@@ -1,10 +1,17 @@
 // App
 
 pub mod filesaver;
-use filesaver::FileSaver;
+use filesaver::{FileSaver, sort};
 
 use std::path::PathBuf;
 use std::{env, fs, io};
+use std::borrow::Cow;
+
+/// The type of block that can be selected.
+pub enum Block {
+    Browser,
+    CommandLine
+}
 
 pub struct App {
     pub path: PathBuf,
@@ -13,9 +20,10 @@ pub struct App {
     pub current_files: Vec<FileSaver>,
     pub child_files: Vec<FileSaver>,
 
-    // TODO: Replace String with Cow<'a, str>
-    pub computer_name: String,
-    pub user_name: String
+    pub selected_block: Block,
+
+    pub computer_name: Cow<'static, str>,
+    pub user_name: Cow<'static, str>
 }
 
 impl Default for App {
@@ -29,8 +37,9 @@ impl Default for App {
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
-            computer_name: host_info.0,
-            user_name: host_info.1
+            selected_block: Block::Browser,
+            computer_name: Cow::from(host_info.0),
+            user_name: Cow::from(host_info.1)
         }
     }
 }
@@ -45,8 +54,7 @@ impl App {
         )?
             .map(filesave_closure)
             .collect();
-        // TODO: Select the parent dir.
-        parent_files.sort();
+        sort(&mut parent_files);
 
         if parent_files.is_empty() {
             return Ok(())
@@ -58,7 +66,7 @@ impl App {
         )?
             .map(filesave_closure)
             .collect();
-        current_files.sort();
+        sort(&mut current_files);
 
         if current_files.is_empty() {
             self.parent_files = parent_files;
@@ -73,7 +81,7 @@ impl App {
             )?
                 .map(filesave_closure)
                 .collect();
-            child_files.sort();
+            sort(&mut child_files);
 
             self.child_files = child_files;
         }

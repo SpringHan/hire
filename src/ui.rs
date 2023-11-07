@@ -10,7 +10,7 @@ use ratatui::{
     text::{Line, Span},
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Modifier, Stylize},
-    widgets::{Block, List, ListItem, Borders}
+    widgets::{Block, List, ListItem, Borders, Paragraph}
 };
 
 pub fn ui(frame: &mut Frame, app: &App) {
@@ -23,6 +23,22 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(frame.size());
 
+    // Title
+    let title_block = Block::default().on_black();
+    let title_paragraph = Paragraph::new(
+        Line::from(
+            vec![
+                Span::raw(format!("{}@{}", app.user_name, app.computer_name))
+                    .light_green()
+                    .bold(),
+                Span::raw(format!("  {}", app.path.to_string_lossy()))
+                    .white()
+                    .bold()
+            ]))
+        .block(title_block);
+
+
+    // File browser layout
     let browser_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -35,7 +51,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Parent Block
     let parent_block = Block::default()
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
+        .on_black();
     let parent_items = render_list(
         app.parent_files.iter(),
         Some(app.selected_item.0)
@@ -45,7 +61,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Current Block
     let current_block = Block::default()
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
+        .on_black();
     let current_items = render_list(
         app.current_files.iter(),
         Some(app.selected_item.1)
@@ -55,13 +71,14 @@ pub fn ui(frame: &mut Frame, app: &App) {
     // Child Block
     let child_block = Block::default()
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
+        .on_black();
     let child_items = render_list(
         app.child_files.iter(),
         None
     );
     let child_list = List::new(child_items).block(child_block);
 
+    frame.render_widget(title_paragraph, chunks[0]);
     frame.render_widget(parent_list, browser_layout[0]);
     frame.render_widget(current_list, browser_layout[1]);
     frame.render_widget(child_list, browser_layout[2]);
@@ -111,6 +128,7 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Ve
     temp_items
 }
 
+/// Return the item which has the style of normal file.
 fn get_normal_item_color(file: &FileSaver) -> ListItem {
     ListItem::new(
         Line::from(

@@ -1,7 +1,7 @@
 // FileSaver
 
 /// The structure used to save file information.
-#[derive(Eq, Ord, PartialEq, PartialOrd, Debug)]
+#[derive(Eq, Ord, PartialEq, PartialOrd, Debug, Clone)]
 pub struct FileSaver {
     pub name: String,
     pub is_dir: bool
@@ -17,8 +17,25 @@ impl FileSaver {
     }
 }
 
-// pub fn sort(files: &mut Vec<FileSaver>) {
-//     let mut temp_files: Vec<String> = files.iter().map(|s| s.name.clone()).collect();
-//     temp_files.sort();
-//     let mut i = 0;
-// }
+pub fn sort(files: &mut Vec<FileSaver>) {
+    let mut directories: Vec<FileSaver> = Vec::new();
+    let mut normal_files: Vec<FileSaver> = Vec::new();
+    for file in files.iter() {
+        // let mut  = expression;
+        // match file.name.chars().nth(0).unwrap() {
+        //     'A'..='Z' => {
+        //     },
+        //     _ => ()
+        // }
+        if file.is_dir {
+            directories.push((*file).clone());
+        } else {
+            normal_files.push((*file).clone());
+        }
+    }
+    directories.sort();
+    normal_files.sort();
+    directories.extend(normal_files);
+
+    *files = directories;
+}
