@@ -23,8 +23,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(25),
-            Constraint::Percentage(50),
-            Constraint::Percentage(25)
+            Constraint::Percentage(30),
+            Constraint::Percentage(45)
         ])
         .split(chunks[1]);
 
@@ -32,24 +32,29 @@ pub fn ui(frame: &mut Frame, app: &App) {
     let parent_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default());
-    let mut parent_items = render_list(app.parent_files.iter());
-    let parent_list = List::new(parent_items);
+    let parent_items = render_list(app.parent_files.iter());
+    let parent_list = List::new(parent_items).block(parent_block);
 
     // Current Block
     let current_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default());
+    let current_items = render_list(app.current_files.iter());
+    let current_list = List::new(current_items).block(current_block);
 
     // Child Block
     let child_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default());
+    let child_items = render_list(app.child_files.iter());
+    let child_list = List::new(child_items).block(child_block);
 
     frame.render_widget(parent_list, browser_layout[0]);
-    frame.render_widget(current_block, browser_layout[1]);
-    frame.render_widget(child_block, browser_layout[2]);
+    frame.render_widget(current_list, browser_layout[1]);
+    frame.render_widget(child_list, browser_layout[2]);
 }
 
+/// Create a list of ListItem
 fn render_list(files: std::slice::Iter<'_, String>) -> Vec<ListItem> {
     let mut temp_items: Vec<ListItem> = Vec::new();
     if files.len() == 0 {

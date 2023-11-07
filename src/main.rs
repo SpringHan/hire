@@ -22,6 +22,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut app = App::default();
     app.init_all_files()?;
+    // println!("{:#?} {:#?} {:#?}", app.parent_files, app.current_files, app.child_files);
+    // println!("{}", app.selected_item.0);
 
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;

@@ -5,10 +5,11 @@ use std::{env, fs, io};
 
 pub struct App {
     pub path: PathBuf,
-    pub selected_item: usize,
+    pub selected_item: (usize, usize),
     pub parent_files: Vec<String>,
     pub current_files: Vec<String>,
     pub child_files: Vec<String>,
+
     // TODO: Replace String with Cow<'a, str>
     pub computer_name: String,
     pub user_name: String
@@ -21,7 +22,7 @@ impl Default for App {
         let host_info = get_host_info();
         App {
             path: current_dir,
-            selected_item: 0,
+            selected_item: (0, 0),
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
@@ -32,6 +33,7 @@ impl Default for App {
 }
 
 impl App {
+    /// Initialize parent, current and child files.
     pub fn init_all_files(&mut self) -> io::Result<()> {
         let temp_path = self.path.as_path();
         
@@ -50,6 +52,7 @@ impl App {
             return Ok(())
         }
 
+        // Current files
         let mut current_files: Vec<String> = fs::read_dir(
             temp_path
         )?
@@ -60,22 +63,40 @@ impl App {
             .collect();
         current_files.sort();
 
-        let mut child_files: Vec<String> = fs::read_dir(
-            temp_path.join(current_files.get(0).unwrap())
-        )?
-            .map(|ele| match ele {
-                Ok(x) => x.file_name().into_string().unwrap(),
-                Err(_) => panic!("Cannot get a file with error!")
-            })
-            .collect();
-        child_files.sort();
+        // Child Files
+        let current_select = temp_path
+            .join(current_files.get(0).unwrap());
+
+        if current_select.is_dir() {
+            let mut child_files: Vec<String> = fs::read_dir(
+                temp_path.join(current_files.get(0).unwrap())
+            )?
+                .map(|ele| match ele {
+                    Ok(x) => x.file_name().into_string().unwrap(),
+                    Err(_) => panic!("Cannot get a file with error!")
+                })
+                .collect();
+            child_files.sort();
+
+            self.child_files = child_files;
+        }
 
         // TODO: Replace with sort by method
         self.parent_files = parent_files;
         self.current_files = current_files;
-        self.child_files = child_files;
+        self.refresh_select_item();
         
         Ok(())
+    }
+
+    /// Refresh the selected item of parent dir & current file.
+    pub fn refresh_select_item(&mut self) {
+        let parent_dir = self.path.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let idx = self.parent_files.iter().position(|e| *e == parent_dir).unwrap();
+        self.selected_item.0 = idx;
     }
 }
 
