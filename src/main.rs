@@ -4,7 +4,7 @@ mod ui;
 use std::io::stderr;
 use std::error::Error;
 use ratatui::{
-    backend::{CrosstermBackend, Backend, self},
+    backend::CrosstermBackend,
     Terminal
 };
 use crossterm::{
@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-
+    
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())

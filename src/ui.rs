@@ -17,8 +17,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(3),
-            Constraint::Percentage(97)
+            Constraint::Percentage(4),
+            Constraint::Percentage(93),
+            Constraint::Percentage(2)
         ])
         .split(frame.size());
 

@@ -46,7 +46,7 @@ impl App {
             .map(filesave_closure)
             .collect();
         // TODO: Select the parent dir.
-        // parent_files.sort();
+        parent_files.sort();
 
         if parent_files.is_empty() {
             return Ok(())
@@ -58,7 +58,7 @@ impl App {
         )?
             .map(filesave_closure)
             .collect();
-        // current_files.sort();
+        current_files.sort();
 
         if current_files.is_empty() {
             self.parent_files = parent_files;
@@ -73,7 +73,7 @@ impl App {
             )?
                 .map(filesave_closure)
                 .collect();
-            // child_files.sort();
+            child_files.sort();
 
             self.child_files = child_files;
         }
@@ -103,8 +103,9 @@ impl App {
 fn filesave_closure(ele: Result<std::fs::DirEntry, std::io::Error>) -> FileSaver {
     match ele {
         Ok(x) => {
-            let file = x.file_name().into_string().unwrap();
-            let is_dir = PathBuf::from(&file).is_dir();
+            let file = x.file_name().into_string().expect("Unknown error!");
+            let file_path = x.path();
+            let is_dir = file_path.is_dir();
             FileSaver::new(file, is_dir)
         },
         Err(_) => panic!("Cannot get a file with error!")
