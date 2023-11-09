@@ -1,18 +1,38 @@
 // FileSaver
 
+use std::time::SystemTime;
+use std::path::PathBuf;
+use std::fs::{self, Permissions};
+
 /// The structure used to save file information.
-#[derive(Eq, Ord, PartialEq, PartialOrd, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct FileSaver {
     pub name: String,
-    pub is_dir: bool
+    pub size: u64,
+    pub is_dir: bool,
+    pub symlink_file: Option<PathBuf>,
+    pub modified_time: SystemTime,
+    pub permissions: Permissions
 }
 
 impl FileSaver {
-    pub fn new(name: String, is_dir: bool) -> FileSaver {
-        // Temporarily regard the file as a normal file.
+    pub fn new(file: fs::DirEntry) -> FileSaver {
+        let file_path = file.path();
+        let meta = fs::metadata(&file_path)
+            .expect("Cannot get the metadata!");
+        let symlink_file: Option<PathBuf> = if meta.is_symlink() {
+            Some(fs::read_link(&file_path).expect("Unable to read symlink!"))
+        } else {
+            None
+        };
+
         FileSaver {
-            name,
-            is_dir
+            name: file.file_name().to_string_lossy().to_string(),
+            size: meta.len(),
+            is_dir: file_path.is_dir(),
+            symlink_file,
+            modified_time: meta.modified().expect("Cannot get last modified time!"),
+            permissions: meta.permissions()
         }
     }
 }
@@ -21,20 +41,14 @@ pub fn sort(files: &mut Vec<FileSaver>) {
     let mut directories: Vec<FileSaver> = Vec::new();
     let mut normal_files: Vec<FileSaver> = Vec::new();
     for file in files.iter() {
-        // let mut  = expression;
-        // match file.name.chars().nth(0).unwrap() {
-        //     'A'..='Z' => {
-        //     },
-        //     _ => ()
-        // }
         if file.is_dir {
             directories.push((*file).clone());
         } else {
             normal_files.push((*file).clone());
         }
     }
-    directories.sort();
-    normal_files.sort();
+    directories.sort_by(|a, b| b.name.cmp(&a.name));
+    normal_files.sort_by(|a, b| b.name.cmp(&a.name));
     directories.extend(normal_files);
 
     *files = directories;

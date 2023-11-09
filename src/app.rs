@@ -110,12 +110,7 @@ impl App {
 #[inline]
 fn filesave_closure(ele: Result<std::fs::DirEntry, std::io::Error>) -> FileSaver {
     match ele {
-        Ok(x) => {
-            let file = x.file_name().into_string().expect("Unknown error!");
-            let file_path = x.path();
-            let is_dir = file_path.is_dir();
-            FileSaver::new(file, is_dir)
-        },
+        Ok(x) => FileSaver::new(x),
         Err(_) => panic!("Cannot get a file with error!")
     }
 }

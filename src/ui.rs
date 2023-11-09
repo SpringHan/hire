@@ -1,14 +1,14 @@
 // UI
 
 use crate::App;
-use crate::app::filesaver::FileSaver;
+use crate::app::{self, filesaver::FileSaver};
 
 use std::ops::AddAssign;
 
 use ratatui::{
     Frame,
     text::{Line, Span},
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Modifier, Stylize},
     widgets::{Block, List, ListItem, Borders, Paragraph}
 };
@@ -82,6 +82,8 @@ pub fn ui(frame: &mut Frame, app: &App) {
     frame.render_widget(parent_list, browser_layout[0]);
     frame.render_widget(current_list, browser_layout[1]);
     frame.render_widget(child_list, browser_layout[2]);
+    // Command Block
+    // render_command_line(app);
 }
 
 /// Create a list of ListItem
@@ -126,6 +128,19 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Ve
     }
 
     temp_items
+}
+
+fn render_command_line(app: &App) -> Paragraph {
+    let block = Block::default().on_black();
+    match app.selected_block {
+        app::Block::Browser => {
+        },
+        app::Block::CommandLine => {
+            
+        },
+    }
+
+    todo!()
 }
 
 /// Return the item which has the style of normal file.
