@@ -8,7 +8,7 @@ use std::ops::AddAssign;
 use ratatui::{
     Frame,
     text::{Line, Span},
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Style, Modifier, Stylize},
     widgets::{Block, List, ListItem, Borders, Paragraph}
 };
@@ -54,7 +54,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .on_black();
     let parent_items = render_list(
         app.parent_files.iter(),
-        Some(app.selected_item.0)
+        app.selected_item.parent
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
@@ -64,7 +64,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .on_black();
     let current_items = render_list(
         app.current_files.iter(),
-        Some(app.selected_item.1)
+        app.selected_item.current
     );
     let current_list = List::new(current_items).block(current_block);
 
@@ -74,7 +74,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .on_black();
     let child_items = render_list(
         app.child_files.iter(),
-        None
+        app.selected_item.child
     );
     let child_list = List::new(child_items).block(child_block);
 
@@ -82,8 +82,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
     frame.render_widget(parent_list, browser_layout[0]);
     frame.render_widget(current_list, browser_layout[1]);
     frame.render_widget(child_list, browser_layout[2]);
+
     // Command Block
-    // render_command_line(app);
+    frame.render_widget(render_command_line(app), chunks[2]);
 }
 
 /// Create a list of ListItem
@@ -130,17 +131,31 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Ve
     temp_items
 }
 
+/// Function used to generate Paragraph at command-line layout.
 fn render_command_line(app: &App) -> Paragraph {
     let block = Block::default().on_black();
-    match app.selected_block {
+    let selected_file = app.current_files
+        // NOTE: Unwrap here
+        .get(app.selected_item.current.unwrap())
+        .unwrap();
+    let message = match app.selected_block {
         app::Block::Browser => {
+            Line::from(vec![
+                selected_file.permission_span(),
+                Span::raw(" "),
+                selected_file.modified_span(),
+                Span::raw(" "),
+                selected_file.size_span(),
+                Span::raw(" "),
+                selected_file.symlink_span()
+            ])
         },
-        app::Block::CommandLine => {
-            
-        },
-    }
+        app::Block::CommandLine(ref input) => {
+            Line::default()
+        }
+    };
 
-    todo!()
+    Paragraph::new(message).block(block)
 }
 
 /// Return the item which has the style of normal file.

@@ -10,12 +10,28 @@ use std::borrow::Cow;
 /// The type of block that can be selected.
 pub enum Block {
     Browser,
-    CommandLine
+    CommandLine(String)
+}
+
+pub struct ItemIndex {
+    pub parent: Option<usize>,
+    pub current: Option<usize>,
+    pub child: Option<usize>
+}
+
+impl Default for ItemIndex {
+    fn default() -> ItemIndex {
+        ItemIndex {
+            parent: None,
+            current: None,
+            child: None
+        }
+    }
 }
 
 pub struct App {
     pub path: PathBuf,
-    pub selected_item: (usize, usize),
+    pub selected_item: ItemIndex,
     pub parent_files: Vec<FileSaver>,
     pub current_files: Vec<FileSaver>,
     pub child_files: Vec<FileSaver>,
@@ -33,7 +49,7 @@ impl Default for App {
         let host_info = get_host_info();
         App {
             path: current_dir,
-            selected_item: (0, 0),
+            selected_item: ItemIndex::default(),
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
@@ -49,9 +65,15 @@ impl App {
     pub fn init_all_files(&mut self) -> io::Result<()> {
         let temp_path = self.path.as_path();
         
-        let mut parent_files: Vec<FileSaver> = fs::read_dir(
-            temp_path.parent().expect("Cannot get parent dir of current directory!")
-        )?
+        let mut parent_files: Vec<FileSaver> = fs::read_dir({
+            let temp = temp_path.parent();
+            if let Some(path) = temp {
+                path
+            } else {
+                // Cannot get parent directory info at root dir.
+                return Ok(())
+            }
+        })?
             .map(filesave_closure)
             .collect();
         sort(&mut parent_files);
@@ -74,7 +96,55 @@ impl App {
         }
 
         // Child Files
-        let current_select = current_files.get(0).unwrap();
+        self.init_child_files(
+            Some(current_files.get(0).unwrap())
+        )?;
+
+        self.parent_files = parent_files;
+        self.current_files = current_files;
+        self.refresh_select_item();
+        
+        Ok(())
+    }
+
+    /// Refresh the selected item of parent dir & current file.
+    pub fn refresh_select_item(&mut self) {
+        // Parent
+        if let None = self.selected_item.parent {
+            let parent_dir = self.path.file_name()
+                .unwrap()
+                .to_string_lossy();
+            let idx = self.parent_files
+                .iter()
+                .position(|e| e.name == parent_dir).unwrap();
+            self.selected_item.parent = Some(idx);
+        }
+        
+        // Current
+        if let None = self.selected_item.current {
+            self.selected_item.current = Some(0);
+        }
+
+        // Child
+        if !self.child_files.is_empty() {
+            self.selected_item.child = Some(0);
+        } else if self.selected_item.child.is_some() {
+            self.selected_item.child = None;
+        }
+    }
+
+    /// To intialize child files, CURRENT_SELECT should be Some(FileSaver)
+    /// To update child files, the value should be None.
+    pub fn init_child_files(&mut self,
+                            current_select: Option<&FileSaver>
+    ) -> io::Result<()> {
+        let temp_path = self.path.as_path();
+        let current_select = if let Some(file) = current_select {
+            file
+        } else {
+            self.current_files.get(self.selected_item.current.unwrap()).unwrap()
+        };
+
         if current_select.is_dir {
             let mut child_files: Vec<FileSaver> = fs::read_dir(
                 temp_path.join(&current_select.name)
@@ -86,24 +156,7 @@ impl App {
             self.child_files = child_files;
         }
 
-        // TODO: Replace with sort by method
-        self.parent_files = parent_files;
-        self.current_files = current_files;
-        self.refresh_select_item();
-        
         Ok(())
-    }
-
-    /// Refresh the selected item of parent dir & current file.
-    pub fn refresh_select_item(&mut self) {
-        let parent_dir = self.path.file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let idx = self.parent_files
-            .iter()
-            .position(|e| e.name == parent_dir).unwrap();
-        self.selected_item.0 = idx;
     }
 }
 
