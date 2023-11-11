@@ -35,6 +35,7 @@ pub struct App {
     pub parent_files: Vec<FileSaver>,
     pub current_files: Vec<FileSaver>,
     pub child_files: Vec<FileSaver>,
+    pub file_content: Option<String>,
 
     pub selected_block: Block,
 
@@ -53,6 +54,7 @@ impl Default for App {
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
+            file_content: None,
             selected_block: Block::Browser,
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
@@ -154,10 +156,17 @@ impl App {
             sort(&mut child_files);
 
             self.child_files = child_files;
+        } else if !self.child_files.is_empty() {
+            self.child_files.clear();
+            // TODO: Set selected file content.
         }
 
         Ok(())
     }
+
+    fn set_file_content(&mut self) {
+    }
+
 }
 
 #[inline]
