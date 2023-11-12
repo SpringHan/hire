@@ -39,13 +39,25 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
 
     // File browser layout
+    let constraints = match app.selected_block {
+        app::Block::Browser(true) => {
+            vec![
+                Constraint::Percentage(50),
+                Constraint::Percentage(50)
+            ]
+        },
+        _ => {
+            vec![
+                Constraint::Percentage(25),
+                Constraint::Percentage(30),
+                Constraint::Percentage(45)
+            ]
+        }
+    };
+
     let browser_layout = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(25),
-            Constraint::Percentage(30),
-            Constraint::Percentage(45)
-        ])
+        .constraints(constraints)
         .split(chunks[1]);
 
     // Parent Block
@@ -68,20 +80,21 @@ pub fn ui(frame: &mut Frame, app: &App) {
     );
     let current_list = List::new(current_items).block(current_block);
 
-    // Child Block
-    let child_block = Block::default()
-        .borders(Borders::ALL)
-        .on_black();
-    let child_items = render_list(
-        app.child_files.iter(),
-        app.selected_item.child
-    );
-    let child_list = List::new(child_items).block(child_block);
-
     frame.render_widget(title_paragraph, chunks[0]);
     frame.render_widget(parent_list, browser_layout[0]);
     frame.render_widget(current_list, browser_layout[1]);
-    frame.render_widget(child_list, browser_layout[2]);
+    
+    // Child Block
+    match app.selected_block {
+        app::Block::Browser(true) => (),
+        _ => {
+            if app.file_content.is_some() {
+                frame.render_widget(render_file_content(app),browser_layout[2]);
+            } else {
+                frame.render_widget(render_child_block(app),browser_layout[2]);
+            }
+        }
+    }
 
     // Command Block
     frame.render_widget(render_command_line(app), chunks[2]);
@@ -131,6 +144,30 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Ve
     temp_items
 }
 
+/// Render child block if the vec of child files is not empty.
+fn render_child_block(app: &App) -> List {
+    let child_block = Block::default()
+        .borders(Borders::ALL)
+        .on_black();
+    let child_items = render_list(
+        app.child_files.iter(),
+        app.selected_item.child
+    );
+    List::new(child_items).block(child_block)
+}
+
+/// Render current file content if the selected file is not a dir.
+fn render_file_content(app: &App) -> Paragraph {
+    let file_block = Block::default()
+        .borders(Borders::ALL)
+        .on_black();
+    if let Some(ref content) = app.file_content {
+        Paragraph::new(content.as_str()).block(file_block)
+    } else {
+        panic!("Unknown error!")
+    }
+}
+
 /// Function used to generate Paragraph at command-line layout.
 fn render_command_line(app: &App) -> Paragraph {
     let block = Block::default().on_black();
@@ -139,7 +176,7 @@ fn render_command_line(app: &App) -> Paragraph {
         .get(app.selected_item.current.unwrap())
         .unwrap();
     let message = match app.selected_block {
-        app::Block::Browser => {
+        app::Block::Browser(_) => {
             Line::from(vec![
                 selected_file.permission_span(),
                 Span::raw(" "),

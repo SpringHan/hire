@@ -84,8 +84,8 @@ pub fn sort(files: &mut Vec<FileSaver>) {
             normal_files.push((*file).clone());
         }
     }
-    directories.sort_by(|a, b| b.name.cmp(&a.name));
-    normal_files.sort_by(|a, b| b.name.cmp(&a.name));
+    directories.sort_by(|a, b| a.name.cmp(&b.name));
+    normal_files.sort_by(|a, b| a.name.cmp(&b.name));
     directories.extend(normal_files);
 
     *files = directories;

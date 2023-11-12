@@ -8,8 +8,9 @@ use std::{env, fs, io};
 use std::borrow::Cow;
 
 /// The type of block that can be selected.
+/// The boolean from Browser indicates whether current dir is the root directory.
 pub enum Block {
-    Browser,
+    Browser(bool),
     CommandLine(String)
 }
 
@@ -35,6 +36,8 @@ pub struct App {
     pub parent_files: Vec<FileSaver>,
     pub current_files: Vec<FileSaver>,
     pub child_files: Vec<FileSaver>,
+
+    // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
     pub selected_block: Block,
@@ -55,7 +58,7 @@ impl Default for App {
             current_files: Vec::new(),
             child_files: Vec::new(),
             file_content: None,
-            selected_block: Block::Browser,
+            selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
         }
@@ -65,52 +68,33 @@ impl Default for App {
 impl App {
     /// Initialize parent, current and child files.
     pub fn init_all_files(&mut self) -> io::Result<()> {
-        let temp_path = self.path.as_path();
-        
-        let mut parent_files: Vec<FileSaver> = fs::read_dir({
-            let temp = temp_path.parent();
-            if let Some(path) = temp {
-                path
-            } else {
-                // Cannot get parent directory info at root dir.
-                return Ok(())
-            }
-        })?
-            .map(filesave_closure)
-            .collect();
-        sort(&mut parent_files);
+        // Parent files
+        self.init_parent_files()?;
 
-        if parent_files.is_empty() {
+        if self.parent_files.is_empty() {
             return Ok(())
         }
 
         // Current files
-        let mut current_files: Vec<FileSaver> = fs::read_dir(
-            temp_path
-        )?
-            .map(filesave_closure)
-            .collect();
-        sort(&mut current_files);
-
-        if current_files.is_empty() {
-            self.parent_files = parent_files;
+        self.init_current_files(None)?;
+        if self.current_files.is_empty() {
             return Ok(())
         }
 
         // Child Files
+        let current_selected_file = self.current_files.get(0).unwrap().clone();
         self.init_child_files(
-            Some(current_files.get(0).unwrap())
+            Some(&current_selected_file)
         )?;
 
-        self.parent_files = parent_files;
-        self.current_files = current_files;
-        self.refresh_select_item();
+        self.refresh_select_item(false);
         
         Ok(())
     }
 
     /// Refresh the selected item of parent dir & current file.
-    pub fn refresh_select_item(&mut self) {
+    /// When CHILD_KEEP is true, the child index will not be changed forcibly.
+    pub fn refresh_select_item(&mut self, child_keep: bool) {
         // Parent
         if let None = self.selected_item.parent {
             let parent_dir = self.path.file_name()
@@ -126,6 +110,10 @@ impl App {
         if let None = self.selected_item.current {
             self.selected_item.current = Some(0);
         }
+        
+        if child_keep {
+            return ()
+        }
 
         // Child
         if !self.child_files.is_empty() {
@@ -134,6 +122,49 @@ impl App {
             self.selected_item.child = None;
         }
     }
+
+    pub fn init_parent_files(&mut self) -> io::Result<()> {
+        let mut parent_files: Vec<FileSaver> = fs::read_dir({
+            let temp = self.path.parent();
+            if let Some(path) = temp {
+                path
+            } else {
+                // Cannot get parent directory info at root dir.
+                return Ok(())
+            }
+        })?
+            .map(filesave_closure)
+            .collect();
+        sort(&mut parent_files);
+        self.parent_files = parent_files;
+
+        Ok(())
+    }
+
+    /// When the result is false, then stop init child files in the main function.
+    /// The PATH is used when the user is in root directory.
+    pub fn init_current_files(&mut self, path: Option<PathBuf>) -> io::Result<()> {
+        let temp_path = if let Some(_path) = path {
+            self.path.join(_path)
+        } else {
+            self.path.clone()
+        };
+
+        let mut current_files: Vec<FileSaver> = fs::read_dir(
+            temp_path.as_path()
+        )?
+            .map(filesave_closure)
+            .collect();
+        sort(&mut current_files);
+
+        if current_files.is_empty() {
+            return Ok(())
+        }
+
+        self.current_files = current_files;
+        Ok(())
+    }
+
 
     /// To intialize child files, CURRENT_SELECT should be Some(FileSaver)
     /// To update child files, the value should be None.
@@ -156,15 +187,37 @@ impl App {
             sort(&mut child_files);
 
             self.child_files = child_files;
-        } else if !self.child_files.is_empty() {
-            self.child_files.clear();
-            // TODO: Set selected file content.
+            if self.file_content.is_some() {
+                self.file_content = None;
+            }
+        } else {
+            // See the note at the definition of App structure.
+            if self.file_content.is_none() {
+                self.child_files.clear();
+            }
+
+            self.set_file_content()?;
         }
 
         Ok(())
     }
 
-    fn set_file_content(&mut self) {
+    fn set_file_content(&mut self) -> io::Result<()> {
+        use io::Read;
+
+        let file_path = self.path.join(
+            PathBuf::from(
+                &self.current_files.get(self.selected_item.current.unwrap())
+                    .unwrap()
+                    .name
+            )
+        );
+        let mut file = fs::File::open(file_path)?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        self.file_content = Some(content);
+
+        Ok(())
     }
 
 }

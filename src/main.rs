@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if key.code == KeyCode::Char('q') {
                         break;
                     }
-                    handle_event(key.code, &mut app);
+                    handle_event(key.code, &mut app)?;
                 }
             }
         }
