@@ -70,7 +70,28 @@ pub fn ui(frame: &mut Frame, app: &App) {
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
+    frame.render_widget(title_paragraph, chunks[0]);
+    frame.render_widget(parent_list, browser_layout[0]);
+    
+    // Child Block
+    match app.selected_block {
+        app::Block::Browser(true) => {
+            if app.file_content.is_some() {
+                frame.render_widget(render_file_content(app), browser_layout[1]);
+                return ()
+            }
+        },
+        _ => {
+            if app.file_content.is_some() {
+                frame.render_widget(render_file_content(app),browser_layout[2]);
+            } else {
+                frame.render_widget(render_child_block(app),browser_layout[2]);
+            }
+        }
+    }
+
     // Current Block
+    // Move current block to here to make preparation for file content of parent file.
     let current_block = Block::default()
         .borders(Borders::ALL)
         .on_black();
@@ -80,21 +101,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
     );
     let current_list = List::new(current_items).block(current_block);
 
-    frame.render_widget(title_paragraph, chunks[0]);
-    frame.render_widget(parent_list, browser_layout[0]);
     frame.render_widget(current_list, browser_layout[1]);
-    
-    // Child Block
-    match app.selected_block {
-        app::Block::Browser(true) => (),
-        _ => {
-            if app.file_content.is_some() {
-                frame.render_widget(render_file_content(app),browser_layout[2]);
-            } else {
-                frame.render_widget(render_child_block(app),browser_layout[2]);
-            }
-        }
-    }
 
     // Command Block
     frame.render_widget(render_command_line(app), chunks[2]);
@@ -177,15 +184,24 @@ fn render_command_line(app: &App) -> Paragraph {
         .unwrap();
     let message = match app.selected_block {
         app::Block::Browser(_) => {
-            Line::from(vec![
-                selected_file.permission_span(),
-                Span::raw(" "),
-                selected_file.modified_span(),
-                Span::raw(" "),
-                selected_file.size_span(),
-                Span::raw(" "),
-                selected_file.symlink_span()
-            ])
+            if selected_file.cannot_read {
+                 Line::styled("DENIED", Style::default().red())
+            } else if selected_file.dangling_symlink {
+                Line::styled(
+                    "DANGLING_SYMLINK",
+                    Style::default().light_red()
+                )
+            } else {
+                Line::from(vec![
+                    selected_file.permission_span(),
+                    Span::raw(" "),
+                    selected_file.modified_span(),
+                    Span::raw(" "),
+                    selected_file.size_span(),
+                    Span::raw(" "),
+                    selected_file.symlink_span()
+                ])
+            }
         },
         app::Block::CommandLine(ref input) => {
             Line::default()

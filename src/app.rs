@@ -3,7 +3,7 @@
 pub mod filesaver;
 use filesaver::{FileSaver, sort};
 
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
 
@@ -124,17 +124,14 @@ impl App {
     }
 
     pub fn init_parent_files(&mut self) -> io::Result<()> {
-        let mut parent_files: Vec<FileSaver> = fs::read_dir({
-            let temp = self.path.parent();
-            if let Some(path) = temp {
-                path
-            } else {
-                // Cannot get parent directory info at root dir.
-                return Ok(())
-            }
-        })?
-            .map(filesave_closure)
-            .collect();
+        let temp_path = if let Some(path) = self.path.parent() {
+            path.to_path_buf()
+        } else {
+            // Cannot get parent directory info at root dir.
+            return Ok(())
+        };
+
+        let mut parent_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
         sort(&mut parent_files);
         self.parent_files = parent_files;
 
@@ -144,34 +141,31 @@ impl App {
     /// When the result is false, then stop init child files in the main function.
     /// The PATH is used when the user is in root directory.
     pub fn init_current_files(&mut self, path: Option<PathBuf>) -> io::Result<()> {
+        // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
         let temp_path = if let Some(_path) = path {
             self.path.join(_path)
         } else {
             self.path.clone()
         };
 
-        let mut current_files: Vec<FileSaver> = fs::read_dir(
-            temp_path.as_path()
-        )?
-            .map(filesave_closure)
-            .collect();
-        sort(&mut current_files);
-
+        let mut current_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
         if current_files.is_empty() {
             return Ok(())
         }
+
+        sort(&mut current_files);
 
         self.current_files = current_files;
         Ok(())
     }
 
-
     /// To intialize child files, CURRENT_SELECT should be Some(FileSaver)
     /// To update child files, the value should be None.
     pub fn init_child_files(&mut self,
                             current_select: Option<&FileSaver>
-    ) -> io::Result<()> {
-        let temp_path = self.path.as_path();
+    ) -> io::Result<()>
+    {
+        let temp_path = self.path.clone();
         let current_select = if let Some(file) = current_select {
             file
         } else {
@@ -179,11 +173,9 @@ impl App {
         };
 
         if current_select.is_dir {
-            let mut child_files: Vec<FileSaver> = fs::read_dir(
-                temp_path.join(&current_select.name)
-            )?
-                .map(filesave_closure)
-                .collect();
+            let mut child_files: Vec<FileSaver> = self.read_files(
+                temp_path.join(&current_select.name).as_path()
+            )?;
             sort(&mut child_files);
 
             self.child_files = child_files;
@@ -202,14 +194,24 @@ impl App {
         Ok(())
     }
 
-    fn set_file_content(&mut self) -> io::Result<()> {
+    pub fn set_file_content(&mut self) -> io::Result<()> {
         use io::Read;
 
         let file_path = self.path.join(
             PathBuf::from(
-                &self.current_files.get(self.selected_item.current.unwrap())
-                    .unwrap()
-                    .name
+                if let Block::Browser(true) = self.selected_block {
+                    &self.parent_files.get(
+                        self.selected_item.parent.unwrap()
+                    )
+                        .unwrap()
+                        .name
+                } else {
+                    &self.current_files.get(
+                        self.selected_item.current.unwrap()
+                    )
+                        .unwrap()
+                        .name
+                }
             )
         );
         let mut file = fs::File::open(file_path)?;
@@ -220,10 +222,39 @@ impl App {
         Ok(())
     }
 
+    fn read_files(&mut self, path: &Path) -> Result<Vec<FileSaver>, io::Error> {
+        let temp_dir = fs::read_dir(path);
+
+        match temp_dir {
+            Ok(dir) => {
+                let result: Vec<FileSaver> = dir.map(filesave_closure).collect();
+                Ok(result)
+            }
+            Err(err) => {
+                if err.kind() == io::ErrorKind::PermissionDenied {
+                    let temp_file = if let
+                        Block::Browser(true) = self.selected_block
+                    {
+                        self.parent_files
+                            .get_mut(self.selected_item.parent.unwrap())
+                            .unwrap()
+                    } else {
+                        self.current_files
+                            .get_mut(self.selected_item.current.unwrap())
+                            .unwrap()
+                    };
+                    temp_file.cannot_read = true;
+                    Ok(Vec::new())
+                } else {
+                    Err(err)
+                }
+            },
+        }
+    }
 }
 
 #[inline]
-fn filesave_closure(ele: Result<std::fs::DirEntry, std::io::Error>) -> FileSaver {
+fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     match ele {
         Ok(x) => FileSaver::new(x),
         Err(_) => panic!("Cannot get a file with error!")

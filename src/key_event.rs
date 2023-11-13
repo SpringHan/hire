@@ -87,6 +87,7 @@ fn move_up_and_down(app: &mut App, up: bool) -> Result<(), Box<dyn Error>> {
         &mut app.selected_item.current
     };
 
+    // CURRENT_ITEM is used for change itself. Cannot used to search.
     if let Some(ref mut current_item) = selected_item {
         if up {
             if *current_item > 0 {
@@ -105,13 +106,20 @@ fn move_up_and_down(app: &mut App, up: bool) -> Result<(), Box<dyn Error>> {
         }
 
         if in_root {
-            let extra_path = PathBuf::from(
-                &app.parent_files.get(app.selected_item.parent.unwrap())
-                    .unwrap()
-                    .name
-            );
-            app.init_current_files(Some(extra_path))?;
-            app.selected_item.current = Some(0);
+            let current_file = app.parent_files.get(
+                app.selected_item.parent.unwrap()
+            ).unwrap();
+
+            let extra_path = PathBuf::from(&current_file.name);
+            if current_file.is_dir {
+                app.init_current_files(Some(extra_path))?;
+                app.selected_item.current = Some(0);
+                if app.file_content.is_some() {
+                    app.file_content = None;
+                }
+            } else {
+                app.set_file_content()?;
+            }
             return Ok(())
         }
 
