@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;
     loop {
-        terminal.draw(|frame| ui::ui(frame, &app))?;
+        terminal.draw(|frame| ui::ui(frame, &mut app))?;
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {

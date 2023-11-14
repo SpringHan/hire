@@ -13,7 +13,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, Borders, Paragraph}
 };
 
-pub fn ui(frame: &mut Frame, app: &App) {
+pub fn ui(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -66,18 +66,23 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .on_black();
     let parent_items = render_list(
         app.parent_files.iter(),
-        app.selected_item.parent
+        app.selected_item.parent_selected()
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
     frame.render_widget(title_paragraph, chunks[0]);
-    frame.render_widget(parent_list, browser_layout[0]);
+    frame.render_stateful_widget(
+        parent_list,
+        browser_layout[0],
+        &mut app.selected_item.parent
+    );
     
     // Child Block
     match app.selected_block {
         app::Block::Browser(true) => {
             if app.file_content.is_some() {
                 frame.render_widget(render_file_content(app), browser_layout[1]);
+                frame.render_widget(render_command_line(app), chunks[2]);
                 return ()
             }
         },
@@ -85,7 +90,20 @@ pub fn ui(frame: &mut Frame, app: &App) {
             if app.file_content.is_some() {
                 frame.render_widget(render_file_content(app),browser_layout[2]);
             } else {
-                frame.render_widget(render_child_block(app),browser_layout[2]);
+                let child_block = Block::default()
+                    .borders(Borders::ALL)
+                    .on_black();
+                let child_items = render_list(
+                    app.child_files.iter(),
+                    app.selected_item.child_selected()
+                );
+                let child_items = List::new(child_items).block(child_block);
+
+                frame.render_stateful_widget(
+                    child_items,
+                    browser_layout[2],
+                    &mut app.selected_item.child
+                );
             }
         }
     }
@@ -97,18 +115,26 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .on_black();
     let current_items = render_list(
         app.current_files.iter(),
-        app.selected_item.current
+        app.selected_item.current_selected()
     );
-    let current_list = List::new(current_items).block(current_block);
+    let current_list = List::new(current_items)
+        .block(current_block);
 
-    frame.render_widget(current_list, browser_layout[1]);
+    frame.render_stateful_widget(
+        current_list,
+        browser_layout[1],
+        &mut app.selected_item.current
+    );
 
     // Command Block
     frame.render_widget(render_command_line(app), chunks[2]);
 }
 
 /// Create a list of ListItem
-fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Vec<ListItem> {
+fn render_list(files: std::slice::Iter<'_, FileSaver>,
+               idx: Option<usize>
+) -> Vec<ListItem>
+{
     let mut temp_items: Vec<ListItem> = Vec::new();
     if files.len() == 0 {
         return temp_items
@@ -151,18 +177,6 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>, idx: Option<usize>) -> Ve
     temp_items
 }
 
-/// Render child block if the vec of child files is not empty.
-fn render_child_block(app: &App) -> List {
-    let child_block = Block::default()
-        .borders(Borders::ALL)
-        .on_black();
-    let child_items = render_list(
-        app.child_files.iter(),
-        app.selected_item.child
-    );
-    List::new(child_items).block(child_block)
-}
-
 /// Render current file content if the selected file is not a dir.
 fn render_file_content(app: &App) -> Paragraph {
     let file_block = Block::default()
@@ -180,7 +194,7 @@ fn render_command_line(app: &App) -> Paragraph {
     let block = Block::default().on_black();
     let selected_file = app.current_files
         // NOTE: Unwrap here
-        .get(app.selected_item.current.unwrap())
+        .get(app.selected_item.current_selected().unwrap())
         .unwrap();
     let message = match app.selected_block {
         app::Block::Browser(_) => {

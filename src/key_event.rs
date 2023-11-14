@@ -3,14 +3,11 @@
 use crate::App;
 use crate::app;
 
-use std::ops::{AddAssign, SubAssign};
 use std::mem::swap;
 use std::error::Error;
 use std::path::PathBuf;
 
-use crossterm::{
-    event::{KeyCode}
-};
+use crossterm::event::KeyCode;
 
 /// Handle KEY event.
 pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
@@ -51,9 +48,9 @@ fn directory_movement(direction: char,
             swap(&mut app.child_files, &mut app.current_files);
             swap(&mut app.current_files, &mut app.parent_files);
 
-            selected_item.child = selected_item.current;
-            selected_item.current = selected_item.parent;
-            selected_item.parent = None;
+            selected_item.child_select(selected_item.current_selected());
+            selected_item.current_select(selected_item.parent_selected());
+            selected_item.parent_select(None);
             app.init_parent_files()?;
             app.refresh_select_item(true);
         },
@@ -88,10 +85,10 @@ fn move_up_and_down(app: &mut App, up: bool) -> Result<(), Box<dyn Error>> {
     };
 
     // CURRENT_ITEM is used for change itself. Cannot used to search.
-    if let Some(ref mut current_item) = selected_item {
+    if let Some(current_idx) = selected_item.selected() {
         if up {
-            if *current_item > 0 {
-                current_item.sub_assign(1);
+            if current_idx > 0 {
+                selected_item.select(Some(current_idx - 1));
             }
         } else {
             let current_len = if in_root {
@@ -100,20 +97,20 @@ fn move_up_and_down(app: &mut App, up: bool) -> Result<(), Box<dyn Error>> {
                 app.current_files.len()
             };
 
-            if *current_item < current_len - 1 {
-                current_item.add_assign(1);
+            if current_idx < current_len - 1 {
+                selected_item.select(Some(current_idx + 1));
             }
         }
 
         if in_root {
             let current_file = app.parent_files.get(
-                app.selected_item.parent.unwrap()
+                app.selected_item.parent_selected().unwrap()
             ).unwrap();
 
             let extra_path = PathBuf::from(&current_file.name);
             if current_file.is_dir {
                 app.init_current_files(Some(extra_path))?;
-                app.selected_item.current = Some(0);
+                app.selected_item.current_select(Some(0));
                 if app.file_content.is_some() {
                     app.file_content = None;
                 }

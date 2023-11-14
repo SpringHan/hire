@@ -6,6 +6,7 @@ use filesaver::{FileSaver, sort};
 use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
+use ratatui::widgets::ListState;
 
 /// The type of block that can be selected.
 /// The boolean from Browser indicates whether current dir is the root directory.
@@ -15,18 +16,44 @@ pub enum Block {
 }
 
 pub struct ItemIndex {
-    pub parent: Option<usize>,
-    pub current: Option<usize>,
-    pub child: Option<usize>
+    pub parent: ListState,
+    pub current: ListState,
+    pub child: ListState
 }
 
 impl Default for ItemIndex {
     fn default() -> ItemIndex {
         ItemIndex {
-            parent: None,
-            current: None,
-            child: None
+            parent: ListState::default(),
+            current: ListState::default(),
+            child: ListState::default()
         }
+    }
+}
+
+impl ItemIndex {
+    pub fn parent_selected(&self) -> Option<usize> {
+        self.parent.selected()
+    }
+
+    pub fn current_selected(&self) -> Option<usize> {
+        self.current.selected()
+    }
+
+    pub fn child_selected(&self) -> Option<usize> {
+        self.child.selected()
+    }
+
+    pub fn parent_select(&mut self, idx: Option<usize>) {
+        self.parent.select(idx);
+    }
+
+    pub fn current_select(&mut self, idx: Option<usize>) {
+        self.current.select(idx);
+    }
+
+    pub fn child_select(&mut self, idx: Option<usize>) {
+        self.child.select(idx);
     }
 }
 
@@ -96,19 +123,19 @@ impl App {
     /// When CHILD_KEEP is true, the child index will not be changed forcibly.
     pub fn refresh_select_item(&mut self, child_keep: bool) {
         // Parent
-        if let None = self.selected_item.parent {
+        if let None = self.selected_item.parent_selected() {
             let parent_dir = self.path.file_name()
                 .unwrap()
                 .to_string_lossy();
             let idx = self.parent_files
                 .iter()
                 .position(|e| e.name == parent_dir).unwrap();
-            self.selected_item.parent = Some(idx);
+            self.selected_item.parent_select(Some(idx));
         }
         
         // Current
-        if let None = self.selected_item.current {
-            self.selected_item.current = Some(0);
+        if let None = self.selected_item.current_selected() {
+            self.selected_item.current_select(Some(0));
         }
         
         if child_keep {
@@ -117,9 +144,9 @@ impl App {
 
         // Child
         if !self.child_files.is_empty() {
-            self.selected_item.child = Some(0);
-        } else if self.selected_item.child.is_some() {
-            self.selected_item.child = None;
+            self.selected_item.child_select(Some(0));
+        } else if self.selected_item.child_selected().is_some() {
+            self.selected_item.child_select(None);
         }
     }
 
@@ -169,7 +196,9 @@ impl App {
         let current_select = if let Some(file) = current_select {
             file
         } else {
-            self.current_files.get(self.selected_item.current.unwrap()).unwrap()
+            self.current_files.get(
+                self.selected_item.current_selected().unwrap()
+            ).unwrap()
         };
 
         if current_select.is_dir {
@@ -201,13 +230,13 @@ impl App {
             PathBuf::from(
                 if let Block::Browser(true) = self.selected_block {
                     &self.parent_files.get(
-                        self.selected_item.parent.unwrap()
+                        self.selected_item.parent_selected().unwrap()
                     )
                         .unwrap()
                         .name
                 } else {
                     &self.current_files.get(
-                        self.selected_item.current.unwrap()
+                        self.selected_item.current_selected().unwrap()
                     )
                         .unwrap()
                         .name
@@ -236,11 +265,19 @@ impl App {
                         Block::Browser(true) = self.selected_block
                     {
                         self.parent_files
-                            .get_mut(self.selected_item.parent.unwrap())
+                            .get_mut(
+                                self.selected_item
+                                    .parent_selected()
+                                    .unwrap()
+                            )
                             .unwrap()
                     } else {
                         self.current_files
-                            .get_mut(self.selected_item.current.unwrap())
+                            .get_mut(
+                                self.selected_item
+                                    .current_selected()
+                                    .unwrap()
+                            )
                             .unwrap()
                     };
                     temp_file.cannot_read = true;
