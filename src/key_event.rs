@@ -53,9 +53,39 @@ fn directory_movement(direction: char,
             selected_item.parent_select(None);
             app.init_parent_files()?;
             app.refresh_select_item(true);
+
+            if app.file_content.is_some() {
+                app.file_content = None;
+            }
         },
         'i' => {
-            
+            if let app::Block::Browser(true) = app.selected_block {
+                let selected_file = app.parent_files.get(
+                    selected_item.parent_selected().unwrap()
+                ).unwrap();
+                if !selected_file.is_dir || app.current_files.is_empty() {
+                    return Ok(())
+                }
+
+                app.path = app.path.join(&selected_file.name);
+                app.selected_block = app::Block::Browser(false);
+            } else {
+                let selected_file = app.current_files.get(
+                    selected_item.current_selected().unwrap()
+                ).unwrap();
+                if !selected_file.is_dir || app.child_files.is_empty() {
+                    return Ok(())
+                }
+
+                app.path = app.path.join(&selected_file.name);
+                app.parent_files = Vec::new();
+                swap(&mut app.parent_files, &mut app.current_files);
+                swap(&mut app.current_files, &mut app.child_files);
+                swap(&mut selected_item.parent, &mut selected_item.current);
+                selected_item.current_select(selected_item.child_selected());
+            }
+            app.init_child_files(None)?;
+            app.refresh_select_item(false);
         },
         'u' => {
             move_up_and_down(app, true)?;

@@ -192,14 +192,19 @@ fn render_file_content(app: &App) -> Paragraph {
 /// Function used to generate Paragraph at command-line layout.
 fn render_command_line(app: &App) -> Paragraph {
     let block = Block::default().on_black();
-    let selected_file = app.current_files
-        // NOTE: Unwrap here
-        .get(app.selected_item.current_selected().unwrap())
-        .unwrap();
+    let selected_file = if let app::Block::Browser(true) = app.selected_block {
+        app.parent_files.get(
+            app.selected_item.parent_selected().unwrap()
+        ).unwrap()
+    } else {
+        app.current_files.get(
+            app.selected_item.current_selected().unwrap()
+        ).unwrap()
+    };
     let message = match app.selected_block {
         app::Block::Browser(_) => {
             if selected_file.cannot_read {
-                 Line::styled("DENIED", Style::default().red())
+                Line::styled("DENIED", Style::default().red())
             } else if selected_file.dangling_symlink {
                 Line::styled(
                     "DANGLING_SYMLINK",

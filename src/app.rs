@@ -6,6 +6,7 @@ use filesaver::{FileSaver, sort};
 use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
+
 use ratatui::widgets::ListState;
 
 /// The type of block that can be selected.
@@ -176,7 +177,10 @@ impl App {
         };
 
         let mut current_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
-        if current_files.is_empty() {
+
+        // To aovid the situation that current_files do not be refreshed
+        // when reading a empty directory.
+        if self.current_files.is_empty() && current_files.is_empty() {
             return Ok(())
         }
 
@@ -243,9 +247,23 @@ impl App {
                 }
             )
         );
-        let mut file = fs::File::open(file_path)?;
         let mut content = String::new();
-        file.read_to_string(&mut content)?;
+        match fs::File::open(file_path) {
+            Err(e) => {
+                if e.kind() != io::ErrorKind::PermissionDenied {
+                    return Err(e)
+                }
+                content = String::from("Permission Denied");
+            },
+            Ok(ref mut file) => {
+                if let Err(e) = file.read_to_string(&mut content) {
+                    if e.kind() != io::ErrorKind::InvalidData {
+                        return Err(e)
+                    }
+                    content = String::from("Non-UTF-8 Data");
+                }
+            },
+        };
         self.file_content = Some(content);
 
         Ok(())
