@@ -37,7 +37,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     if key.code == KeyCode::Char('q') {
-                        break;
+                        if let app::Block::Browser(_) = app.selected_block {
+                            break;
+                        }
                     }
                     handle_event(key.code, &mut app)?;
                 }

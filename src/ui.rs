@@ -223,7 +223,7 @@ fn render_command_line(app: &App) -> Paragraph {
             }
         },
         app::Block::CommandLine(ref input) => {
-            Line::default()
+            Line::styled(input, Style::default().white())
         }
     };
 

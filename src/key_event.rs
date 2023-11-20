@@ -11,28 +11,60 @@ use crossterm::event::KeyCode;
 
 /// Handle KEY event.
 pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
-    if let KeyCode::Char(c) = key {
-        // TODO: Add check for current selected block -> Browser
-        match c {
-            'n' | 'i' | 'u' | 'e' => {
-                directory_movement(c, app)?;
-            },
-            _ => ()
-        }
+    match key {
+        KeyCode::Char(c) => {
+            if let app::Block::Browser(in_root) = app.selected_block {
+                match c {
+                    'n' | 'i' | 'u' | 'e' => directory_movement(
+                        c, app, in_root
+                    )?,
+                    '/' => app.set_command_line("/"),
+                    _ => ()
+                }
+            } else {
+                app.command_line_append(c);
+            }
+        },
+
+        KeyCode::Backspace => {
+            if let
+                app::Block::CommandLine(ref mut origin) = app.selected_block
+            {
+                origin.pop();
+            }
+        },
+
+        KeyCode::Esc => {
+            match app.selected_block {
+                app::Block::CommandLine(_) => {
+                    app.selected_block = app::Block::Browser(
+                        if app.path.to_str() == Some("/") {
+                            true
+                        } else {
+                            false
+                        }
+                    );
+                },
+                _ => ()
+            }
+        },
+
+        _ => ()
     }
 
     Ok(())
 }
 
 fn directory_movement(direction: char,
-                      app: &mut App
+                      app: &mut App,
+                      in_root: bool
 ) -> Result<(), Box<dyn Error>>
 {
     let selected_item = &mut app.selected_item;
 
     match direction {
         'n' => {
-            if let app::Block::Browser(true) = app.selected_block {
+            if in_root {
                 return Ok(())
             }
 
@@ -59,7 +91,7 @@ fn directory_movement(direction: char,
             }
         },
         'i' => {
-            if let app::Block::Browser(true) = app.selected_block {
+            if in_root {
                 let selected_file = app.parent_files.get(
                     selected_item.parent_selected().unwrap()
                 ).unwrap();
@@ -88,10 +120,10 @@ fn directory_movement(direction: char,
             app.refresh_select_item(false);
         },
         'u' => {
-            move_up_and_down(app, true)?;
+            move_up_and_down(app, true, in_root)?;
         },
         'e' => {
-            move_up_and_down(app, false)?;
+            move_up_and_down(app, false, in_root)?;
         },
 
         _ => panic!("Unknown error!")
@@ -100,14 +132,11 @@ fn directory_movement(direction: char,
     Ok(())
 }
 
-fn move_up_and_down(app: &mut App, up: bool) -> Result<(), Box<dyn Error>> {
-    // Definition of variables used for telling whether the user is in root.
-    let in_root = if let app::Block::Browser(true) = app.selected_block {
-        true
-    } else {
-        false
-    };
-
+fn move_up_and_down(app: &mut App,
+                    up: bool,
+                    in_root: bool
+) -> Result<(), Box<dyn Error>>
+{
     let selected_item = if in_root {
         &mut app.selected_item.parent
     } else {

@@ -7,6 +7,9 @@ use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
 
+use std::thread;
+use std::sync::{Arc, Mutex};
+
 use ratatui::widgets::ListState;
 
 /// The type of block that can be selected.
@@ -68,6 +71,7 @@ pub struct App {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
+    pub searched_idx: Vec<usize>,
     pub selected_block: Block,
 
     pub computer_name: Cow<'static, str>,
@@ -86,6 +90,7 @@ impl Default for App {
             current_files: Vec::new(),
             child_files: Vec::new(),
             file_content: None,
+            searched_idx: Vec::new(),
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
@@ -305,6 +310,22 @@ impl App {
                 }
             },
         }
+    }
+
+    pub fn set_command_line<T: Into<String>>(&mut self, content: T) {
+        self.selected_block = Block::CommandLine(content.into());
+    }
+
+    pub fn command_line_append(&mut self, content: char) {
+        if let Block::CommandLine(ref mut origin) = self.selected_block {
+            origin.push(content);
+        }
+    }
+
+    pub fn file_search(&mut self) {
+        thread::spawn(|| {
+            
+        });
     }
 }
 
