@@ -9,6 +9,12 @@ use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
 
+pub enum Goto {
+    Up,
+    Down,
+    Index(usize)
+}
+
 /// Handle KEY event.
 pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
     match key {
@@ -18,7 +24,19 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, in_root
                     )?,
+                    'g' => move_cursor(app, Goto::Index(0), in_root)?,
+                    'G' => {
+                        let last_idx = if in_root {
+                            app.parent_files.len() - 1
+                        } else {
+                            app.current_files.len() - 1
+                        };
+                        move_cursor(app, Goto::Index(last_idx), in_root)?;
+                    },
                     '/' => app.set_command_line("/"),
+                    '?' => app.set_command_line("?"),
+                    'k' => app.next_candidate()?,
+                    'K' => app.prev_candidate()?,
                     _ => ()
                 }
             } else {
@@ -37,15 +55,24 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
         KeyCode::Esc => {
             match app.selected_block {
                 app::Block::CommandLine(_) => {
-                    app.selected_block = app::Block::Browser(
-                        if app.path.to_str() == Some("/") {
-                            true
-                        } else {
-                            false
-                        }
-                    );
+                    app.quit_command_mode();
                 },
                 _ => ()
+            }
+        },
+
+        KeyCode::Enter => {
+            if let
+                app::Block::CommandLine(ref content) = app.selected_block
+            {
+                if content.starts_with('/') {
+                    app.file_search(content[1..].to_owned());
+                    // app.next_candidate()?;
+                } else if content.starts_with('?') {
+                    app.file_search(content[1..].to_owned());
+                    // app.prev_candidate()?;
+                }
+                app.quit_command_mode();
             }
         },
 
@@ -120,10 +147,10 @@ fn directory_movement(direction: char,
             app.refresh_select_item(false);
         },
         'u' => {
-            move_up_and_down(app, true, in_root)?;
+            move_cursor(app, Goto::Up, in_root)?;
         },
         'e' => {
-            move_up_and_down(app, false, in_root)?;
+            move_cursor(app, Goto::Down, in_root)?;
         },
 
         _ => panic!("Unknown error!")
@@ -132,9 +159,9 @@ fn directory_movement(direction: char,
     Ok(())
 }
 
-fn move_up_and_down(app: &mut App,
-                    up: bool,
-                    in_root: bool
+pub fn move_cursor(app: &mut App,
+                   goto: Goto,
+                   in_root: bool
 ) -> Result<(), Box<dyn Error>>
 {
     let selected_item = if in_root {
@@ -145,20 +172,24 @@ fn move_up_and_down(app: &mut App,
 
     // CURRENT_ITEM is used for change itself. Cannot used to search.
     if let Some(current_idx) = selected_item.selected() {
-        if up {
-            if current_idx > 0 {
-                selected_item.select(Some(current_idx - 1));
-            }
-        } else {
-            let current_len = if in_root {
-                app.parent_files.len()
-            } else {
-                app.current_files.len()
-            };
+        match goto {
+            Goto::Up => {
+                if current_idx > 0 {
+                    selected_item.select(Some(current_idx - 1));
+                }
+            },
+            Goto::Down => {
+                let current_len = if in_root {
+                    app.parent_files.len()
+                } else {
+                    app.current_files.len()
+                };
 
-            if current_idx < current_len - 1 {
-                selected_item.select(Some(current_idx + 1));
-            }
+                if current_idx < current_len - 1 {
+                    selected_item.select(Some(current_idx + 1));
+                }
+            },
+            Goto::Index(idx) => selected_item.select(Some(idx))
         }
 
         if in_root {
@@ -178,7 +209,7 @@ fn move_up_and_down(app: &mut App,
             }
             return Ok(())
         }
-
+        
         app.init_child_files(None)?;
         app.refresh_select_item(false);
     }

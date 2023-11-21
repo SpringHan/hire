@@ -6,6 +6,7 @@ use filesaver::{FileSaver, sort};
 use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
+use std::error;
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -71,7 +72,7 @@ pub struct App {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
-    pub searched_idx: Vec<usize>,
+    pub searched_idx: Arc<Mutex<Vec<usize>>>,
     pub selected_block: Block,
 
     pub computer_name: Cow<'static, str>,
@@ -90,7 +91,7 @@ impl Default for App {
             current_files: Vec::new(),
             child_files: Vec::new(),
             file_content: None,
-            searched_idx: Vec::new(),
+            searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
@@ -322,10 +323,90 @@ impl App {
         }
     }
 
-    pub fn file_search(&mut self) {
-        thread::spawn(|| {
-            
+    pub fn file_search(&mut self, name: String) {
+        let idx = Arc::clone(&self.searched_idx);
+        let current_files = if let
+            Block::Browser(true) = self.selected_block
+        {
+            self.parent_files.clone()
+        } else {
+            self.current_files.clone()
+        };
+
+        thread::spawn(move || {
+            let mut i = 0;
+            for file in current_files.iter() {
+                if file.name == name {
+                    idx.lock().unwrap().push(i);
+                }
+                i += 1;
+            }
         });
+    }
+
+    pub fn prev_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+        self.move_candidate(false)?;
+        Ok(())
+    }
+
+    pub fn next_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+        self.move_candidate(true)?;
+        Ok(())
+    }
+
+    /// Move current cursor to next/previous searched file name.
+    /// When NEXT is true, searching the next. Otherwise the previous.
+    fn move_candidate(&mut self,
+                      next: bool
+    ) -> Result<(), Box<dyn error::Error>> {
+        use crate::key_event::{move_cursor, Goto};
+
+        let candidates = Arc::clone(&self.searched_idx);
+        if candidates.lock().unwrap().is_empty() {
+            return Ok(())
+        }
+
+        let in_root = if let Block::Browser(true) = self.selected_block {
+            true
+        } else {
+            false
+        };
+        let current_idx = if in_root {
+            self.selected_item.parent.selected().unwrap()
+        } else {
+            self.selected_item.current.selected().unwrap()
+        };
+
+        let target = if next {
+            get_search_index(
+                candidates.lock().unwrap().iter(),
+                current_idx,
+                true
+            )
+        } else {
+            get_search_index(
+                candidates.lock().unwrap().iter().rev(),
+                current_idx,
+                false
+            )
+        };
+
+        if let Some(idx) = target {
+            move_cursor(self, Goto::Index(idx), in_root)?;
+        }
+
+        Ok(())
+    }
+
+    /// Quit command line selection.
+    pub fn quit_command_mode(&mut self) {
+        self.selected_block = self::Block::Browser(
+            if self.path.to_str() == Some("/") {
+                true
+            } else {
+                false
+            }
+        );
     }
 }
 
@@ -335,6 +416,53 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
         Ok(x) => FileSaver::new(x),
         Err(_) => panic!("Cannot get a file with error!")
     }
+}
+
+#[inline]
+fn get_search_index<'a, T>(iter: T,
+                    current: usize,
+                    next: bool
+) -> Option<usize>
+    where T: Iterator<Item = &'a usize>
+{
+    // let mut prev_idx: Option<usize> = None;
+    let mut get_current_idx = false;
+
+    for i in iter {
+        if get_current_idx {
+            return Some(*i)
+        }
+
+        if !next && *i < current {
+            return Some(*i)
+        }
+
+        if next && *i > current {
+            return Some(*i)
+            // if prev_idx.is_some() {
+            //     return prev_idx
+            // } else {
+            //     return Some(*i)
+            // }
+        }
+
+        if *i == current {
+            // if next {
+            //     get_current_idx = true;
+            // } else {
+            //     if prev_idx.is_some() {
+            //         return prev_idx
+            //     }
+            //     break;
+            // }
+            get_current_idx = true;
+            continue;
+        }
+
+        // prev_idx = Some(*i);
+    }
+
+    None
 }
 
 fn get_host_info() -> (String, String) {
