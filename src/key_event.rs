@@ -115,6 +115,7 @@ fn directory_movement(direction: char,
 
             if app.file_content.is_some() {
                 app.file_content = None;
+                app.clean_search_idx();
             }
         },
         'i' => {
@@ -145,6 +146,7 @@ fn directory_movement(direction: char,
             }
             app.init_child_files(None)?;
             app.refresh_select_item(false);
+            app.clean_search_idx();
         },
         'u' => {
             move_cursor(app, Goto::Up, in_root)?;

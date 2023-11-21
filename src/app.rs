@@ -72,8 +72,9 @@ pub struct App {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
-    pub searched_idx: Arc<Mutex<Vec<usize>>>,
     pub selected_block: Block,
+    pub search_history: Vec<String>,
+    pub searched_idx: Arc<Mutex<Vec<usize>>>,
 
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
@@ -91,6 +92,7 @@ impl Default for App {
             current_files: Vec::new(),
             child_files: Vec::new(),
             file_content: None,
+            search_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
@@ -329,6 +331,7 @@ impl App {
             idx.lock().unwrap().clear();
         }
 
+        self.search_history.push(name.clone());
         // Use this way as we cannot change the selected_block at the same time.
         let current_files = if self.path.to_str() == Some("/") {
             self.parent_files.clone()
@@ -411,6 +414,10 @@ impl App {
                 false
             }
         );
+    }
+
+    pub fn clean_search_idx(&mut self) {
+        self.searched_idx.lock().unwrap().clear();
     }
 }
 
