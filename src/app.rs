@@ -325,9 +325,12 @@ impl App {
 
     pub fn file_search(&mut self, name: String) {
         let idx = Arc::clone(&self.searched_idx);
-        let current_files = if let
-            Block::Browser(true) = self.selected_block
-        {
+        if !idx.lock().unwrap().is_empty() {
+            idx.lock().unwrap().clear();
+        }
+
+        // Use this way as we cannot change the selected_block at the same time.
+        let current_files = if self.path.to_str() == Some("/") {
             self.parent_files.clone()
         } else {
             self.current_files.clone()
