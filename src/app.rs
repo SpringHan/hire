@@ -338,8 +338,9 @@ impl App {
 
         thread::spawn(move || {
             let mut i = 0;
+            let name = name.to_lowercase();
             for file in current_files.iter() {
-                if file.name == name {
+                if file.name.to_lowercase().contains(&name) {
                     idx.lock().unwrap().push(i);
                 }
                 i += 1;
