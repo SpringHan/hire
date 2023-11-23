@@ -1,6 +1,7 @@
 // App
 
 pub mod filesaver;
+use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
 
 use std::path::{PathBuf, Path};
@@ -73,7 +74,8 @@ pub struct App {
     pub file_content: Option<String>,
 
     pub selected_block: Block,
-    pub search_history: Vec<String>,
+    pub command_idx: Option<usize>,
+    pub command_history: Vec<String>,
     pub searched_idx: Arc<Mutex<Vec<usize>>>,
 
     pub computer_name: Cow<'static, str>,
@@ -92,7 +94,8 @@ impl Default for App {
             current_files: Vec::new(),
             child_files: Vec::new(),
             file_content: None,
-            search_history: Vec::new(),
+            command_idx: None,
+            command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
@@ -331,7 +334,7 @@ impl App {
             idx.lock().unwrap().clear();
         }
 
-        self.search_history.push(name.clone());
+        self.command_history.push(format!("/{}", name.clone()));
         // Use this way as we cannot change the selected_block at the same time.
         let current_files = if self.path.to_str() == Some("/") {
             self.parent_files.clone()
@@ -366,7 +369,7 @@ impl App {
     fn move_candidate(&mut self,
                       next: bool
     ) -> Result<(), Box<dyn error::Error>> {
-        use crate::key_event::{move_cursor, Goto};
+        use crate::key_event::move_cursor;
 
         let candidates = Arc::clone(&self.searched_idx);
         if candidates.lock().unwrap().is_empty() {
@@ -414,10 +417,88 @@ impl App {
                 false
             }
         );
+
+        if self.command_idx.is_some() {
+            self.command_idx = None;
+        }
     }
 
     pub fn clean_search_idx(&mut self) {
         self.searched_idx.lock().unwrap().clear();
+    }
+
+    /// The function will change content in command line.
+    /// In the meanwhile, adjusting current command index.
+    pub fn command_select(&mut self, direct: Goto) {
+        if let Block::CommandLine(ref mut current) = self.selected_block {
+            if self.command_history.is_empty() {
+                return ()
+            }
+
+            if let Some(index) = self.command_idx {
+                match direct {
+                    Goto::Up => {
+                        if index == 0 {
+                            return ()
+                        }
+                        self.command_idx = Some(index - 1);
+                        *current = self.command_history[index - 1].to_owned();
+                    },
+                    Goto::Down => {
+                        if index == self.command_history.len() - 1 {
+                            return ()
+                        }
+                        self.command_idx = Some(index + 1);
+                        *current = self.command_history[index + 1].to_owned()
+                    },
+                    _ => panic!("Unvalid value!")
+                }
+                return ()
+            }
+
+            // Initial selection.
+            let current_idx = match direct {
+                Goto::Up => {
+                    self.command_history
+                        .iter()
+                        .rev()
+                        .position(|x| x == current)
+                },
+                Goto::Down => {
+                    self.command_history
+                        .iter()
+                        .position(|x| x == current)
+                },
+                _ => panic!("Unvalid value!")
+            };
+            if let Some(idx) = current_idx {
+                if direct == Goto::Up {
+                    // The real idx is: len - 1 - IDX
+                    if idx == self.command_history.len() - 1 {
+                        self.command_idx = Some(0);
+                        return ()
+                    }
+                    let temp_idx = self.command_history.len() - 2 - idx;
+                    self.command_idx = Some(temp_idx);
+                    *current = self.command_history[temp_idx].to_owned();
+                } else {
+                    if idx + 1 == self.command_history.len() {
+                        self.command_idx = Some(idx);
+                        return ()
+                    }
+                    self.command_idx = Some(idx + 1);
+                    *current = self.command_history[idx + 1].to_owned();
+                }
+            } else {
+                if direct == Goto::Up {
+                    self.command_idx = Some(self.command_history.len() - 1);
+                    *current = self.command_history.last().unwrap().to_owned();
+                } else {
+                    self.command_idx = Some(0);
+                    *current = self.command_history.first().unwrap().to_owned();
+                }
+            }
+        }
     }
 }
 

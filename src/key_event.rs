@@ -9,12 +9,15 @@ use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
 
+/// The enum that used to declare method to move.
+#[derive(PartialEq, Eq)]
 pub enum Goto {
     Up,
     Down,
     Index(usize)
 }
 
+// NOTE: When quiting command-line mode, you're required to use quit_command_mode function!
 /// Handle KEY event.
 pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
     match key {
@@ -73,6 +76,18 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     // app.prev_candidate()?;
                 }
                 app.quit_command_mode();
+            }
+        },
+
+        KeyCode::Up => {
+            if let app::Block::CommandLine(_) = app.selected_block {
+                app.command_select(Goto::Up);
+            }
+        },
+
+        KeyCode::Down => {
+            if let app::Block::CommandLine(_) = app.selected_block {
+                app.command_select(Goto::Down);
             }
         },
 
