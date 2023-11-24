@@ -474,25 +474,27 @@ impl App {
         }
     }
 
-    // TODO: Refactor project with this function.
-    pub fn get_file_name(&self) -> String {
+    pub fn get_file_saver(&self) -> &FileSaver {
         if self.path.to_str() == Some("/") {
-            self.path.join(
-                self.parent_files[self.selected_item.parent_selected().unwrap()]
-                    .name
-                    .to_owned()
-            )
-                .to_string_lossy()
-                .to_string()
+            self.parent_files
+                .get(self.selected_item.parent_selected().unwrap())
+                .unwrap()
         } else {
-            self.path.join(
-                self.current_files[self.selected_item.current_selected().unwrap()]
-                    .name
-                    .to_owned()
-            )
-                .to_string_lossy()
-                .to_string()
+            self.current_files
+                .get(self.selected_item.current_selected().unwrap())
+                .unwrap()
         }
+    }
+
+    // TODO: Refactor project with this function.
+    pub fn get_file_name(&self, without_path: bool) -> String {
+        let file_saver = self.get_file_saver();
+
+        if without_path {
+            return file_saver.name.to_owned()
+        }
+
+        self.path.join(&file_saver.name).to_string_lossy().to_string()
     }
 }
 
