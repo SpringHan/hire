@@ -1,7 +1,7 @@
 // UI
 
 use crate::App;
-use crate::app::{self, filesaver::FileSaver};
+use crate::app::{self, filesaver::FileSaver, CursorPos};
 
 use std::ops::AddAssign;
 
@@ -222,8 +222,9 @@ fn render_command_line(app: &App) -> Paragraph {
                 ])
             }
         },
-        app::Block::CommandLine(ref input) => {
-            Line::styled(input, Style::default().white())
+        app::Block::CommandLine(ref input, cursor) => {
+            // Line::styled(input, Style::default().white())
+            Line::from(get_command_line_span_list(input, cursor))
         }
     };
 
@@ -252,4 +253,31 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
     } else {
         Modifier::empty()
     }
+}
+
+fn get_command_line_span_list(command: &String, cursor: CursorPos) -> Vec<Span> {
+    let mut span_list: Vec<Span> = Vec::new();
+    if let CursorPos::Index(idx) = cursor {
+        let mut i = 0;
+        for c in command.chars() {
+            span_list.push(
+                if i == idx {
+                    Span::raw(String::from(c))
+                        .fg(Color::Black)
+                        .bg(Color::White)
+                } else {
+                    Span::raw(String::from(c))
+                        .fg(Color::White)
+                }
+            );
+            i += 1;
+        }
+
+        return span_list
+    }
+
+    span_list.push(Span::from(command).fg(Color::White));
+    span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
+
+    span_list
 }

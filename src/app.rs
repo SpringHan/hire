@@ -1,6 +1,9 @@
 // App
 
 pub mod filesaver;
+pub mod special_types;
+pub use special_types::*;
+
 use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
 
@@ -8,60 +11,10 @@ use std::path::{PathBuf, Path};
 use std::{env, fs, io};
 use std::borrow::Cow;
 use std::error;
+use std::ops::AddAssign;
 
 use std::thread;
 use std::sync::{Arc, Mutex};
-
-use ratatui::widgets::ListState;
-
-/// The type of block that can be selected.
-/// The boolean from Browser indicates whether current dir is the root directory.
-pub enum Block {
-    Browser(bool),
-    CommandLine(String)
-}
-
-pub struct ItemIndex {
-    pub parent: ListState,
-    pub current: ListState,
-    pub child: ListState
-}
-
-impl Default for ItemIndex {
-    fn default() -> ItemIndex {
-        ItemIndex {
-            parent: ListState::default(),
-            current: ListState::default(),
-            child: ListState::default()
-        }
-    }
-}
-
-impl ItemIndex {
-    pub fn parent_selected(&self) -> Option<usize> {
-        self.parent.selected()
-    }
-
-    pub fn current_selected(&self) -> Option<usize> {
-        self.current.selected()
-    }
-
-    pub fn child_selected(&self) -> Option<usize> {
-        self.child.selected()
-    }
-
-    pub fn parent_select(&mut self, idx: Option<usize>) {
-        self.parent.select(idx);
-    }
-
-    pub fn current_select(&mut self, idx: Option<usize>) {
-        self.current.select(idx);
-    }
-
-    pub fn child_select(&mut self, idx: Option<usize>) {
-        self.child.select(idx);
-    }
-}
 
 pub struct App {
     pub path: PathBuf,
@@ -318,12 +271,23 @@ impl App {
         }
     }
 
-    pub fn set_command_line<T: Into<String>>(&mut self, content: T) {
-        self.selected_block = Block::CommandLine(content.into());
+    pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
+        self.selected_block = Block::CommandLine(content.into(), pos);
     }
 
     pub fn command_line_append(&mut self, content: char) {
-        if let Block::CommandLine(ref mut origin) = self.selected_block {
+        if let
+            Block::CommandLine(
+                ref mut origin,
+                ref mut cursor
+            ) = self.selected_block
+        {
+            if let CursorPos::Index(idx) = cursor {
+                origin.insert(*idx, content);
+                idx.add_assign(1);
+                return ()
+            }
+
             origin.push(content);
         }
     }
@@ -430,9 +394,18 @@ impl App {
     /// The function will change content in command line.
     /// In the meanwhile, adjusting current command index.
     pub fn command_select(&mut self, direct: Goto) {
-        if let Block::CommandLine(ref mut current) = self.selected_block {
+        if let
+            Block::CommandLine(
+                ref mut current,
+                ref mut cursor
+            ) = self.selected_block
+        {
             if self.command_history.is_empty() {
                 return ()
+            }
+
+            if *cursor != CursorPos::End {
+                *cursor = CursorPos::End;
             }
 
             if let Some(index) = self.command_idx {
@@ -500,6 +473,27 @@ impl App {
             }
         }
     }
+
+    // TODO: Refactor project with this function.
+    pub fn get_file_name(&self) -> String {
+        if self.path.to_str() == Some("/") {
+            self.path.join(
+                self.parent_files[self.selected_item.parent_selected().unwrap()]
+                    .name
+                    .to_owned()
+            )
+                .to_string_lossy()
+                .to_string()
+        } else {
+            self.path.join(
+                self.current_files[self.selected_item.current_selected().unwrap()]
+                    .name
+                    .to_owned()
+            )
+                .to_string_lossy()
+                .to_string()
+        }
+    }
 }
 
 #[inline]
@@ -510,6 +504,7 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     }
 }
 
+// TODO: Delete commented code lines when the time is right.
 #[inline]
 fn get_search_index<'a, T>(iter: T,
                     current: usize,

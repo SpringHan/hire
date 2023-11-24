@@ -1,11 +1,12 @@
 // Key Event
 
 use crate::App;
-use crate::app;
+use crate::app::{self, CursorPos};
 
 use std::mem::swap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::ops::SubAssign;
 
 use crossterm::event::KeyCode;
 
@@ -36,10 +37,12 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         };
                         move_cursor(app, Goto::Index(last_idx), in_root)?;
                     },
-                    '/' => app.set_command_line("/"),
-                    '?' => app.set_command_line("?"),
+                    '/' => app.set_command_line("/", CursorPos::End),
+                    '?' => app.set_command_line("?", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
+                    'a' => {
+                    },
                     _ => ()
                 }
             } else {
@@ -49,15 +52,26 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
 
         KeyCode::Backspace => {
             if let
-                app::Block::CommandLine(ref mut origin) = app.selected_block
+                app::Block::CommandLine(
+                    ref mut origin,
+                    ref mut cursor
+                ) = app.selected_block
             {
-                origin.pop();
+                if let app::CursorPos::Index(idx) = cursor {
+                    if *idx == 0 {
+                        return Ok(())
+                    }
+                    origin.remove(*idx);
+                    idx.sub_assign(1);
+                } else {
+                    origin.pop();
+                }
             }
         },
 
         KeyCode::Esc => {
             match app.selected_block {
-                app::Block::CommandLine(_) => {
+                app::Block::CommandLine(_, _) => {
                     app.quit_command_mode();
                 },
                 _ => ()
@@ -66,27 +80,28 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
 
         KeyCode::Enter => {
             if let
-                app::Block::CommandLine(ref content) = app.selected_block
+                app::Block::CommandLine(ref content, _) = app.selected_block
             {
                 if content.starts_with('/') {
                     app.file_search(content[1..].to_owned());
                     // app.next_candidate()?;
-                } else if content.starts_with('?') {
-                    app.file_search(content[1..].to_owned());
-                    // app.prev_candidate()?;
                 }
+                // else if content.starts_with('?') {
+                //     app.file_search(content[1..].to_owned());
+                //     // app.prev_candidate()?;
+                // }
                 app.quit_command_mode();
             }
         },
 
         KeyCode::Up => {
-            if let app::Block::CommandLine(_) = app.selected_block {
+            if let app::Block::CommandLine(_, _) = app.selected_block {
                 app.command_select(Goto::Up);
             }
         },
 
         KeyCode::Down => {
-            if let app::Block::CommandLine(_) = app.selected_block {
+            if let app::Block::CommandLine(_, _) = app.selected_block {
                 app.command_select(Goto::Down);
             }
         },
