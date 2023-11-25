@@ -78,21 +78,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
             }
         },
 
-        KeyCode::Enter => {
-            if let
-                app::Block::CommandLine(ref content, _) = app.selected_block
-            {
-                if content.starts_with('/') {
-                    app.file_search(content[1..].to_owned());
-                    // app.next_candidate()?;
-                }
-                // else if content.starts_with('?') {
-                //     app.file_search(content[1..].to_owned());
-                //     // app.prev_candidate()?;
-                // }
-                app.quit_command_mode();
-            }
-        },
+        KeyCode::Enter => app.command_parse(),
 
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {

@@ -2,6 +2,7 @@
 
 pub mod filesaver;
 pub mod special_types;
+pub mod command;
 pub use special_types::*;
 
 use crate::key_event::Goto;
@@ -26,6 +27,8 @@ pub struct App {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
+    // When command_error is true, the content in command line will be displayed in red.
+    pub command_error: bool,
     pub selected_block: Block,
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
@@ -48,6 +51,7 @@ impl Default for App {
             child_files: Vec::new(),
             file_content: None,
             command_idx: None,
+            command_error: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
@@ -385,6 +389,10 @@ impl App {
         if self.command_idx.is_some() {
             self.command_idx = None;
         }
+
+        if self.command_error {
+            self.command_error = false;
+        }
     }
 
     pub fn clean_search_idx(&mut self) {
@@ -495,6 +503,26 @@ impl App {
         }
 
         self.path.join(&file_saver.name).to_string_lossy().to_string()
+    }
+
+    pub fn command_parse(&mut self) {
+        // TODO: Add current command to history
+        if let Block::CommandLine(ref command, _) = self.selected_block {
+            if command.starts_with("/") {
+                self.file_search(command[1..].to_owned());
+                return self.quit_command_mode()
+            }
+
+            let command_slices: Vec<&str> = command.split(" ").collect();
+            let ready_for_check = match command_slices[0] {
+                ":rename" => {
+                    // TODO: Replace this with right codes
+                    command::ModificationError::None
+                },
+                _ => command::ModificationError::UnvalidCommand
+            }
+            self.quit_command_mode();
+        }
     }
 }
 

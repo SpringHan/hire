@@ -98,14 +98,18 @@ impl FileSaver {
 
     /// Get permission span of file.
     pub fn permission_span(&self) -> Span {
-        if let Some(ref permission) = self.permissions {
-            if permission.readonly() {
-                Span::raw("READONLY").red().bold()
-            } else {
-                Span::raw("MUTABLE").light_green().bold()
-            }
+        if self.read_only() {
+            Span::raw("READONLY").red().bold()
         } else {
-            panic!("Unknown Error!")
+            Span::raw("MUTABLE").light_green().bold()
+        }
+    }
+
+    pub fn read_only(&self) -> bool {
+        if let Some(ref permission) = self.permissions {
+            permission.readonly()
+        } else {
+            panic!("Unknow Error!")
         }
     }
 
