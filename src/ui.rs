@@ -223,8 +223,11 @@ fn render_command_line(app: &App) -> Paragraph {
             }
         },
         app::Block::CommandLine(ref input, cursor) => {
-            // Line::styled(input, Style::default().white())
-            Line::from(get_command_line_span_list(input, cursor))
+            Line::from(get_command_line_span_list(
+                input,
+                cursor,
+                app.command_error
+            ))
         }
     };
 
@@ -255,7 +258,12 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
     }
 }
 
-fn get_command_line_span_list(command: &String, cursor: CursorPos) -> Vec<Span> {
+fn get_command_line_span_list(
+    command: &String,
+    cursor: CursorPos,
+    error_msg: bool
+) -> Vec<Span>
+{
     let mut span_list: Vec<Span> = Vec::new();
     if let CursorPos::Index(idx) = cursor {
         let mut i = 0;
@@ -276,7 +284,11 @@ fn get_command_line_span_list(command: &String, cursor: CursorPos) -> Vec<Span> 
         return span_list
     }
 
-    span_list.push(Span::from(command).fg(Color::White));
+    span_list.push(Span::from(command).fg(if error_msg {
+        Color::Red
+    } else {
+        Color::White
+    }));
     span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
 
     span_list

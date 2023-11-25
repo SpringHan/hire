@@ -17,6 +17,8 @@ use std::ops::AddAssign;
 use std::thread;
 use std::sync::{Arc, Mutex};
 
+use ratatui::widgets::ListState;
+
 pub struct App {
     pub path: PathBuf,
     pub selected_item: ItemIndex,
@@ -482,6 +484,14 @@ impl App {
         }
     }
 
+    pub fn get_directory_mut(&mut self) -> (&mut Vec<FileSaver>, &mut ListState) {
+        if self.path.to_str() == Some("/") {
+            (&mut self.parent_files, &mut self.selected_item.parent)
+        } else {
+            (&mut self.current_files, &mut self.selected_item.current)
+        }
+    }
+
     pub fn get_file_saver(&self) -> &FileSaver {
         if self.path.to_str() == Some("/") {
             self.parent_files
@@ -494,35 +504,47 @@ impl App {
         }
     }
 
-    // TODO: Refactor project with this function.
-    pub fn get_file_name(&self, without_path: bool) -> String {
-        let file_saver = self.get_file_saver();
-
-        if without_path {
-            return file_saver.name.to_owned()
+    pub fn get_file_saver_mut(&mut self) -> &mut FileSaver {
+        if self.path.to_str() == Some("/") {
+            &mut self.parent_files[self.selected_item.parent_selected().unwrap()]
+        } else {
+            &mut self.current_files[self.selected_item.current_selected().unwrap()]
         }
-
-        self.path.join(&file_saver.name).to_string_lossy().to_string()
     }
 
-    pub fn command_parse(&mut self) {
-        // TODO: Add current command to history
+    pub fn command_parse(&mut self) -> io::Result<()> {
+        if self.command_error {
+            return Ok(self.quit_command_mode())
+        }
+
         if let Block::CommandLine(ref command, _) = self.selected_block {
             if command.starts_with("/") {
                 self.file_search(command[1..].to_owned());
-                return self.quit_command_mode()
+                return Ok(self.quit_command_mode())
             }
 
-            let command_slices: Vec<&str> = command.split(" ").collect();
+            self.command_history.push(command.to_owned());
+            let mut command_slices: Vec<&str> = command.split(" ").collect();
             let ready_for_check = match command_slices[0] {
                 ":rename" => {
-                    // TODO: Replace this with right codes
-                    command::ModificationError::None
+                    command_slices.remove(0);
+                    let file_name = command_slices.join(" ");
+                    command::rename_file(
+                        self.path.to_owned(),
+                        self,
+                        file_name
+                    )?
                 },
                 _ => command::ModificationError::UnvalidCommand
+            };
+
+            // When result of check is false, there would be errors, which should be displayed.
+            if ready_for_check.check(self) {
+                self.quit_command_mode();
             }
-            self.quit_command_mode();
         }
+
+        Ok(())
     }
 }
 

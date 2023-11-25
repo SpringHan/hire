@@ -1,4 +1,4 @@
-// FileSaveri
+// FileSaver
 
 use std::io;
 use std::time::SystemTime;
@@ -111,6 +111,10 @@ impl FileSaver {
         } else {
             panic!("Unknow Error!")
         }
+    }
+
+    pub fn set_modified(&mut self, time: SystemTime) {
+        self.modified_time = Some(time);
     }
 
     pub fn modified_span(&self) -> Span {

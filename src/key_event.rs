@@ -78,7 +78,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
             }
         },
 
-        KeyCode::Enter => app.command_parse(),
+        KeyCode::Enter => app.command_parse()?,
 
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
@@ -162,6 +162,8 @@ fn directory_movement(direction: char,
             selected_item.current_select(selected_item.parent_selected());
             selected_item.parent_select(None);
             app.init_parent_files()?;
+            // Normally, calling this function would initialize child_index.
+            // So, use TRUE to keep it.
             app.refresh_select_item(true);
 
             if app.file_content.is_some() {
