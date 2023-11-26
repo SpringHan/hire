@@ -30,6 +30,7 @@ pub struct App {
     pub file_content: Option<String>,
 
     // When command_error is true, the content in command line will be displayed in red.
+    pub goto_action: bool,
     pub command_error: bool,
     pub selected_block: Block,
     pub command_idx: Option<usize>,
@@ -53,6 +54,7 @@ impl Default for App {
             child_files: Vec::new(),
             file_content: None,
             command_idx: None,
+            goto_action: false,
             command_error: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
@@ -74,7 +76,7 @@ impl App {
         }
 
         // Current files
-        self.init_current_files(None)?;
+        self.init_current_files::<&str>(None)?;
         if self.current_files.is_empty() {
             return Ok(())
         }
@@ -116,7 +118,11 @@ impl App {
         // Child
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
-        } else if self.selected_item.child_selected().is_some() {
+            self.file_content = None;
+            return ()
+        }
+
+        if self.selected_item.child_selected().is_some() {
             self.selected_item.child_select(None);
         }
     }
@@ -126,7 +132,7 @@ impl App {
             path.to_path_buf()
         } else {
             // Cannot get parent directory info at root dir.
-            return Ok(())
+            PathBuf::from("/")
         };
 
         let mut parent_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
@@ -136,12 +142,13 @@ impl App {
         Ok(())
     }
 
-    /// When the result is false, then stop init child files in the main function.
     /// The PATH is used when the user is in root directory.
-    pub fn init_current_files(&mut self, path: Option<PathBuf>) -> io::Result<()> {
+    pub fn init_current_files<T>(&mut self, path: Option<T>) -> io::Result<()>
+        where T: AsRef<Path>
+    {
         // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
         let temp_path = if let Some(_path) = path {
-            self.path.join(_path)
+            self.path.join(_path.as_ref())
         } else {
             self.path.clone()
         };
@@ -543,6 +550,26 @@ impl App {
                 self.quit_command_mode();
             }
         }
+
+        Ok(())
+    }
+
+    pub fn goto_dir(&mut self, dir: &str) -> io::Result<()> {
+        self.path = PathBuf::from(dir);
+        self.selected_item = ItemIndex::default();
+
+        if dir == "/" {
+            self.file_content = None;
+            self.selected_block = Block::Browser(true);
+
+            self.init_parent_files()?;
+            self.selected_item.parent_select(Some(0));
+            self.init_current_files(Some(self.parent_files[0].name.to_owned()))?;
+        } else {
+            self.init_all_files()?;
+            self.selected_block = Block::Browser(false);
+        }
+        self.refresh_select_item(false);
 
         Ok(())
     }

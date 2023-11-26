@@ -24,11 +24,17 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
     match key {
         KeyCode::Char(c) => {
             if let app::Block::Browser(in_root) = app.selected_block {
+                if app.goto_action {
+                    goto_operation(app, c, in_root)?;
+                    app.goto_action = false;
+                    return Ok(())
+                }
+
                 match c {
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, in_root
                     )?,
-                    'g' => move_cursor(app, Goto::Index(0), in_root)?,
+                    'g' => app.goto_action = true,
                     'G' => {
                         let last_idx = if in_root {
                             app.parent_files.len() - 1
@@ -38,7 +44,6 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         move_cursor(app, Goto::Index(last_idx), in_root)?;
                     },
                     '/' => app.set_command_line("/", CursorPos::End),
-                    // '?' => app.set_command_line("?", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
                     'a' => append_file_name(app, false),
@@ -305,4 +310,20 @@ fn append_file_name(app: &mut App, to_end: bool) {
         }
     );
 
+}
+
+fn goto_operation(app: &mut App,
+                  key: char,
+                  in_root: bool
+) -> Result<(), Box<dyn Error>>
+{
+    match key {
+        'g' => move_cursor(app, Goto::Index(0), in_root)?,
+        'h' => app.goto_dir("/home/spring/")?,
+        '/' => app.goto_dir("/")?,
+        'G' => app.goto_dir("/home/spring/Github/")?,
+        _ => ()
+    }
+
+    Ok(())
 }
