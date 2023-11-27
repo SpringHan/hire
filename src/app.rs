@@ -30,8 +30,8 @@ pub struct App {
     pub file_content: Option<String>,
 
     // When command_error is true, the content in command line will be displayed in red.
-    pub goto_action: bool,
     pub command_error: bool,
+    pub option_key: OptionFor,       // Use the next key as option.
     pub selected_block: Block,
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
@@ -54,7 +54,7 @@ impl Default for App {
             child_files: Vec::new(),
             file_content: None,
             command_idx: None,
-            goto_action: false,
+            option_key: OptionFor::None,
             command_error: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
@@ -499,15 +499,23 @@ impl App {
         }
     }
 
-    pub fn get_file_saver(&self) -> &FileSaver {
+    pub fn get_file_saver(&self) -> Option<&FileSaver> {
         if self.path.to_str() == Some("/") {
-            self.parent_files
-                .get(self.selected_item.parent_selected().unwrap())
-                .unwrap()
+            Some(
+                self.parent_files
+                    .get(self.selected_item.parent_selected().unwrap())
+                    .unwrap()
+            )
         } else {
-            self.current_files
-                .get(self.selected_item.current_selected().unwrap())
-                .unwrap()
+            if self.current_files.is_empty() {
+                None
+            } else {
+                Some(
+                    self.current_files
+                        .get(self.selected_item.current_selected().unwrap())
+                        .unwrap()
+                )
+            }
         }
     }
 

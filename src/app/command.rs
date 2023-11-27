@@ -11,6 +11,7 @@ pub enum ModificationError {
     PermissionDenied,
     UnvalidCommand,
     FileExists,
+    NoSelected,
     None
 }
 
@@ -36,7 +37,13 @@ impl ModificationError {
                     String::from("[Error]: The File already exists!"),
                     CursorPos::End
                 );
-            }
+            },
+            ModificationError::NoSelected => {
+                app.selected_block = Block::CommandLine(
+                    String::from("[Error]: No selected item to be operated!"),
+                    CursorPos::End
+                )
+            },
             ModificationError::None => return true
         }
         app.command_error = true;

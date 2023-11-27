@@ -1,7 +1,8 @@
 // Key Event
 
 use crate::App;
-use crate::app::{self, CursorPos};
+use crate::app::{self, CursorPos, OptionFor};
+use crate::app::command::ModificationError;
 
 use std::mem::swap;
 use std::error::Error;
@@ -24,17 +25,24 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
     match key {
         KeyCode::Char(c) => {
             if let app::Block::Browser(in_root) = app.selected_block {
-                if app.goto_action {
-                    goto_operation(app, c, in_root)?;
-                    app.goto_action = false;
-                    return Ok(())
+                // NOTE: All the function in the blocks below must be end with
+                // code to set OPTION_KEY to None.
+                match app.option_key {
+                    OptionFor::Goto => {
+                        goto_operation(app, c, in_root)?;
+                        return Ok(())
+                    },
+                    OptionFor::Delete => {
+                        return Ok(())
+                    },
+                    OptionFor::None => ()
                 }
 
                 match c {
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, in_root
                     )?,
-                    'g' => app.goto_action = true,
+                    'g' => app.option_key = OptionFor::Goto,
                     'G' => {
                         let last_idx = if in_root {
                             app.parent_files.len() - 1
@@ -279,37 +287,40 @@ pub fn move_cursor(app: &mut App,
 
 fn append_file_name(app: &mut App, to_end: bool) {
     let file_saver = app.get_file_saver();
-    let current_file = &file_saver.name;
+    if let Some(file_saver) = file_saver {
+        let current_file = &file_saver.name;
 
-    if file_saver.is_dir || to_end {
+        if file_saver.is_dir || to_end {
+            app.set_command_line(
+                format!(":rename {}", current_file),
+                CursorPos::End
+            );
+            return ()
+        }
+
+        let cursor_pos = current_file
+            .chars()
+            .rev()
+            .position(|x| x == '.');
+
         app.set_command_line(
             format!(":rename {}", current_file),
-            CursorPos::End
-        );
-        return ()
-    }
-
-    let cursor_pos = current_file
-        .chars()
-        .rev()
-        .position(|x| x == '.');
-
-    app.set_command_line(
-        format!(":rename {}", current_file),
-        if let Some(idx) = cursor_pos {
-            let idx = current_file.len() - 1 - idx;
-            // In this condition,
-            // the file does not have string about its extension.
-            if idx == 0 {
-                CursorPos::End
+            if let Some(idx) = cursor_pos {
+                let idx = current_file.len() - 1 - idx;
+                // In this condition,
+                // the file does not have string about its extension.
+                if idx == 0 {
+                    CursorPos::End
+                } else {
+                    CursorPos::Index(idx + 8)
+                }
             } else {
-                CursorPos::Index(idx + 8)
+                CursorPos::End
             }
-        } else {
-            CursorPos::End
-        }
-    );
-
+        );
+    } else {
+        ModificationError::NoSelected.check(app);
+    }
 }
 
 fn goto_operation(app: &mut App,
@@ -322,6 +333,49 @@ fn goto_operation(app: &mut App,
         'h' => app.goto_dir("/home/spring/")?,
         '/' => app.goto_dir("/")?,
         'G' => app.goto_dir("/home/spring/Github/")?,
+        _ => ()
+    }
+
+    app.option_key = OptionFor::None;
+
+    Ok(())
+}
+
+// TODO: Cannot be used.
+fn delete_operation(app: &mut App,
+                    key: char,
+                    in_root: bool
+) -> Result<(), Box<dyn Error>>
+{
+    use std::fs::remove_file;
+
+    match key {
+        'd' => {
+            
+        },
+        'D' => {
+            let current_file = app.get_file_saver().clone();
+
+            if let Some(current_file) = current_file {
+                if current_file.cannot_read || current_file.read_only() {
+                    ModificationError::PermissionDenied.check(app);
+                    app.option_key = OptionFor::None;
+                    return Ok(())
+                }
+
+                remove_file(app.path.join(&current_file.name))?;
+                let (dir, idx) = app.get_directory_mut();
+                dir.remove(idx.selected().unwrap());
+
+                if dir.is_empty() {
+                }
+
+                if dir.len() - 1 == idx.selected().unwrap() {
+                }
+            } else {
+                ModificationError::NoSelected.check(app);
+            }
+        },
         _ => ()
     }
 

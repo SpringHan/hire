@@ -8,6 +8,12 @@ pub enum CursorPos {
     End
 }
 
+pub enum OptionFor {
+    Goto,
+    Delete,
+    None
+}
+
 /// The type of block that can be selected.
 /// The boolean from Browser indicates whether current dir is the root directory.
 pub enum Block {
