@@ -58,6 +58,11 @@ pub fn rename_file(path: PathBuf,
 ) -> io::Result<ModificationError>
 {
     let file = app.get_file_saver_mut();
+    if let None = file {
+        return Ok(ModificationError::NoSelected);
+    }
+
+    let file = file.unwrap();
     let is_dir = file.is_dir;
 
     if file.cannot_read || file.read_only() {

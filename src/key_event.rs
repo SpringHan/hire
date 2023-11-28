@@ -151,8 +151,6 @@ fn directory_movement(direction: char,
                       in_root: bool
 ) -> Result<(), Box<dyn Error>>
 {
-    let selected_item = &mut app.selected_item;
-
     match direction {
         'n' => {
             if in_root {
@@ -171,6 +169,8 @@ fn directory_movement(direction: char,
             swap(&mut app.child_files, &mut app.current_files);
             swap(&mut app.current_files, &mut app.parent_files);
 
+            let selected_item = &mut app.selected_item;
+
             selected_item.child_select(selected_item.current_selected());
             selected_item.current_select(selected_item.parent_selected());
             selected_item.parent_select(None);
@@ -185,32 +185,48 @@ fn directory_movement(direction: char,
             }
         },
         'i' => {
+            let mut current_empty = false;
+
             if in_root {
-                let selected_file = app.parent_files.get(
-                    selected_item.parent_selected().unwrap()
-                ).unwrap();
-                if !selected_file.is_dir || app.current_files.is_empty() {
+                let selected_file = app.get_file_saver().unwrap();
+                // It seems impossible that the root directory is empty.
+                // if let None = selected_file {
+                //     return Ok(())
+                // }
+
+                // let selected_file = selected_file.unwrap();
+                if !selected_file.is_dir || selected_file.cannot_read {
                     return Ok(())
                 }
 
                 app.path = app.path.join(&selected_file.name);
                 app.selected_block = app::Block::Browser(false);
             } else {
-                let selected_file = app.current_files.get(
-                    selected_item.current_selected().unwrap()
-                ).unwrap();
-                if !selected_file.is_dir || app.child_files.is_empty() {
+                let selected_file = app.get_file_saver();
+                if let None = selected_file {
                     return Ok(())
                 }
 
-                app.path = app.path.join(&selected_file.name);
+                let selected_file = selected_file.unwrap();
+                if !selected_file.is_dir || selected_file.cannot_read {
+                    return Ok(())
+                }
+
+                app.path = app.path.join(selected_file.name.to_owned());
                 app.parent_files = Vec::new();
                 swap(&mut app.parent_files, &mut app.current_files);
                 swap(&mut app.current_files, &mut app.child_files);
+
+                let selected_item = &mut app.selected_item;
                 swap(&mut selected_item.parent, &mut selected_item.current);
                 selected_item.current_select(selected_item.child_selected());
+                if app.current_files.is_empty() {
+                    current_empty = true;
+                }
             }
-            app.init_child_files(None)?;
+            if !current_empty {
+                app.init_child_files(None)?;
+            }
             app.refresh_select_item(false);
             app.clean_search_idx();
         },
@@ -235,6 +251,10 @@ pub fn move_cursor(app: &mut App,
     let selected_item = if in_root {
         &mut app.selected_item.parent
     } else {
+        if app.current_files.is_empty() {
+            return Ok(())
+        }
+
         &mut app.selected_item.current
     };
 
@@ -330,9 +350,9 @@ fn goto_operation(app: &mut App,
 {
     match key {
         'g' => move_cursor(app, Goto::Index(0), in_root)?,
-        'h' => app.goto_dir("/home/spring/")?,
+        'h' => app.goto_dir("/home/spring")?,
         '/' => app.goto_dir("/")?,
-        'G' => app.goto_dir("/home/spring/Github/")?,
+        'G' => app.goto_dir("/home/spring/Github")?,
         _ => ()
     }
 

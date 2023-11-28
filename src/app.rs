@@ -78,6 +78,7 @@ impl App {
         // Current files
         self.init_current_files::<&str>(None)?;
         if self.current_files.is_empty() {
+            self.refresh_select_item(false);
             return Ok(())
         }
 
@@ -169,6 +170,7 @@ impl App {
 
     /// To intialize child files, CURRENT_SELECT should be Some(FileSaver)
     /// To update child files, the value should be None.
+    /// It's your deal to ensure CURRENT_FILES is not empty.
     pub fn init_child_files(&mut self,
                             current_select: Option<&FileSaver>
     ) -> io::Result<()>
@@ -519,11 +521,15 @@ impl App {
         }
     }
 
-    pub fn get_file_saver_mut(&mut self) -> &mut FileSaver {
+    pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
         if self.path.to_str() == Some("/") {
-            &mut self.parent_files[self.selected_item.parent_selected().unwrap()]
+            Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
         } else {
-            &mut self.current_files[self.selected_item.current_selected().unwrap()]
+            if self.current_files.is_empty() {
+                None
+            } else {
+                Some(&mut self.current_files[self.selected_item.current_selected().unwrap()])
+            }
         }
     }
 
