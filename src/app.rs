@@ -145,7 +145,7 @@ impl App {
 
     /// The PATH is used when the user is in root directory.
     pub fn init_current_files<T>(&mut self, path: Option<T>) -> io::Result<()>
-        where T: AsRef<Path>
+    where T: AsRef<Path>
     {
         // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
         let temp_path = if let Some(_path) = path {
@@ -503,20 +503,14 @@ impl App {
 
     pub fn get_file_saver(&self) -> Option<&FileSaver> {
         if self.path.to_str() == Some("/") {
-            Some(
-                self.parent_files
-                    .get(self.selected_item.parent_selected().unwrap())
-                    .unwrap()
-            )
+            self.parent_files
+                .get(self.selected_item.parent_selected().unwrap())
         } else {
             if self.current_files.is_empty() {
                 None
             } else {
-                Some(
-                    self.current_files
-                        .get(self.selected_item.current_selected().unwrap())
-                        .unwrap()
-                )
+                self.current_files
+                    .get(self.selected_item.current_selected().unwrap())
             }
         }
     }
@@ -600,10 +594,10 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
 // TODO: Delete commented code lines when the time is right.
 #[inline]
 fn get_search_index<'a, T>(iter: T,
-                    current: usize,
-                    next: bool
+                           current: usize,
+                           next: bool
 ) -> Option<usize>
-    where T: Iterator<Item = &'a usize>
+where T: Iterator<Item = &'a usize>
 {
     // let mut prev_idx: Option<usize> = None;
     let mut get_current_idx = false;

@@ -7,6 +7,7 @@ use crate::app::command::ModificationError;
 use std::mem::swap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::io::ErrorKind;
 use std::ops::{SubAssign, AddAssign};
 
 use crossterm::event::KeyCode;
@@ -33,6 +34,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         return Ok(())
                     },
                     OptionFor::Delete => {
+                        delete_operation(app, c, in_root)?;
                         return Ok(())
                     },
                     OptionFor::None => ()
@@ -51,6 +53,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         };
                         move_cursor(app, Goto::Index(last_idx), in_root)?;
                     },
+                    'd' => app.option_key = OptionFor::Delete,
                     '/' => app.set_command_line("/", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
@@ -383,14 +386,42 @@ fn delete_operation(app: &mut App,
                     return Ok(())
                 }
 
-                remove_file(app.path.join(&current_file.name))?;
+                match remove_file(app.path.join(&current_file.name)) {
+                    Err(err) if err.kind() == ErrorKind::PermissionDenied => {
+                        ModificationError::PermissionDenied.check(app);
+                        app.option_key = OptionFor::None;
+                        return Ok(())
+                    },
+                    Ok(_) => (),
+                    _ => panic!("Error")
+                }
+
                 let (dir, idx) = app.get_directory_mut();
                 dir.remove(idx.selected().unwrap());
 
                 if dir.is_empty() {
-                }
+                    app.selected_item.current_select(None);
+                    app.selected_item.child_select(None);
+                    // It's impossible that root directory could be empty.
+                    app.child_files.clear();
 
-                if dir.len() - 1 == idx.selected().unwrap() {
+                    if app.file_content.is_some() {
+                        app.file_content = None;
+                    }
+                } else if dir.len() == idx.selected().unwrap() { // There have been an element deleted.
+                    idx.select(Some(idx.selected().unwrap() - 1));
+                    if in_root {
+                        let current_select = app.get_file_saver().unwrap();
+                        app.init_current_files(Some(current_select.name.clone()))?;
+                    } else {
+                        app.init_child_files(None)?;
+                        app.selected_item.child_select(None);
+                    }
+                    app.refresh_select_item(false);
+                } else {
+                    app.init_child_files(None)?;
+                    app.selected_item.child_select(None);
+                    app.refresh_select_item(false);
                 }
             } else {
                 ModificationError::NoSelected.check(app);
@@ -399,5 +430,6 @@ fn delete_operation(app: &mut App,
         _ => ()
     }
 
+    app.option_key = OptionFor::None;
     Ok(())
 }
