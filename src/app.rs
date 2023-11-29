@@ -8,11 +8,12 @@ pub use special_types::*;
 use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
 
-use std::path::{PathBuf, Path};
-use std::{env, fs, io};
-use std::borrow::Cow;
 use std::error;
+use std::borrow::Cow;
+use std::{env, fs, io};
 use std::ops::AddAssign;
+use std::collections::HashMap;
+use std::path::{PathBuf, Path};
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -29,12 +30,18 @@ pub struct App {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: Option<String>,
 
+    // Block
+    pub selected_block: Block,
+
+    pub option_key: OptionFor,       // Use the next key as option.
+    pub marked_files: HashMap<PathBuf, MarkedFiles>,
+
     // When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
-    pub option_key: OptionFor,       // Use the next key as option.
-    pub selected_block: Block,
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
+
+    // Search file
     pub searched_idx: Arc<Mutex<Vec<usize>>>,
 
     pub computer_name: Cow<'static, str>,
@@ -60,7 +67,8 @@ impl Default for App {
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
-            user_name: Cow::from(host_info.1)
+            user_name: Cow::from(host_info.1),
+            marked_files: HashMap::new()
         }
     }
 }
@@ -315,7 +323,7 @@ impl App {
 
         self.command_history.push(format!("/{}", name.clone()));
         // Use this way as we cannot change the selected_block at the same time.
-        let current_files = if self.path.to_str() == Some("/") {
+        let current_files = if self.path.to_string_lossy() == "/" {
             self.parent_files.clone()
         } else {
             self.current_files.clone()
@@ -390,7 +398,7 @@ impl App {
     /// Quit command line selection.
     pub fn quit_command_mode(&mut self) {
         self.selected_block = self::Block::Browser(
-            if self.path.to_str() == Some("/") {
+            if self.path.to_string_lossy() == "/" {
                 true
             } else {
                 false
@@ -494,7 +502,7 @@ impl App {
     }
 
     pub fn get_directory_mut(&mut self) -> (&mut Vec<FileSaver>, &mut ListState) {
-        if self.path.to_str() == Some("/") {
+        if self.path.to_string_lossy() == "/" {
             (&mut self.parent_files, &mut self.selected_item.parent)
         } else {
             (&mut self.current_files, &mut self.selected_item.current)
@@ -502,7 +510,7 @@ impl App {
     }
 
     pub fn get_file_saver(&self) -> Option<&FileSaver> {
-        if self.path.to_str() == Some("/") {
+        if self.path.to_string_lossy() == "/" {
             self.parent_files
                 .get(self.selected_item.parent_selected().unwrap())
         } else {
@@ -516,7 +524,7 @@ impl App {
     }
 
     pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
-        if self.path.to_str() == Some("/") {
+        if self.path.to_string_lossy() == "/" {
             Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
         } else {
             if self.current_files.is_empty() {
@@ -581,6 +589,27 @@ impl App {
 
         Ok(())
     }
+
+    /// Append FILE to marked file list.
+    pub fn append_marked_file<S: Into<String>>(&mut self, file: S) {
+        let path = if self.path.to_string_lossy() == "/" {
+            let current_file = self.get_file_saver().unwrap().name.to_owned();
+            self.path.join(current_file)
+        } else {
+            self.path.to_owned()
+        };
+
+        self.marked_files
+            .entry(path)
+            .or_insert(MarkedFiles::default())
+            .files
+            .push(file.into());
+    }
+
+    // pub fn clear_marked_file(&mut self) {
+    //     self.marked_files.files.clear();
+    //     self.marked_files.operation = FileOperation::None;
+    // }
 }
 
 #[inline]

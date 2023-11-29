@@ -65,7 +65,7 @@ impl FileSaver {
                 };
 
                 FileSaver {
-                    name: file.file_name().to_string_lossy().to_string(),
+                    name: file.file_name().to_string_lossy().into(),
                     size: metadata.len(),
                     is_dir: file_path.is_dir(),
                     dangling_symlink: false,

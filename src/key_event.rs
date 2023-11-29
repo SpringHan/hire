@@ -377,6 +377,7 @@ fn delete_operation(app: &mut App,
             
         },
         'D' => {
+            // TODO: Add support for marked files.
             let current_file = app.get_file_saver().clone();
 
             if let Some(current_file) = current_file {

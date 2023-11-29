@@ -21,6 +21,26 @@ pub enum Block {
     CommandLine(String, CursorPos)
 }
 
+pub enum FileOperation {
+    Delete,
+    Move,
+    None
+}
+
+pub struct MarkedFiles {
+    pub files: Vec<String>,
+    pub operation: FileOperation
+}
+
+impl Default for MarkedFiles {
+    fn default() -> Self {
+        MarkedFiles {
+            files: Vec::new(),
+            operation: FileOperation::None
+        }
+    }
+}
+
 pub struct ItemIndex {
     pub parent: ListState,
     pub current: ListState,
