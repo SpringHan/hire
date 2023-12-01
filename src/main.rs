@@ -32,6 +32,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;
     loop {
+        // NOTE: Debug
+        // use ratatui::text::{Span, Line};
+        // use ratatui::style::{Stylize, Modifier};
+        // use ratatui::widgets::Paragraph;
+        // terminal.draw(|frame| {
+        //     let a = vec![
+        //         Span::raw("Test").add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC),
+        //         Span::raw("Test").add_modifier(Modifier::BOLD),
+        //         Span::raw("Test").add_modifier(Modifier::ITALIC)
+        //     ];
+        //     let b = Line::from(a);
+        //     frame.render_widget(Paragraph::new(b), frame.size());
+        // })?;
+
         terminal.draw(|frame| ui::ui(frame, &mut app))?;
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {

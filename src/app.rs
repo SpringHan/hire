@@ -603,7 +603,7 @@ impl App {
             .entry(path)
             .or_insert(MarkedFiles::default())
             .files
-            .push(file.into());
+            .insert(file.into());
     }
 
     // pub fn clear_marked_file(&mut self) {

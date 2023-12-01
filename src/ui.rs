@@ -1,9 +1,10 @@
 // UI
 
 use crate::App;
-use crate::app::{self, filesaver::FileSaver, CursorPos};
+use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles};
 
 use std::ops::AddAssign;
+use std::collections::HashSet;
 
 use ratatui::{
     Frame,
@@ -66,7 +67,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
         .on_black();
     let parent_items = render_list(
         app.parent_files.iter(),
-        app.selected_item.parent_selected()
+        app.selected_item.parent_selected(),
+        None
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
@@ -95,7 +97,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                     .on_black();
                 let child_items = render_list(
                     app.child_files.iter(),
-                    app.selected_item.child_selected()
+                    app.selected_item.child_selected(),
+                    None
                 );
                 let child_items = List::new(child_items).block(child_block);
 
@@ -113,9 +116,17 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     let current_block = Block::default()
         .borders(Borders::ALL)
         .on_black();
+    let marked_items = if app.path.to_string_lossy() == "/" {
+        let path = app.path
+            .join(&app.get_file_saver().unwrap().name);
+        app.marked_files.get(&path)
+    } else {
+        app.marked_files.get(&app.path)
+    };
     let current_items = render_list(
         app.current_files.iter(),
-        app.selected_item.current_selected()
+        app.selected_item.current_selected(),
+        marked_items
     );
     let current_list = List::new(current_items)
         .block(current_block);
@@ -131,9 +142,10 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 }
 
 /// Create a list of ListItem
-fn render_list(files: std::slice::Iter<'_, FileSaver>,
-               idx: Option<usize>
-) -> Vec<ListItem>
+fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
+                   idx: Option<usize>,
+                   marked_items: Option<&'a MarkedFiles>
+) -> Vec<ListItem<'a>>
 {
     let mut temp_items: Vec<ListItem> = Vec::new();
     if files.len() == 0 {
@@ -146,13 +158,38 @@ fn render_list(files: std::slice::Iter<'_, FileSaver>,
         None
     };
 
+    // Use this method to avoid extra clone.
+    let temp_set: HashSet<String> = HashSet::new();
+    let marked_files = if let Some(item) = marked_items {
+        &item.files
+    } else {
+        &temp_set
+    };
+
     for file in files {
         temp_items.push(
             if let Some(ref mut num) = current_item {
                 match idx {
                     Some(i) => {
                         // Make the style of selected item
-                        if *num == i {
+                        if !marked_files.is_empty() && marked_files.contains(&file.name) {
+                            num.add_assign(1);
+                            ListItem::new(Line::from(
+                                Span::raw(&file.name)
+                                    .bg(if *num == i {
+                                        Color::White
+                                    } else {
+                                        Color::LightYellow
+                                    })
+                                    .fg(if *num == i {
+                                        Color::LightYellow
+                                    } else {
+                                        Color::White
+                                    })
+                                    .add_modifier(Modifier::ITALIC)
+                                    .add_modifier(get_file_font_style(file.is_dir))
+                            ))
+                        } else if *num == i {
                             num.add_assign(1);
                             ListItem::new(Line::from(Span::styled(
                                 &file.name,

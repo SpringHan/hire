@@ -1,5 +1,7 @@
 // Special types used in App structure.
 
+use std::collections::HashSet;
+
 use ratatui::widgets::ListState;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -28,14 +30,14 @@ pub enum FileOperation {
 }
 
 pub struct MarkedFiles {
-    pub files: Vec<String>,
+    pub files: HashSet<String>,
     pub operation: FileOperation
 }
 
 impl Default for MarkedFiles {
     fn default() -> Self {
         MarkedFiles {
-            files: Vec::new(),
+            files: HashSet::new(),
             operation: FileOperation::None
         }
     }
