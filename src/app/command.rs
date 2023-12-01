@@ -7,7 +7,7 @@ use std::{io, fs};
 use std::path::PathBuf;
 
 /// This enum is used for the errors that will not destroy program.
-pub enum ModificationError {
+pub enum OperationError {
     PermissionDenied,
     UnvalidCommand,
     FileExists,
@@ -15,36 +15,36 @@ pub enum ModificationError {
     None
 }
 
-impl ModificationError {
-    /// Check whether the ModificationError is None
+impl OperationError {
+    /// Check whether the OperationError is None
     /// If it's None, return true. Otherwise false.
     pub fn check(self, app: &mut App) -> bool {
         match self {
-            ModificationError::PermissionDenied => {
+            OperationError::PermissionDenied => {
                 app.selected_block = Block::CommandLine(
                     String::from("[Error]: Permission Denied!"),
                     CursorPos::End
                 );
             },
-            ModificationError::UnvalidCommand => {
+            OperationError::UnvalidCommand => {
                 app.selected_block = Block::CommandLine(
                     String::from("[Error]: Unvalid Command!"),
                     CursorPos::End
                 );
             },
-            ModificationError::FileExists => {
+            OperationError::FileExists => {
                 app.selected_block = Block::CommandLine(
                     String::from("[Error]: The File already exists!"),
                     CursorPos::End
                 );
             },
-            ModificationError::NoSelected => {
+            OperationError::NoSelected => {
                 app.selected_block = Block::CommandLine(
-                    String::from("[Error]: No selected item to be operated!"),
+                    String::from("[Error]: No item to be selected and operated!"),
                     CursorPos::End
                 )
             },
-            ModificationError::None => return true
+            OperationError::None => return true
         }
         app.command_error = true;
 
@@ -55,22 +55,22 @@ impl ModificationError {
 pub fn rename_file(path: PathBuf,
                    app: &mut App,
                    new_name: String
-) -> io::Result<ModificationError>
+) -> io::Result<OperationError>
 {
     let file = app.get_file_saver_mut();
     if let None = file {
-        return Ok(ModificationError::NoSelected);
+        return Ok(OperationError::NoSelected);
     }
 
     let file = file.unwrap();
     let is_dir = file.is_dir;
 
     if file.cannot_read || file.read_only() {
-        return Ok(ModificationError::PermissionDenied)
+        return Ok(OperationError::PermissionDenied)
     }
 
     if file.name == new_name {
-        return Ok(ModificationError::FileExists)
+        return Ok(OperationError::FileExists)
     }
 
     let origin_file = path.join(&file.name);
@@ -93,5 +93,5 @@ pub fn rename_file(path: PathBuf,
     *directory = new_files;
     index.select(Some(new_index));
 
-    Ok(ModificationError::None)
+    Ok(OperationError::None)
 }

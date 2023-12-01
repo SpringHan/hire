@@ -2,12 +2,12 @@
 
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor};
-use crate::app::command::ModificationError;
+use crate::app::command::OperationError;
 
 use std::mem::swap;
 use std::error::Error;
 use std::path::PathBuf;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::ops::{SubAssign, AddAssign};
 
 use crossterm::event::KeyCode;
@@ -59,6 +59,8 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     'K' => app.prev_candidate()?,
                     'a' => append_file_name(app, false),
                     'A' => append_file_name(app, true),
+                    ' ' => mark_operation(app, true, in_root)?,
+                    'm' => mark_operation(app, false, in_root)?,
                     _ => ()
                 }
             } else {
@@ -342,7 +344,7 @@ fn append_file_name(app: &mut App, to_end: bool) {
             }
         );
     } else {
-        ModificationError::NoSelected.check(app);
+        OperationError::NoSelected.check(app);
     }
 }
 
@@ -370,67 +372,173 @@ fn delete_operation(app: &mut App,
                     in_root: bool
 ) -> Result<(), Box<dyn Error>>
 {
-    use std::fs::remove_file;
-
     match key {
         'd' => {
+            // NOTE: Check whether the target dir is accessible firstly.
             
         },
         'D' => {
-            // TODO: Add support for marked files.
-            let current_file = app.get_file_saver().clone();
+            if !app.marked_files.is_empty() {
+                let current_dir = app.current_path();
+                let marked_files = app.marked_files.clone();
+                for (path, files) in marked_files.into_iter() {
+                    delete_file(
+                        app,
+                        path,
+                        files.files.into_iter(),
+                        None,
+                        in_root
+                    )?;
+                }
+                app.goto_dir(current_dir)?;
 
-            if let Some(current_file) = current_file {
+                app.option_key = OptionFor::None;
+                return Ok(())
+            }
+
+            let current_file = app.get_file_saver();
+            if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
-                    ModificationError::PermissionDenied.check(app);
+                    OperationError::PermissionDenied.check(app);
                     app.option_key = OptionFor::None;
                     return Ok(())
                 }
 
-                match remove_file(app.path.join(&current_file.name)) {
-                    Err(err) if err.kind() == ErrorKind::PermissionDenied => {
-                        ModificationError::PermissionDenied.check(app);
-                        app.option_key = OptionFor::None;
-                        return Ok(())
-                    },
-                    Ok(_) => (),
-                    _ => panic!("Error")
-                }
-
-                let (dir, idx) = app.get_directory_mut();
-                dir.remove(idx.selected().unwrap());
-
-                if dir.is_empty() {
-                    app.selected_item.current_select(None);
-                    app.selected_item.child_select(None);
-                    // It's impossible that root directory could be empty.
-                    app.child_files.clear();
-
-                    if app.file_content.is_some() {
-                        app.file_content = None;
-                    }
-                } else if dir.len() == idx.selected().unwrap() { // There have been an element deleted.
-                    idx.select(Some(idx.selected().unwrap() - 1));
-                    if in_root {
-                        let current_select = app.get_file_saver().unwrap();
-                        app.init_current_files(Some(current_select.name.clone()))?;
-                    } else {
-                        app.init_child_files(None)?;
-                        app.selected_item.child_select(None);
-                    }
-                    app.refresh_select_item(false);
-                } else {
-                    app.init_child_files(None)?;
-                    app.selected_item.child_select(None);
-                    app.refresh_select_item(false);
-                }
+                delete_file(
+                    app,
+                    app.current_path(),
+                    vec![current_file.name].into_iter(),
+                    Some(current_file.is_dir),
+                    in_root
+                )?;
             } else {
-                ModificationError::NoSelected.check(app);
+                OperationError::NoSelected.check(app);
             }
         },
         _ => ()
     }
 
     app.option_key = OptionFor::None;
+    Ok(())
+}
+
+/// Execute mark operation.
+/// single is a boolean which indicates whether to mark all files in current dir.
+pub fn mark_operation(app: &mut App,
+                      single: bool,
+                      in_root: bool
+) -> Result<(), Box<dyn Error>>
+{
+    if single {
+        let selected_file = app.get_file_saver();
+        if let Some(selected_file) = selected_file {
+            if app.marked_file_contains(&selected_file.name) {
+                app.remove_marked_file(selected_file.name.to_owned());
+            } else {
+                app.append_marked_file(selected_file.name.to_owned());
+            }
+            move_cursor(app, Goto::Down, in_root)?;
+            return Ok(())
+        }
+    } else if !app.current_files.is_empty() {
+        // NOTE: Maybe append all files to marked files could be implied in app method.
+        if app.marked_file_contains_path() {
+            app.clear_path_marked_files();
+        } else {
+            app.append_marked_files(app.current_files.to_owned().into_iter());
+        }
+        return Ok(())
+    }
+
+    OperationError::NoSelected.check(app);
+    Ok(())
+}
+
+/// When deleting files from marked list, DIR_INFO should be None.
+fn delete_file<I>(app: &mut App,
+                  path: PathBuf,
+                  file_iter: I,
+                  dir_info: Option<bool>,
+                  in_root: bool
+) -> io::Result<()>
+where I: Iterator<Item = String>
+{
+    use std::fs::{remove_file, remove_dir_all, metadata};
+
+    for file in file_iter {
+        let file = path.join(file);
+        let mut is_dir = false;
+        if dir_info.is_none() {
+            match metadata(&file) {
+                Ok(metadata) => is_dir = metadata.is_dir(),
+                Err(other) => {
+                    if other.kind() == ErrorKind::PermissionDenied {
+                        continue;
+                    } else if other.kind() != ErrorKind::NotFound {
+                        return Err(other)
+                    }
+                    // No need to reset is_dir. See filesaver 'metadata'
+                }
+            }
+        } else {
+            is_dir = dir_info.unwrap();
+        }
+
+        let remove_result = if is_dir {
+            remove_dir_all(file)
+        } else {
+            remove_file(file)
+        };
+
+        match remove_result {
+            Err(err) => {
+                if err.kind() == ErrorKind::PermissionDenied && dir_info.is_some() {
+                    OperationError::PermissionDenied.check(app);
+                } else if err.kind() != ErrorKind::NotFound {
+                    return Err(err)
+                }
+                // When the file does not exist, maybe the path is deleted.
+                // If it's true, do not return error for stably running.
+                if dir_info.is_some() {
+                    app.option_key = OptionFor::None;
+                    return Ok(())
+                }
+            },
+            Ok(_) => (),
+        }
+    }
+
+    if dir_info.is_none() {
+        return Ok(())
+    }
+
+    let (dir, idx) = app.get_directory_mut();
+    dir.remove(idx.selected().unwrap());
+
+    if dir.is_empty() {
+        app.selected_item.current_select(None);
+        app.selected_item.child_select(None);
+        // It's impossible that root directory could be empty.
+        app.child_files.clear();
+
+        if app.file_content.is_some() {
+            app.file_content = None;
+        }
+    } else if dir.len() == idx.selected().unwrap() { // There have been an element deleted.
+        idx.select(Some(idx.selected().unwrap() - 1));
+        if in_root {
+            let current_select = app.get_file_saver().unwrap();
+            app.init_current_files(Some(current_select.name.clone()))?;
+        } else {
+            app.init_child_files(None)?;
+            app.selected_item.child_select(None);
+        }
+        app.refresh_select_item(false);
+    } else {
+        app.init_child_files(None)?;
+        app.selected_item.child_select(None);
+        app.refresh_select_item(false);
+    }
+
     Ok(())
 }

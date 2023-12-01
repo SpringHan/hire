@@ -23,12 +23,14 @@ pub enum Block {
     CommandLine(String, CursorPos)
 }
 
+#[derive(Clone)]
 pub enum FileOperation {
     Delete,
     Move,
     None
 }
 
+#[derive(Clone)]
 pub struct MarkedFiles {
     pub files: HashSet<String>,
     pub operation: FileOperation

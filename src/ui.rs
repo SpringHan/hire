@@ -173,22 +173,23 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                     Some(i) => {
                         // Make the style of selected item
                         if !marked_files.is_empty() && marked_files.contains(&file.name) {
-                            num.add_assign(1);
                             ListItem::new(Line::from(
                                 Span::raw(&file.name)
-                                    .bg(if *num == i {
-                                        Color::White
-                                    } else {
-                                        Color::LightYellow
-                                    })
                                     .fg(if *num == i {
-                                        Color::LightYellow
+                                        Color::Black
                                     } else {
-                                        Color::White
+                                        Color::LightYellow
                                     })
-                                    .add_modifier(Modifier::ITALIC)
                                     .add_modifier(get_file_font_style(file.is_dir))
+                                    .add_modifier(Modifier::ITALIC)
                             ))
+                                .bg(if *num == i {
+                                    num.add_assign(1);
+                                    Color::LightYellow
+                                } else {
+                                    num.add_assign(1);
+                                    Color::Black
+                                })
                         } else if *num == i {
                             num.add_assign(1);
                             ListItem::new(Line::from(Span::styled(

@@ -73,7 +73,17 @@ impl Default for App {
     }
 }
 
+// Basic
 impl App {
+    pub fn current_path(&self) -> PathBuf {
+        if self.path.to_string_lossy() == "/" {
+            let current_file = self.get_file_saver().unwrap().name.to_owned();
+            self.path.join(current_file)
+        } else {
+            self.path.to_owned()
+        }
+    }
+
     /// Initialize parent, current and child files.
     pub fn init_all_files(&mut self) -> io::Result<()> {
         // Parent files
@@ -91,7 +101,10 @@ impl App {
         }
 
         // Child Files
-        let current_selected_file = self.current_files.get(0).unwrap().clone();
+        let current_selected_file = self.current_files
+            .get(0)
+            .unwrap()
+            .clone();
         self.init_child_files(
             Some(&current_selected_file)
         )?;
@@ -214,44 +227,73 @@ impl App {
         Ok(())
     }
 
+    pub fn get_directory_mut(&mut self) -> (&mut Vec<FileSaver>, &mut ListState) {
+        if self.path.to_string_lossy() == "/" {
+            (&mut self.parent_files, &mut self.selected_item.parent)
+        } else {
+            (&mut self.current_files, &mut self.selected_item.current)
+        }
+    }
+
+    pub fn get_file_saver(&self) -> Option<&FileSaver> {
+        if self.path.to_string_lossy() == "/" {
+            self.parent_files
+                .get(self.selected_item.parent_selected().unwrap())
+        } else {
+            if self.current_files.is_empty() {
+                None
+            } else {
+                let current_select = self.selected_item.current_selected();
+                if let Some(idx) = current_select {
+                    self.current_files.get(idx)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
+        if self.path.to_string_lossy() == "/" {
+            Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
+        } else {
+            if self.current_files.is_empty() {
+                None
+            } else {
+                Some(&mut self.current_files[self.selected_item.current_selected().unwrap()])
+            }
+        }
+    }
+}
+
+// File Content
+impl App {
     pub fn set_file_content(&mut self) -> io::Result<()> {
         use io::Read;
 
-        let file_path = self.path.join(
-            PathBuf::from(
-                if let Block::Browser(true) = self.selected_block {
-                    &self.parent_files.get(
-                        self.selected_item.parent_selected().unwrap()
-                    )
-                        .unwrap()
-                        .name
-                } else {
-                    &self.current_files.get(
-                        self.selected_item.current_selected().unwrap()
-                    )
-                        .unwrap()
-                        .name
-                }
-            )
-        );
-        let mut content = String::new();
-        match fs::File::open(file_path) {
-            Err(e) => {
-                if e.kind() != io::ErrorKind::PermissionDenied {
-                    return Err(e)
-                }
-                content = String::from("Permission Denied");
-            },
-            Ok(ref mut file) => {
-                if let Err(e) = file.read_to_string(&mut content) {
-                    if e.kind() != io::ErrorKind::InvalidData {
+        let selected_file = self.get_file_saver();
+        if let Some(selected_file) = selected_file {
+            let file_path = self.current_path()
+                .join(selected_file.name.to_owned());
+            let mut content = String::new();
+            match fs::File::open(file_path) {
+                Err(e) => {
+                    if e.kind() != io::ErrorKind::PermissionDenied {
                         return Err(e)
                     }
-                    content = String::from("Non-UTF-8 Data");
-                }
-            },
-        };
-        self.file_content = Some(content);
+                    content = String::from("Permission Denied");
+                },
+                Ok(ref mut file) => {
+                    if let Err(e) = file.read_to_string(&mut content) {
+                        if e.kind() != io::ErrorKind::InvalidData {
+                            return Err(e)
+                        }
+                        content = String::from("Non-UTF-8 Data");
+                    }
+                },
+            };
+            self.file_content = Some(content);
+        }
 
         Ok(())
     }
@@ -266,25 +308,7 @@ impl App {
             }
             Err(err) => {
                 if err.kind() == io::ErrorKind::PermissionDenied {
-                    let temp_file = if let
-                        Block::Browser(true) = self.selected_block
-                    {
-                        self.parent_files
-                            .get_mut(
-                                self.selected_item
-                                    .parent_selected()
-                                    .unwrap()
-                            )
-                            .unwrap()
-                    } else {
-                        self.current_files
-                            .get_mut(
-                                self.selected_item
-                                    .current_selected()
-                                    .unwrap()
-                            )
-                            .unwrap()
-                    };
+                    let temp_file = self.get_file_saver_mut().unwrap();
                     temp_file.cannot_read = true;
                     Ok(Vec::new())
                 } else {
@@ -293,7 +317,10 @@ impl App {
             },
         }
     }
+}
 
+// Command Line
+impl App {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
         self.selected_block = Block::CommandLine(content.into(), pos);
     }
@@ -314,87 +341,7 @@ impl App {
             origin.push(content);
         }
     }
-
-    pub fn file_search(&mut self, name: String) {
-        let idx = Arc::clone(&self.searched_idx);
-        if !idx.lock().unwrap().is_empty() {
-            idx.lock().unwrap().clear();
-        }
-
-        self.command_history.push(format!("/{}", name.clone()));
-        // Use this way as we cannot change the selected_block at the same time.
-        let current_files = if self.path.to_string_lossy() == "/" {
-            self.parent_files.clone()
-        } else {
-            self.current_files.clone()
-        };
-
-        thread::spawn(move || {
-            let mut i = 0;
-            let name = name.to_lowercase();
-            for file in current_files.iter() {
-                if file.name.to_lowercase().contains(&name) {
-                    idx.lock().unwrap().push(i);
-                }
-                i += 1;
-            }
-        });
-    }
-
-    pub fn prev_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
-        self.move_candidate(false)?;
-        Ok(())
-    }
-
-    pub fn next_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
-        self.move_candidate(true)?;
-        Ok(())
-    }
-
-    /// Move current cursor to next/previous searched file name.
-    /// When NEXT is true, searching the next. Otherwise the previous.
-    fn move_candidate(&mut self,
-                      next: bool
-    ) -> Result<(), Box<dyn error::Error>> {
-        use crate::key_event::move_cursor;
-
-        let candidates = Arc::clone(&self.searched_idx);
-        if candidates.lock().unwrap().is_empty() {
-            return Ok(())
-        }
-
-        let in_root = if let Block::Browser(true) = self.selected_block {
-            true
-        } else {
-            false
-        };
-        let current_idx = if in_root {
-            self.selected_item.parent.selected().unwrap()
-        } else {
-            self.selected_item.current.selected().unwrap()
-        };
-
-        let target = if next {
-            get_search_index(
-                candidates.lock().unwrap().iter(),
-                current_idx,
-                true
-            )
-        } else {
-            get_search_index(
-                candidates.lock().unwrap().iter().rev(),
-                current_idx,
-                false
-            )
-        };
-
-        if let Some(idx) = target {
-            move_cursor(self, Goto::Index(idx), in_root)?;
-        }
-
-        Ok(())
-    }
-
+    
     /// Quit command line selection.
     pub fn quit_command_mode(&mut self) {
         self.selected_block = self::Block::Browser(
@@ -413,11 +360,7 @@ impl App {
             self.command_error = false;
         }
     }
-
-    pub fn clean_search_idx(&mut self) {
-        self.searched_idx.lock().unwrap().clear();
-    }
-
+    
     /// The function will change content in command line.
     /// In the meanwhile, adjusting current command index.
     pub fn command_select(&mut self, direct: Goto) {
@@ -500,41 +443,7 @@ impl App {
             }
         }
     }
-
-    pub fn get_directory_mut(&mut self) -> (&mut Vec<FileSaver>, &mut ListState) {
-        if self.path.to_string_lossy() == "/" {
-            (&mut self.parent_files, &mut self.selected_item.parent)
-        } else {
-            (&mut self.current_files, &mut self.selected_item.current)
-        }
-    }
-
-    pub fn get_file_saver(&self) -> Option<&FileSaver> {
-        if self.path.to_string_lossy() == "/" {
-            self.parent_files
-                .get(self.selected_item.parent_selected().unwrap())
-        } else {
-            if self.current_files.is_empty() {
-                None
-            } else {
-                self.current_files
-                    .get(self.selected_item.current_selected().unwrap())
-            }
-        }
-    }
-
-    pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
-        if self.path.to_string_lossy() == "/" {
-            Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
-        } else {
-            if self.current_files.is_empty() {
-                None
-            } else {
-                Some(&mut self.current_files[self.selected_item.current_selected().unwrap()])
-            }
-        }
-    }
-
+    
     pub fn command_parse(&mut self) -> io::Result<()> {
         if self.command_error {
             return Ok(self.quit_command_mode())
@@ -558,7 +467,7 @@ impl App {
                         file_name
                     )?
                 },
-                _ => command::ModificationError::UnvalidCommand
+                _ => command::OperationError::UnvalidCommand
             };
 
             // When result of check is false, there would be errors, which should be displayed.
@@ -569,13 +478,100 @@ impl App {
 
         Ok(())
     }
+}
 
-    pub fn goto_dir(&mut self, dir: &str) -> io::Result<()> {
-        self.path = PathBuf::from(dir);
+// File Search
+impl App {
+    pub fn file_search(&mut self, name: String) {
+        let idx = Arc::clone(&self.searched_idx);
+        if !idx.lock().unwrap().is_empty() {
+            idx.lock().unwrap().clear();
+        }
+
+        self.command_history.push(format!("/{}", name.clone()));
+        // Use this way as we cannot change the selected_block at the same time.
+        let current_files = self.get_directory_mut().0.clone();
+
+        thread::spawn(move || {
+            let mut i = 0;
+            let name = name.to_lowercase();
+            for file in current_files.iter() {
+                if file.name.to_lowercase().contains(&name) {
+                    idx.lock().unwrap().push(i);
+                }
+                i += 1;
+            }
+        });
+    }
+
+    pub fn prev_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+        self.move_candidate(false)?;
+        Ok(())
+    }
+
+    pub fn next_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+        self.move_candidate(true)?;
+        Ok(())
+    }
+
+    /// Move current cursor to next/previous searched file name.
+    /// When NEXT is true, searching the next. Otherwise the previous.
+    fn move_candidate(&mut self,
+                      next: bool
+    ) -> Result<(), Box<dyn error::Error>> {
+        use crate::key_event::move_cursor;
+
+        let candidates = Arc::clone(&self.searched_idx);
+        if candidates.lock().unwrap().is_empty() {
+            return Ok(())
+        }
+
+        let in_root = if let Block::Browser(true) = self.selected_block {
+            true
+        } else {
+            false
+        };
+        let current_idx = if in_root {
+            self.selected_item.parent.selected().unwrap()
+        } else {
+            self.selected_item.current.selected().unwrap()
+        };
+
+        let target = if next {
+            get_search_index(
+                candidates.lock().unwrap().iter(),
+                current_idx,
+                true
+            )
+        } else {
+            get_search_index(
+                candidates.lock().unwrap().iter().rev(),
+                current_idx,
+                false
+            )
+        };
+
+        if let Some(idx) = target {
+            move_cursor(self, Goto::Index(idx), in_root)?;
+        }
+
+        Ok(())
+    }
+    
+    pub fn clean_search_idx(&mut self) {
+        self.searched_idx.lock().unwrap().clear();
+    }
+}
+
+// Other Action
+impl App {
+    pub fn goto_dir<P: AsRef<Path>>(&mut self, dir: P) -> io::Result<()> {
+        self.path = PathBuf::from(dir.as_ref());
         self.selected_item = ItemIndex::default();
 
-        if dir == "/" {
+        if dir.as_ref().to_string_lossy() == "/" {
             self.file_content = None;
+            self.child_files.clear();
             self.selected_block = Block::Browser(true);
 
             self.init_parent_files()?;
@@ -589,15 +585,10 @@ impl App {
 
         Ok(())
     }
-
+    
     /// Append FILE to marked file list.
     pub fn append_marked_file<S: Into<String>>(&mut self, file: S) {
-        let path = if self.path.to_string_lossy() == "/" {
-            let current_file = self.get_file_saver().unwrap().name.to_owned();
-            self.path.join(current_file)
-        } else {
-            self.path.to_owned()
-        };
+        let path = self.current_path();
 
         self.marked_files
             .entry(path)
@@ -606,10 +597,45 @@ impl App {
             .insert(file.into());
     }
 
-    // pub fn clear_marked_file(&mut self) {
-    //     self.marked_files.files.clear();
-    //     self.marked_files.operation = FileOperation::None;
-    // }
+    pub fn append_marked_files<I>(&mut self, iter: I)
+    where I: Iterator<Item = FileSaver>
+    {
+        let path = self.current_path();
+
+        let temp_set = self.marked_files
+            .entry(path)
+            .or_insert(MarkedFiles::default());
+        for file in iter {
+            temp_set.files.insert(file.name);
+        }
+    }
+
+    pub fn marked_file_contains<S: Into<String>>(&self, file: S) -> bool {
+        let path = self.current_path();
+        if let Some(marked_files) = self.marked_files.get(&path) {
+            return marked_files.files.contains(&file.into())
+        }
+
+        false
+    }
+
+    pub fn remove_marked_file<S: Into<String>>(&mut self, file: S) {
+        let path = self.current_path();
+        if let Some(marked_files) = self.marked_files.get_mut(&path) {
+            marked_files.files.remove(&file.into());
+        }
+    }
+
+    pub fn marked_file_contains_path(&self) -> bool {
+        let path = self.current_path();
+        self.marked_files.contains_key(&path)
+    }
+
+    /// Clear marked files in current directory.
+    pub fn clear_path_marked_files(&mut self) {
+        let path = self.current_path();
+        self.marked_files.remove(&path);
+    }
 }
 
 #[inline]
