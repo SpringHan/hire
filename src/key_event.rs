@@ -61,6 +61,14 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     'A' => append_file_name(app, true),
                     ' ' => mark_operation(app, true, in_root)?,
                     'm' => mark_operation(app, false, in_root)?,
+                    '+' => app.set_command_line(
+                        ":create_dir ",
+                        CursorPos::End
+                    ),
+                    '=' => app.set_command_line(
+                        ":create_file ",
+                        CursorPos::End
+                    ),
                     _ => ()
                 }
             } else {
@@ -366,7 +374,6 @@ fn goto_operation(app: &mut App,
     Ok(())
 }
 
-// TODO: Cannot be used.
 fn delete_operation(app: &mut App,
                     key: char,
                     in_root: bool
@@ -391,6 +398,7 @@ fn delete_operation(app: &mut App,
                     )?;
                 }
                 app.goto_dir(current_dir)?;
+                app.marked_files.clear();
 
                 app.option_key = OptionFor::None;
                 return Ok(())
@@ -455,6 +463,7 @@ pub fn mark_operation(app: &mut App,
 }
 
 /// When deleting files from marked list, DIR_INFO should be None.
+/// Otherwise dir_info should be the result of is_dir wrapped with Some.
 fn delete_file<I>(app: &mut App,
                   path: PathBuf,
                   file_iter: I,
@@ -528,11 +537,17 @@ where I: Iterator<Item = String>
         idx.select(Some(idx.selected().unwrap() - 1));
         if in_root {
             let current_select = app.get_file_saver().unwrap();
-            app.init_current_files(Some(current_select.name.clone()))?;
+            if current_select.is_dir {
+                app.init_current_files(Some(current_select.name.clone()))?;
+            } else {
+                app.selected_item.current_select(None);
+                app.current_files.clear();
+            }
         } else {
             app.init_child_files(None)?;
             app.selected_item.child_select(None);
         }
+        app.init_child_files(None)?;
         app.refresh_select_item(false);
     } else {
         app.init_child_files(None)?;

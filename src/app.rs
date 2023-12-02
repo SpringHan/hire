@@ -200,9 +200,15 @@ impl App {
         let current_select = if let Some(file) = current_select {
             file
         } else {
-            self.current_files.get(
-                self.selected_item.current_selected().unwrap()
-            ).unwrap()
+            let file_saver = self.current_files.get(
+                self.selected_item.current_selected()
+                    .expect("Failed to initialize child files.")
+            );
+            if let Some(file_saver) = file_saver {
+                file_saver
+            } else {
+                return Ok(())
+            }
         };
 
         if current_select.is_dir {
@@ -467,6 +473,26 @@ impl App {
                         file_name
                     )?
                 },
+                ":create_file" => {
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files.split(",").collect();
+                    command::create_file(
+                        self,
+                        files.into_iter(),
+                        false
+                    )?
+                },
+                ":create_dir" => {
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files.split(",").collect();
+                    command::create_file(
+                        self,
+                        files.into_iter(),
+                        true
+                    )?
+                },
                 _ => command::OperationError::UnvalidCommand
             };
 
@@ -623,6 +649,10 @@ impl App {
         let path = self.current_path();
         if let Some(marked_files) = self.marked_files.get_mut(&path) {
             marked_files.files.remove(&file.into());
+
+            if marked_files.files.is_empty() {
+                self.marked_files.remove(&path);
+            }
         }
     }
 
@@ -641,7 +671,11 @@ impl App {
 #[inline]
 fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     match ele {
-        Ok(x) => FileSaver::new(x),
+        Ok(x) => FileSaver::new(
+            x.file_name().to_string_lossy(),
+            x.path(),
+            None
+        ),
         Err(_) => panic!("Cannot get a file with error!")
     }
 }

@@ -4,6 +4,7 @@ use std::io;
 use std::time::SystemTime;
 use std::path::PathBuf;
 use std::fs::{self, Permissions};
+
 use ratatui::{
     text::Span,
     style::Stylize
@@ -39,20 +40,29 @@ impl Default for FileSaver {
 }
 
 impl FileSaver {
-    pub fn new(file: fs::DirEntry) -> Self {
-        let file_path = file.path();
-        match fs::metadata(&file_path) {
+    /// FILE_PATH is the full path of file.
+    pub fn new<S, P>(file_name: S,
+                     file_path: P,
+                     meta: Option<io::Result<fs::Metadata>>
+    ) -> Self
+    where S: Into<String>,
+          P: AsRef<std::path::Path>
+    {
+        let meta = if let
+            Some(metadata) = meta
+        {
+            metadata
+        } else {
+            fs::metadata(&file_path)  
+        };
+        match meta {
             Err(e) => {
                 match e.kind() {
                     io::ErrorKind::NotFound => {
-                        FileSaver::default().dangling_symlink(
-                            file.file_name().to_string_lossy()
-                        )
+                        FileSaver::default().dangling_symlink(file_name)
                     },
                     io::ErrorKind::PermissionDenied => {
-                        FileSaver::default().cannot_read(
-                            file.file_name().to_string_lossy()
-                        )
+                        FileSaver::default().cannot_read(file_name)
                     },
                     _ => panic!("Cannot get metadata of file!")
                 }
@@ -65,9 +75,9 @@ impl FileSaver {
                 };
 
                 FileSaver {
-                    name: file.file_name().to_string_lossy().into(),
+                    name: file_name.into(),
                     size: metadata.len(),
-                    is_dir: file_path.is_dir(),
+                    is_dir: metadata.is_dir(),
                     dangling_symlink: false,
                     symlink_file,
                     cannot_read: false,
@@ -77,21 +87,20 @@ impl FileSaver {
                     ),
                     permissions: Some(metadata.permissions())
                 }
-
             }
         }
     }
 
-    fn dangling_symlink<T: ToString>(self, name: T) -> Self {
+    fn dangling_symlink<T: Into<String>>(self, name: T) -> Self {
         let mut temp = self;
-        temp.name = name.to_string();
+        temp.name = name.into();
         temp.dangling_symlink = true;
         temp
     }
 
-    fn cannot_read<T: ToString>(self, name: T) -> Self {
+    fn cannot_read<T: Into<String>>(self, name: T) -> Self {
         let mut temp = self;
-        temp.name = name.to_string();
+        temp.name = name.into();
         temp.cannot_read = true;
         temp
     }
