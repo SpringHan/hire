@@ -1,7 +1,7 @@
 // Key Event
 
 use crate::App;
-use crate::app::{self, CursorPos, OptionFor};
+use crate::app::{self, CursorPos, OptionFor, FileOperation};
 use crate::app::command::OperationError;
 
 use std::mem::swap;
@@ -100,7 +100,12 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                 app::Block::CommandLine(_, _) => {
                     app.quit_command_mode();
                 },
-                _ => ()
+                _ => {
+                    if !app.marked_files.is_empty() {
+                        app.marked_files.clear();
+                        app.marked_operation = FileOperation::None;
+                    }
+                }
             }
         },
 
@@ -382,7 +387,18 @@ fn delete_operation(app: &mut App,
     match key {
         'd' => {
             // NOTE: Check whether the target dir is accessible firstly.
-            
+            if app.marked_files.is_empty() {
+                let current_file = app.get_file_saver();
+                if let Some(current_file) = current_file {
+                    app.append_marked_file(current_file.name.to_owned());
+                } else {
+                    OperationError::NoSelected.check(app);
+                    app.option_key = OptionFor::None;
+                    return Ok(())
+                }
+            }
+
+            app.marked_operation = FileOperation::Move;
         },
         'D' => {
             if !app.marked_files.is_empty() {

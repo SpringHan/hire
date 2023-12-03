@@ -34,6 +34,7 @@ pub struct App {
     pub selected_block: Block,
 
     pub option_key: OptionFor,       // Use the next key as option.
+    pub marked_operation: FileOperation,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
     // When command_error is true, the content in command line will be displayed in red.
@@ -68,7 +69,8 @@ impl Default for App {
             selected_block: Block::Browser(false),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1),
-            marked_files: HashMap::new()
+            marked_files: HashMap::new(),
+            marked_operation: FileOperation::None
         }
     }
 }

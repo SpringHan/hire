@@ -23,9 +23,9 @@ pub enum Block {
     CommandLine(String, CursorPos)
 }
 
-#[derive(Clone)]
+/// The Move operation includes the move of file & the creation of symbolic link of file.
+#[derive(Clone, Copy, PartialEq)]
 pub enum FileOperation {
-    Delete,
     Move,
     None
 }
@@ -33,14 +33,12 @@ pub enum FileOperation {
 #[derive(Clone)]
 pub struct MarkedFiles {
     pub files: HashSet<String>,
-    pub operation: FileOperation
 }
 
 impl Default for MarkedFiles {
     fn default() -> Self {
         MarkedFiles {
-            files: HashSet::new(),
-            operation: FileOperation::None
+            files: HashSet::new()
         }
     }
 }

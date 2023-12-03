@@ -1,7 +1,7 @@
 // UI
 
 use crate::App;
-use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles};
+use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles, FileOperation};
 
 use std::ops::AddAssign;
 use std::collections::HashSet;
@@ -68,7 +68,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     let parent_items = render_list(
         app.parent_files.iter(),
         app.selected_item.parent_selected(),
-        None
+        None,
+        FileOperation::None
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
@@ -98,7 +99,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                 let child_items = render_list(
                     app.child_files.iter(),
                     app.selected_item.child_selected(),
-                    None
+                    None,
+                    FileOperation::None
                 );
                 let child_items = List::new(child_items).block(child_block);
 
@@ -126,7 +128,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     let current_items = render_list(
         app.current_files.iter(),
         app.selected_item.current_selected(),
-        marked_items
+        marked_items,
+        app.marked_operation
     );
     let current_list = List::new(current_items)
         .block(current_block);
@@ -144,7 +147,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 /// Create a list of ListItem
 fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                    idx: Option<usize>,
-                   marked_items: Option<&'a MarkedFiles>
+                   marked_items: Option<&'a MarkedFiles>,
+                   marked_operation: FileOperation
 ) -> Vec<ListItem<'a>>
 {
     let mut temp_items: Vec<ListItem> = Vec::new();
@@ -160,7 +164,11 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
 
     // Use this method to avoid extra clone.
     let temp_set: HashSet<String> = HashSet::new();
+    let mut to_be_moved = false;
     let marked_files = if let Some(item) = marked_items {
+        if marked_operation == FileOperation::Move {
+            to_be_moved = true;
+        }
         &item.files
     } else {
         &temp_set
@@ -172,7 +180,7 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                 match idx {
                     Some(i) => {
                         // Make the style of selected item
-                        if !marked_files.is_empty() && marked_files.contains(&file.name) {
+                        if marked_files.contains(&file.name) {
                             ListItem::new(Line::from(
                                 Span::raw(&file.name)
                                     .fg(if *num == i {
@@ -181,7 +189,11 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                                         Color::LightYellow
                                     })
                                     .add_modifier(get_file_font_style(file.is_dir))
-                                    .add_modifier(Modifier::ITALIC)
+                                    .add_modifier(if to_be_moved {
+                                        Modifier::ITALIC
+                                    } else {
+                                        Modifier::empty()
+                                    })
                             ))
                                 .bg(if *num == i {
                                     num.add_assign(1);
