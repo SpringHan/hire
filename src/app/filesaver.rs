@@ -127,10 +127,10 @@ impl FileSaver {
     }
 
     pub fn modified_span(&self) -> Span {
-        use chrono::{DateTime, Utc};
+        use chrono::{DateTime, Local};
 
         if let Some(time) = self.modified_time {
-            let datetime: DateTime<Utc> = time.into();
+            let datetime: DateTime<Local> = time.into();
             Span::raw(datetime.format("%Y-%m-%d %H:%M").to_string())
         } else {
             Span::raw("")

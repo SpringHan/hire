@@ -1,12 +1,13 @@
 // Key Event
 
 use crate::App;
-use crate::app::{self, CursorPos, OptionFor, FileOperation};
+use crate::app::{self, CursorPos, OptionFor, FileOperation, MarkedFiles};
 use crate::app::command::OperationError;
 
+use std::fs;
 use std::mem::swap;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::io::{self, ErrorKind};
 use std::ops::{SubAssign, AddAssign};
 
@@ -399,6 +400,7 @@ fn delete_operation(app: &mut App,
             }
 
             app.marked_operation = FileOperation::Move;
+            move_cursor(app, Goto::Down, in_root)?;
         },
         'D' => {
             if !app.marked_files.is_empty() {
@@ -569,6 +571,64 @@ where I: Iterator<Item = String>
         app.init_child_files(None)?;
         app.selected_item.child_select(None);
         app.refresh_select_item(false);
+    }
+
+    Ok(())
+}
+
+pub fn paste_operation(app: &mut App,
+                       key: char,
+                       in_root: bool
+) -> Result<(), Box<dyn Error>>
+{
+    if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
+        OperationError::NoSelected.check(app);
+        app.option_key = OptionFor::None;
+        return Ok(())
+    }
+
+    let current_dir = app.current_path();
+
+    match key {
+        'p' => {
+        },
+        's' => {
+        },
+        'c' => {
+        },
+        'o' => {
+        },
+        'O' => {
+        },
+        _ => ()
+    }
+
+    app.option_key = OptionFor::None;
+    Ok(())
+}
+
+fn paste_files<I, P>(app: &mut App,
+                     file_iter: I,
+                     target_path: P,
+                     overwrite: bool
+) -> io::Result<()>
+where
+    I: Iterator<Item = (PathBuf, MarkedFiles)>,
+    P: AsRef<Path>
+{
+    for (path, files) in file_iter {
+        for file in files.files.into_iter() {
+            match fs::copy(
+                path.join(&file),
+                target_path.as_ref().join(file)
+            )
+            {
+                Ok(_) => {
+                },
+                Err(err) => {
+                }
+            }
+        }
     }
 
     Ok(())
