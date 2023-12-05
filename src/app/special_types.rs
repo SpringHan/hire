@@ -1,6 +1,6 @@
 // Special types used in App structure.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use ratatui::widgets::ListState;
 
@@ -32,13 +32,13 @@ pub enum FileOperation {
 
 #[derive(Clone)]
 pub struct MarkedFiles {
-    pub files: HashSet<String>,
+    pub files: HashMap<String, bool>,
 }
 
 impl Default for MarkedFiles {
     fn default() -> Self {
         MarkedFiles {
-            files: HashSet::new()
+            files: HashMap::new()
         }
     }
 }

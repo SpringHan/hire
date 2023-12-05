@@ -10,3 +10,4 @@ ratatui = "0.24"
 crossterm = "0.26"
 chrono = { version = "0.4.31", features = ["alloc", "std"] }
 file-size = "1.0.3"
+copy_dir = "0.1.3"

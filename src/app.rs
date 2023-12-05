@@ -615,14 +615,14 @@ impl App {
     }
     
     /// Append FILE to marked file list.
-    pub fn append_marked_file<S: Into<String>>(&mut self, file: S) {
+    pub fn append_marked_file<S: Into<String>>(&mut self, file: S, is_dir: bool) {
         let path = self.current_path();
 
         self.marked_files
             .entry(path)
             .or_insert(MarkedFiles::default())
             .files
-            .insert(file.into());
+            .insert(file.into(), is_dir);
     }
 
     pub fn append_marked_files<I>(&mut self, iter: I)
@@ -634,14 +634,16 @@ impl App {
             .entry(path)
             .or_insert(MarkedFiles::default());
         for file in iter {
-            temp_set.files.insert(file.name);
+            temp_set.files.insert(file.name, file.is_dir);
         }
     }
 
     pub fn marked_file_contains<S: Into<String>>(&self, file: S) -> bool {
         let path = self.current_path();
         if let Some(marked_files) = self.marked_files.get(&path) {
-            return marked_files.files.contains(&file.into())
+            // In Linux, there could not be more than one files that have the same name.
+            // (Include directories)
+            return marked_files.files.contains_key(&file.into())
         }
 
         false

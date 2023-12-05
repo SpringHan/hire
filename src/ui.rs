@@ -4,7 +4,7 @@ use crate::App;
 use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles, FileOperation};
 
 use std::ops::AddAssign;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use ratatui::{
     Frame,
@@ -163,7 +163,7 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
     };
 
     // Use this method to avoid extra clone.
-    let temp_set: HashSet<String> = HashSet::new();
+    let temp_set: HashMap<String, bool> = HashMap::new();
     let mut to_be_moved = false;
     let marked_files = if let Some(item) = marked_items {
         if marked_operation == FileOperation::Move {
@@ -180,7 +180,7 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                 match idx {
                     Some(i) => {
                         // Make the style of selected item
-                        if marked_files.contains(&file.name) {
+                        if marked_files.contains_key(&file.name) {
                             ListItem::new(Line::from(
                                 Span::raw(&file.name)
                                     .fg(if *num == i {

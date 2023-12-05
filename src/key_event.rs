@@ -7,6 +7,7 @@ use crate::app::command::OperationError;
 use std::fs;
 use std::mem::swap;
 use std::error::Error;
+use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 use std::io::{self, ErrorKind};
 use std::ops::{SubAssign, AddAssign};
@@ -391,7 +392,10 @@ fn delete_operation(app: &mut App,
             if app.marked_files.is_empty() {
                 let current_file = app.get_file_saver();
                 if let Some(current_file) = current_file {
-                    app.append_marked_file(current_file.name.to_owned());
+                    app.append_marked_file(
+                        current_file.name.to_owned(),
+                        current_file.is_dir
+                    );
                 } else {
                     OperationError::NoSelected.check(app);
                     app.option_key = OptionFor::None;
@@ -411,7 +415,7 @@ fn delete_operation(app: &mut App,
                         app,
                         path,
                         files.files.into_iter(),
-                        None,
+                        false,
                         in_root
                     )?;
                 }
@@ -425,16 +429,19 @@ fn delete_operation(app: &mut App,
             let current_file = app.get_file_saver();
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
-                    OperationError::PermissionDenied.check(app);
+                    OperationError::PermissionDenied(None).check(app);
                     app.option_key = OptionFor::None;
                     return Ok(())
                 }
 
+                let mut temp_hashmap = HashMap::new();
+                temp_hashmap.insert(current_file.name, current_file.is_dir);
+
                 delete_file(
                     app,
                     app.current_path(),
-                    vec![current_file.name].into_iter(),
-                    Some(current_file.is_dir),
+                    temp_hashmap.into_iter(),
+                    true,
                     in_root
                 )?;
             } else {
@@ -461,7 +468,10 @@ pub fn mark_operation(app: &mut App,
             if app.marked_file_contains(&selected_file.name) {
                 app.remove_marked_file(selected_file.name.to_owned());
             } else {
-                app.append_marked_file(selected_file.name.to_owned());
+                app.append_marked_file(
+                    selected_file.name.to_owned(),
+                        selected_file.is_dir
+                );
             }
             move_cursor(app, Goto::Down, in_root)?;
             return Ok(())
@@ -480,53 +490,40 @@ pub fn mark_operation(app: &mut App,
     Ok(())
 }
 
-/// When deleting files from marked list, DIR_INFO should be None.
-/// Otherwise dir_info should be the result of is_dir wrapped with Some.
 fn delete_file<I>(app: &mut App,
                   path: PathBuf,
                   file_iter: I,
-                  dir_info: Option<bool>,
+                  single_file: bool,
                   in_root: bool
 ) -> io::Result<()>
-where I: Iterator<Item = String>
+where I: Iterator<Item = (String, bool)>
 {
-    use std::fs::{remove_file, remove_dir_all, metadata};
+    use std::fs::{remove_file, remove_dir_all};
+
+    let mut no_permission_files: Vec<String> = Vec::new();
+    let mut not_found_files: Vec<String> = Vec::new();
 
     for file in file_iter {
-        let file = path.join(file);
-        let mut is_dir = false;
-        if dir_info.is_none() {
-            match metadata(&file) {
-                Ok(metadata) => is_dir = metadata.is_dir(),
-                Err(other) => {
-                    if other.kind() == ErrorKind::PermissionDenied {
-                        continue;
-                    } else if other.kind() != ErrorKind::NotFound {
-                        return Err(other)
-                    }
-                    // No need to reset is_dir. See filesaver 'metadata'
-                }
-            }
-        } else {
-            is_dir = dir_info.unwrap();
-        }
+        let is_dir = file.1;
+        let full_file = path.join(&file.0);
 
         let remove_result = if is_dir {
-            remove_dir_all(file)
+            remove_dir_all(full_file)
         } else {
-            remove_file(file)
+            remove_file(full_file)
         };
 
         match remove_result {
             Err(err) => {
-                if err.kind() == ErrorKind::PermissionDenied && dir_info.is_some() {
-                    OperationError::PermissionDenied.check(app);
+                if err.kind() == ErrorKind::PermissionDenied {
+                    no_permission_files.push(file.0);
                 } else if err.kind() != ErrorKind::NotFound {
-                    return Err(err)
+                    not_found_files.push(file.0);
                 }
+
                 // When the file does not exist, maybe the path is deleted.
                 // If it's true, do not return error for stably running.
-                if dir_info.is_some() {
+                if single_file {
                     app.option_key = OptionFor::None;
                     return Ok(())
                 }
@@ -535,7 +532,15 @@ where I: Iterator<Item = String>
         }
     }
 
-    if dir_info.is_none() {
+    if !no_permission_files.is_empty() {
+        OperationError::PermissionDenied(Some(no_permission_files)).check(app);
+    }
+
+    if !not_found_files.is_empty() {
+        OperationError::NotFound(Some(not_found_files)).check(app);
+    }
+
+    if !single_file {
         return Ok(())
     }
 
@@ -576,11 +581,7 @@ where I: Iterator<Item = String>
     Ok(())
 }
 
-pub fn paste_operation(app: &mut App,
-                       key: char,
-                       in_root: bool
-) -> Result<(), Box<dyn Error>>
-{
+pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
     if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
         OperationError::NoSelected.check(app);
         app.option_key = OptionFor::None;
@@ -588,21 +589,49 @@ pub fn paste_operation(app: &mut App,
     }
 
     let current_dir = app.current_path();
+    let files = app.marked_files.to_owned();
 
     match key {
         'p' => {
+            paste_files(
+                app,
+                files.into_iter(),
+                current_dir,
+                false
+            )?;
+            // TODO: Delete files
         },
         's' => {
         },
         'c' => {
+            paste_files(
+                app,
+                files.into_iter(),
+                current_dir,
+                false
+            )?;
         },
         'o' => {
+            paste_files(
+                app,
+                files.into_iter(),
+                current_dir,
+                true
+            )?;
         },
         'O' => {
+            paste_files(
+                app,
+                files.into_iter(),
+                current_dir,
+                true
+            )?;
+            // TODO: Delete files
         },
         _ => ()
     }
 
+    app.marked_files.clear();
     app.option_key = OptionFor::None;
     Ok(())
 }
@@ -616,19 +645,94 @@ where
     I: Iterator<Item = (PathBuf, MarkedFiles)>,
     P: AsRef<Path>
 {
-    for (path, files) in file_iter {
-        for file in files.files.into_iter() {
-            match fs::copy(
-                path.join(&file),
-                target_path.as_ref().join(file)
-            )
-            {
-                Ok(_) => {
+    use copy_dir::copy_dir;
+
+    let mut permission_err: Vec<String> = Vec::new();
+    let mut exists_files: Vec<Box<str>> = Vec::new();
+
+    macro_rules! file_action {
+        ($func:expr, $file:expr, $from:expr $(, $to:expr )*) => {
+            match $func($from, $( $to )*) {
+                Err(err) if err.kind() == ErrorKind::PermissionDenied => {
+                    permission_err.push($file.0);
+                    continue;
                 },
-                Err(err) => {
-                }
+                Ok(_) => (),
+                Err(err)=> return Err(err)
             }
         }
+    }
+
+    for (path, files) in file_iter {
+        let mut target_exists = false;
+        let mut target_is_dir = false;
+
+        for file in files.files.into_iter() {
+            let target_file = fs::metadata(
+                target_path.as_ref().join(&file.0)
+            );
+            // Check whether the target file exists.
+            match target_file {
+                Err(err) => {
+                    match err.kind() {
+                        ErrorKind::PermissionDenied => {
+                            permission_err.push(file.0.to_owned());
+                            continue;
+                        },
+                        ErrorKind::NotFound => (), // Nice find.
+                        _ => panic!("Unknown error!")
+                    }
+                },
+                Ok(metadata) => {
+                    if !overwrite {
+                        exists_files.push(file.0.into_boxed_str());
+                        continue;
+                    }
+                    target_exists = true;
+                    target_is_dir = metadata.is_dir();
+                }
+            }
+
+            if target_exists {
+                if target_is_dir {
+                    file_action!(
+                        fs::remove_dir_all,
+                        file,
+                        target_path.as_ref().join(&file.0)
+                    );
+                } else {
+                    file_action!(
+                        fs::remove_file,
+                        file,
+                        target_path.as_ref().join(&file.0)
+                    );
+                }
+            }
+
+            if file.1 {         // The original file is a dir.
+                file_action!(
+                    copy_dir,
+                    file,
+                    path.join(&file.0),
+                    target_path.as_ref().join(&file.0)
+                );
+            } else {
+                file_action!(
+                    fs::copy,
+                    file,
+                    path.join(&file.0),
+                    target_path.as_ref().join(&file.0)
+                );
+            }
+        }
+    }
+
+    if !permission_err.is_empty() {
+        OperationError::PermissionDenied(Some(permission_err)).check(app);
+    }
+
+    if !exists_files.is_empty() {
+        OperationError::FileExists(exists_files).check(app);
     }
 
     Ok(())

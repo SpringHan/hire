@@ -9,43 +9,63 @@ use std::path::PathBuf;
 
 /// This enum is used for the errors that will not destroy program.
 pub enum OperationError {
-    PermissionDenied,
+    PermissionDenied(Option<Vec<String>>),
     UnvalidCommand,
     FileExists(Vec<Box<str>>),
     NoSelected,
+    NotFound(Option<Vec<String>>),
     None
 }
 
 impl OperationError {
+    pub fn error_value(&self) -> Option<String> {
+        match self {
+            OperationError::NoSelected => {
+                Some(String::from("[Error]: No item to be selected and operated!"),)
+            },
+            OperationError::FileExists(files) => {
+                Some(format!("[Error]: File {:?} already exists!", files))
+            },
+            OperationError::UnvalidCommand => {
+                Some(String::from("[Error]: Unvalid Command!"))
+            },
+            OperationError::PermissionDenied(files) => {
+                if let Some(files) = files {
+                    Some(format!("[Error]: Permission Denied: {:?}", files))
+                } else {
+                    Some(String::from("[Error]: Permission Denied!"))
+                }                
+            },
+            OperationError::NotFound(files) => {
+                if let Some(files) = files {
+                    Some(format!("[Error]: Not found: {:?}", files))
+                } else {
+                    Some(String::from("[Error]: Not found file!"))
+                }
+            },
+            OperationError::None => None
+        }
+    }
+
     /// Check whether the OperationError is None
     /// If it's None, return true. Otherwise false.
     pub fn check(self, app: &mut App) -> bool {
-        match self {
-            OperationError::PermissionDenied => {
-                app.selected_block = Block::CommandLine(
-                    String::from("[Error]: Permission Denied!"),
-                    CursorPos::End
-                );
-            },
-            OperationError::UnvalidCommand => {
-                app.selected_block = Block::CommandLine(
-                    String::from("[Error]: Unvalid Command!"),
-                    CursorPos::End
-                );
-            },
-            OperationError::FileExists(file) => {
-                app.selected_block = Block::CommandLine(
-                    format!("[Error]: File {:?} already exists!", file),
-                    CursorPos::End
-                );
-            },
-            OperationError::NoSelected => {
-                app.selected_block = Block::CommandLine(
-                    String::from("[Error]: No item to be selected and operated!"),
-                    CursorPos::End
-                )
-            },
-            OperationError::None => return true
+        if let Some(msg) = self.error_value() {
+            if let
+                Block::CommandLine(
+                    ref mut error,
+                    ref mut cursor
+                ) = app.selected_block
+            {
+                if app.command_error {
+                    error.push_str(&format!("\n{}", msg));
+                } else {
+                    *error = msg;
+                    *cursor = CursorPos::End;
+                }
+            }
+        } else {
+            return true
         }
         app.command_error = true;
 
@@ -67,7 +87,7 @@ pub fn rename_file(path: PathBuf,
     let is_dir = file.is_dir;
 
     if file.cannot_read || file.read_only() {
-        return Ok(OperationError::PermissionDenied)
+        return Ok(OperationError::PermissionDenied(None))
     }
 
     if file.name == new_name {
@@ -113,7 +133,7 @@ where I: Iterator<Item = &'a str>
             match fs::create_dir(path.join(file)) {
                 Err(err) => {
                     if err.kind() == ErrorKind::PermissionDenied {
-                        return Ok(OperationError::PermissionDenied)
+                        return Ok(OperationError::PermissionDenied(None))
                     } else if err.kind() == ErrorKind::AlreadyExists {
                         exists_files.push(file.into());
                     }
@@ -138,7 +158,7 @@ where I: Iterator<Item = &'a str>
                 },
                 Err(err) => {
                     if err.kind() == ErrorKind::PermissionDenied {
-                        return Ok(OperationError::PermissionDenied)
+                        return Ok(OperationError::PermissionDenied(None))
                     } else if err.kind() == ErrorKind::AlreadyExists {
                         exists_files.push(file.into());
                     }
