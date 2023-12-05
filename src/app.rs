@@ -107,6 +107,10 @@ impl App {
             return Ok(())
         }
 
+        // NOTE: Initialize the selected_item of parent & current, which are required in
+        // function app.set_file_content.
+        self.refresh_select_item(true);
+
         // Child Files
         let current_selected_file = self.current_files
             .get(0)
@@ -602,20 +606,22 @@ impl App {
     pub fn goto_dir<P: AsRef<Path>>(&mut self, dir: P) -> io::Result<()> {
         self.path = PathBuf::from(dir.as_ref());
         self.selected_item = ItemIndex::default();
+        self.file_content = None;
+        self.child_files.clear();
 
         if dir.as_ref().to_string_lossy() == "/" {
-            self.file_content = None;
-            self.child_files.clear();
-            self.selected_block = Block::Browser(true);
+            if !self.command_error {
+                self.selected_block = Block::Browser(true);
+            }
 
             self.init_parent_files()?;
             self.selected_item.parent_select(Some(0));
             self.init_current_files(Some(self.parent_files[0].name.to_owned()))?;
+            self.refresh_select_item(false);
         } else {
             self.init_all_files()?;
             self.selected_block = Block::Browser(false);
         }
-        self.refresh_select_item(false);
 
         Ok(())
     }
