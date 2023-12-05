@@ -13,6 +13,7 @@ pub enum CursorPos {
 pub enum OptionFor {
     Goto,
     Delete,
+    Paste,
     None
 }
 

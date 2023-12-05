@@ -77,10 +77,15 @@ impl Default for App {
 
 // Basic
 impl App {
+    /// Only get the path path of current file, without its file name.
     pub fn current_path(&self) -> PathBuf {
         if self.path.to_string_lossy() == "/" {
-            let current_file = self.get_file_saver().unwrap().name.to_owned();
-            self.path.join(current_file)
+            let current_file = self.get_file_saver().unwrap();
+            if current_file.is_dir {
+                self.path.join(current_file.name.to_owned())
+            } else {
+                self.path.to_owned()
+            }
         } else {
             self.path.to_owned()
         }
@@ -282,8 +287,9 @@ impl App {
         let selected_file = self.get_file_saver();
         if let Some(selected_file) = selected_file {
             let file_path = self.current_path()
-                .join(selected_file.name.to_owned());
+                .join(&selected_file.name);
             let mut content = String::new();
+
             match fs::File::open(file_path) {
                 Err(e) => {
                     if e.kind() != io::ErrorKind::PermissionDenied {
@@ -664,7 +670,7 @@ impl App {
         let path = self.current_path();
         self.marked_files.contains_key(&path)
     }
-
+    
     /// Clear marked files in current directory.
     pub fn clear_path_marked_files(&mut self) {
         let path = self.current_path();

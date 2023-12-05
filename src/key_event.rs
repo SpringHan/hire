@@ -39,6 +39,10 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         delete_operation(app, c, in_root)?;
                         return Ok(())
                     },
+                    OptionFor::Paste => {
+                        paste_operation(app, c)?;
+                        return Ok(())
+                    },
                     OptionFor::None => ()
                 }
 
@@ -71,6 +75,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         ":create_file ",
                         CursorPos::End
                     ),
+                    'p' => app.option_key = OptionFor::Paste,
                     _ => ()
                 }
             } else {
@@ -301,9 +306,7 @@ pub fn move_cursor(app: &mut App,
         }
 
         if in_root {
-            let current_file = app.parent_files.get(
-                app.selected_item.parent_selected().unwrap()
-            ).unwrap();
+            let current_file = app.get_file_saver().unwrap();
 
             let extra_path = PathBuf::from(&current_file.name);
             if current_file.is_dir {
@@ -595,18 +598,27 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
         'p' => {
             paste_files(
                 app,
-                files.into_iter(),
+                files.iter(),
                 current_dir,
                 false
             )?;
-            // TODO: Delete files
+
+            for (path, files) in files.into_iter() {
+                delete_file(
+                    app,
+                    path,
+                    files.files.into_iter(),
+                    false,
+                    false       // Not necesary
+                )?;
+            }
         },
         's' => {
         },
         'c' => {
             paste_files(
                 app,
-                files.into_iter(),
+                files.iter(),
                 current_dir,
                 false
             )?;
@@ -614,7 +626,7 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
         'o' => {
             paste_files(
                 app,
-                files.into_iter(),
+                files.iter(),
                 current_dir,
                 true
             )?;
@@ -622,27 +634,37 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
         'O' => {
             paste_files(
                 app,
-                files.into_iter(),
+                files.iter(),
                 current_dir,
                 true
             )?;
-            // TODO: Delete files
+
+            for (path, files) in files.into_iter() {
+                delete_file(
+                    app,
+                    path,
+                    files.files.into_iter(),
+                    false,
+                    false       // Not necesary
+                )?;
+            }
         },
         _ => ()
     }
 
     app.marked_files.clear();
     app.option_key = OptionFor::None;
+    app.goto_dir(app.current_path())?;
     Ok(())
 }
 
-fn paste_files<I, P>(app: &mut App,
+fn paste_files<'a, I, P>(app: &'a mut App,
                      file_iter: I,
                      target_path: P,
                      overwrite: bool
 ) -> io::Result<()>
 where
-    I: Iterator<Item = (PathBuf, MarkedFiles)>,
+    I: Iterator<Item = (&'a PathBuf, &'a MarkedFiles)>,
     P: AsRef<Path>
 {
     use copy_dir::copy_dir;
@@ -654,7 +676,7 @@ where
         ($func:expr, $file:expr, $from:expr $(, $to:expr )*) => {
             match $func($from, $( $to )*) {
                 Err(err) if err.kind() == ErrorKind::PermissionDenied => {
-                    permission_err.push($file.0);
+                    permission_err.push($file.0.to_owned());
                     continue;
                 },
                 Ok(_) => (),
@@ -667,9 +689,9 @@ where
         let mut target_exists = false;
         let mut target_is_dir = false;
 
-        for file in files.files.into_iter() {
+        for file in files.files.iter() {
             let target_file = fs::metadata(
-                target_path.as_ref().join(&file.0)
+                target_path.as_ref().join(file.0)
             );
             // Check whether the target file exists.
             match target_file {
@@ -685,7 +707,7 @@ where
                 },
                 Ok(metadata) => {
                     if !overwrite {
-                        exists_files.push(file.0.into_boxed_str());
+                        exists_files.push(file.0.to_owned().into_boxed_str());
                         continue;
                     }
                     target_exists = true;
@@ -709,7 +731,7 @@ where
                 }
             }
 
-            if file.1 {         // The original file is a dir.
+            if *file.1 {         // The original file is a dir.
                 file_action!(
                     copy_dir,
                     file,
