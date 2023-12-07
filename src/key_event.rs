@@ -79,7 +79,11 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     _ => ()
                 }
             } else {
-                app.command_line_append(c);
+                if app.command_error && c == '+' {
+                    app.command_expand = true;
+                } else {
+                    app.command_line_append(c);
+                }
             }
         },
 
@@ -108,6 +112,11 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     app.quit_command_mode();
                 },
                 _ => {
+                    if app.option_key != OptionFor::None {
+                        app.option_key = OptionFor::None;
+                        return Ok(())
+                    }
+
                     if !app.marked_files.is_empty() {
                         app.marked_files.clear();
                         app.marked_operation = FileOperation::None;
@@ -116,7 +125,13 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
             }
         },
 
-        KeyCode::Enter => app.command_parse()?,
+        KeyCode::Enter => {
+            if app.command_error {
+                app.quit_command_mode();
+            } else {
+                app.command_parse()?;
+            }
+        },
 
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
@@ -213,13 +228,8 @@ fn directory_movement(direction: char,
             let mut current_empty = false;
 
             if in_root {
-                let selected_file = app.get_file_saver().unwrap();
                 // It seems impossible that the root directory is empty.
-                // if let None = selected_file {
-                //     return Ok(())
-                // }
-
-                // let selected_file = selected_file.unwrap();
+                let selected_file = app.get_file_saver().unwrap();
                 if !selected_file.is_dir || selected_file.cannot_read {
                     return Ok(())
                 }
@@ -596,7 +606,7 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
 
     match key {
         'p' => {
-            paste_files(
+            let exists_files = paste_files(
                 app,
                 files.iter(),
                 current_dir,
@@ -604,14 +614,34 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
             )?;
 
             for (path, files) in files.into_iter() {
+                // Avoid removing files that failed to be moved to target path.
+                let path_in_exists = exists_files.get(&path);
+                let files: HashMap<String, bool> = if let
+                    Some(exists) = path_in_exists
+                {
+                    files.files
+                        .into_iter()
+                        .filter(|file|
+                                !exists.contains(&file.0))
+                        .collect()
+                } else {
+                    files.files
+                };
+
                 delete_file(
                     app,
                     path,
-                    files.files.into_iter(),
+                    files.into_iter(),
                     false,
                     false       // Not necesary
                 )?;
             }
+
+            let mut files_for_error: Vec<String> = Vec::new();
+            for (_, files) in exists_files.into_iter() {
+                files_for_error.extend(files);
+            }
+            OperationError::FileExists(files_for_error).check(app);
         },
         's' => {
         },
@@ -654,6 +684,7 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
 
     app.marked_files.clear();
     app.option_key = OptionFor::None;
+    app.marked_operation = FileOperation::None;
     app.goto_dir(app.current_path())?;
     Ok(())
 }
@@ -662,15 +693,16 @@ fn paste_files<'a, I, P>(app: &'a mut App,
                      file_iter: I,
                      target_path: P,
                      overwrite: bool
-) -> io::Result<()>
+) -> io::Result<HashMap<PathBuf, Vec<String>>>
 where
     I: Iterator<Item = (&'a PathBuf, &'a MarkedFiles)>,
     P: AsRef<Path>
 {
     use copy_dir::copy_dir;
 
+    // TODO: Record the existed files, return them. Make sure they're not deleted.
     let mut permission_err: Vec<String> = Vec::new();
-    let mut exists_files: Vec<Box<str>> = Vec::new();
+    let mut exists_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
     macro_rules! file_action {
         ($func:expr, $file:expr, $from:expr $(, $to:expr )*) => {
@@ -707,7 +739,10 @@ where
                 },
                 Ok(metadata) => {
                     if !overwrite {
-                        exists_files.push(file.0.to_owned().into_boxed_str());
+                        exists_files
+                            .entry(path.to_owned())
+                            .or_insert(Vec::new())
+                            .push(file.0.to_owned());
                         continue;
                     }
                     target_exists = true;
@@ -753,9 +788,5 @@ where
         OperationError::PermissionDenied(Some(permission_err)).check(app);
     }
 
-    if !exists_files.is_empty() {
-        OperationError::FileExists(exists_files).check(app);
-    }
-
-    Ok(())
+    Ok(exists_files)
 }

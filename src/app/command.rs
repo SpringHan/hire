@@ -11,7 +11,7 @@ use std::path::PathBuf;
 pub enum OperationError {
     PermissionDenied(Option<Vec<String>>),
     UnvalidCommand,
-    FileExists(Vec<Box<str>>),
+    FileExists(Vec<String>),
     NoSelected,
     NotFound(Option<Vec<String>>),
     None
@@ -63,6 +63,8 @@ impl OperationError {
                     *error = msg;
                     *cursor = CursorPos::End;
                 }
+            } else {
+                app.set_command_line(msg, CursorPos::End);
             }
         } else {
             return true
@@ -91,7 +93,7 @@ pub fn rename_file(path: PathBuf,
     }
 
     if file.name == new_name {
-        return Ok(OperationError::FileExists(vec![new_name.into_boxed_str()]))
+        return Ok(OperationError::FileExists(vec![new_name]))
     }
 
     let origin_file = path.join(&file.name);
@@ -124,7 +126,7 @@ pub fn create_file<'a, I>(app: &mut App,
 where I: Iterator<Item = &'a str>
 {
     let path = app.current_path();
-    let mut exists_files: Vec<Box<str>> = Vec::new();
+    let mut exists_files: Vec<String> = Vec::new();
     let mut new_files: Vec<FileSaver> = Vec::new();
 
     for file in files {

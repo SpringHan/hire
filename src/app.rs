@@ -39,6 +39,7 @@ pub struct App {
 
     // When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
+    pub command_expand: bool,
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
 
@@ -64,6 +65,7 @@ impl Default for App {
             command_idx: None,
             option_key: OptionFor::None,
             command_error: false,
+            command_expand: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block: Block::Browser(false),
@@ -376,7 +378,9 @@ impl App {
 
         if self.command_error {
             self.command_error = false;
+            self.command_expand = false;
         }
+
     }
     
     /// The function will change content in command line.
@@ -463,10 +467,6 @@ impl App {
     }
     
     pub fn command_parse(&mut self) -> io::Result<()> {
-        if self.command_error {
-            return Ok(self.quit_command_mode())
-        }
-
         if let Block::CommandLine(ref command, _) = self.selected_block {
             if command.starts_with("/") {
                 self.file_search(command[1..].to_owned());
@@ -620,7 +620,9 @@ impl App {
             self.refresh_select_item(false);
         } else {
             self.init_all_files()?;
-            self.selected_block = Block::Browser(false);
+            if !self.command_error {
+                self.selected_block = Block::Browser(false);
+            }
         }
 
         Ok(())

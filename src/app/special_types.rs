@@ -10,6 +10,7 @@ pub enum CursorPos {
     End
 }
 
+#[derive(PartialEq)]
 pub enum OptionFor {
     Goto,
     Delete,

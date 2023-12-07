@@ -17,11 +17,18 @@ use ratatui::{
 pub fn ui(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(4),
-            Constraint::Percentage(93),
-            Constraint::Percentage(2)
-        ])
+        .constraints(if !app.command_expand {
+            vec![
+                Constraint::Percentage(4),
+                Constraint::Percentage(93),
+                Constraint::Percentage(2)
+            ]
+        } else {
+            vec![
+                Constraint::Percentage(4),
+                Constraint::Percentage(96)
+            ]
+        })
         .split(frame.size());
 
     // Title
@@ -37,6 +44,24 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                     .bold()
             ]))
         .block(title_block);
+
+    // Expanded Commandline
+    if app.command_expand {
+        let command_block = Block::default().on_black();
+        if let app::Block::CommandLine(ref error, _) = app.selected_block {
+            let command_errors = Paragraph::new(
+                Span::raw(error)
+            )
+                .red()
+                .block(command_block);
+
+            frame.render_widget(title_paragraph, chunks[0]);
+            frame.render_widget(command_errors, chunks[1]);
+            return ()
+        } else {
+            app.quit_command_mode();
+        }
+    }
 
 
     // File browser layout
@@ -241,9 +266,11 @@ fn render_file_content(app: &App) -> Paragraph {
 
 /// Function used to generate Paragraph at command-line layout.
 fn render_command_line(app: &App) -> Paragraph {
+    use app::Block as ABlock;
+
     let block = Block::default().on_black();
     let message = match app.selected_block {
-        app::Block::Browser(_) => {
+        ABlock::Browser(_) => {
             let selected_file = app.get_file_saver();
             if let Some(selected_file) = selected_file {
                 if selected_file.cannot_read {
@@ -268,7 +295,7 @@ fn render_command_line(app: &App) -> Paragraph {
                 Line::raw("")
             }
         },
-        app::Block::CommandLine(ref input, cursor) => {
+        ABlock::CommandLine(ref input, cursor) => {
             Line::from(get_command_line_span_list(
                 input,
                 cursor,
