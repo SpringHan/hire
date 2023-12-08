@@ -5,7 +5,7 @@ use super::{App, Block, CursorPos};
 
 use std::io::ErrorKind;
 use std::{io, fs};
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
 /// This enum is used for the errors that will not destroy program.
 pub enum OperationError {
@@ -14,6 +14,7 @@ pub enum OperationError {
     FileExists(Vec<String>),
     NoSelected,
     NotFound(Option<Vec<String>>),
+    Specific(String),
     None
 }
 
@@ -43,12 +44,15 @@ impl OperationError {
                     Some(String::from("[Error]: Not found file!"))
                 }
             },
+            OperationError::Specific(err) => {
+                Some(format!("[Error]: {}", err))
+            }
             OperationError::None => None
         }
     }
 
     /// Check whether the OperationError is None
-    /// If it's None, return true. Otherwise false.
+    /// If it's None, return true. If previous errors exist, still return false.
     pub fn check(self, app: &mut App) -> bool {
         if let Some(msg) = self.error_value() {
             if let
@@ -67,6 +71,11 @@ impl OperationError {
                 app.set_command_line(msg, CursorPos::End);
             }
         } else {
+            // Though current error not exists, but previous errors exist.
+            if app.command_error {
+                return false
+            }
+
             return true
         }
         app.command_error = true;
@@ -210,6 +219,53 @@ where I: Iterator<Item = &'a str>
 
     if !exists_files.is_empty() {
         return Ok(OperationError::FileExists(exists_files))
+    }
+
+    Ok(OperationError::None)
+}
+
+pub fn create_symlink<I, P>(app: &mut App, files: I) -> io::Result<OperationError>
+where
+    I: Iterator<Item = (P, P)>,
+    P: AsRef<Path>
+{
+    use std::os::unix::fs::symlink;
+
+    let mut no_permission: Vec<String> = Vec::new();
+    let mut not_found: Vec<String> = Vec::new();
+    let mut exists_links: Vec<String> = Vec::new();
+
+    for (file, target) in files {
+        match symlink(&file, &target) {
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::PermissionDenied => no_permission.push(
+                        file.as_ref().to_string_lossy().into()
+                    ),
+                    ErrorKind::NotFound => not_found.push(
+                        file.as_ref().to_string_lossy().into()
+                    ),
+                    ErrorKind::AlreadyExists => exists_links.push(
+                        file.as_ref().to_string_lossy().into()
+                    ),
+                    _ => return Err(err)
+                }
+            },
+            _ => ()
+        }
+    }
+    app.partly_update_block()?;
+
+    if !no_permission.is_empty() {
+        OperationError::PermissionDenied(Some(no_permission)).check(app);
+    }
+
+    if !exists_links.is_empty() {
+        OperationError::FileExists(exists_links).check(app);
+    }
+
+    if !not_found.is_empty() {
+        return Ok(OperationError::NotFound(Some(not_found)))
     }
 
     Ok(OperationError::None)

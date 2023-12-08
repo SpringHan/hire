@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use ratatui::{
     Frame,
-    text::{Line, Span},
+    text::{Line, Span, Text},
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Modifier, Stylize},
-    widgets::{Block, List, ListItem, Borders, Paragraph}
+    widgets::{Block, List, ListItem, Borders, Paragraph, Wrap}
 };
 
 pub fn ui(frame: &mut Frame, app: &mut App) {
@@ -50,9 +50,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
         let command_block = Block::default().on_black();
         if let app::Block::CommandLine(ref error, _) = app.selected_block {
             let command_errors = Paragraph::new(
-                Span::raw(error)
+                Text::raw(error)
             )
                 .red()
+                .wrap(Wrap { trim: true })
+                .scroll((app.command_scroll.unwrap(), 0))
                 .block(command_block);
 
             frame.render_widget(title_paragraph, chunks[0]);

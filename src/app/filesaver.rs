@@ -68,7 +68,13 @@ impl FileSaver {
                 }
             },
             Ok(metadata) => {
-                let symlink_file: Option<PathBuf> = if metadata.is_symlink() {
+                let is_symlink = match fs::symlink_metadata(&file_path) {
+                    Ok(meta) => {
+                        meta.is_symlink()
+                    },
+                    _ => false
+                };
+                let symlink_file: Option<PathBuf> = if is_symlink {
                     Some(fs::read_link(&file_path).expect("Unable to read symlink!"))
                 } else {
                     None
@@ -118,6 +124,10 @@ impl FileSaver {
         if let Some(ref permission) = self.permissions {
             permission.readonly()
         } else {
+            // When DANGLING_SYMLINK is true, the file must be mutable.
+            if self.dangling_symlink {
+                return false
+            }
             panic!("Unknow Error!")
         }
     }
@@ -144,7 +154,7 @@ impl FileSaver {
 
     pub fn symlink_span(&self) -> Span {
         let link_file = if let Some(ref file) = self.symlink_file {
-            file.to_string_lossy()
+            format!("-> {}", file.to_string_lossy())
         } else {
             "".into()
         };

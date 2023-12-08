@@ -1,8 +1,8 @@
 // Key Event
 
 use crate::App;
-use crate::app::{self, CursorPos, OptionFor, FileOperation, MarkedFiles};
 use crate::app::command::OperationError;
+use crate::app::{self, CursorPos, OptionFor, FileOperation, MarkedFiles};
 
 use std::fs;
 use std::mem::swap;
@@ -76,11 +76,17 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         CursorPos::End
                     ),
                     'p' => app.option_key = OptionFor::Paste,
+                    's' => make_single_symlink(app)?,
                     _ => ()
                 }
             } else {
-                if app.command_error && c == '+' {
-                    app.command_expand = true;
+                if app.command_error {
+                    match c {
+                        '+' => app.expand_init(),
+                        'e' => app.expand_scroll(Goto::Down),
+                        'u' => app.expand_scroll(Goto::Up),
+                        _ => ()
+                    }
                 } else {
                     app.command_line_append(c);
                 }
@@ -641,9 +647,20 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
             for (_, files) in exists_files.into_iter() {
                 files_for_error.extend(files);
             }
-            OperationError::FileExists(files_for_error).check(app);
+
+            if !files_for_error.is_empty() {
+                OperationError::FileExists(files_for_error).check(app);
+            }
         },
         's' => {
+            let mut final_files: Vec<(PathBuf, PathBuf)> = Vec::new();
+            for (path, files) in files.into_iter() {
+                for (file, _) in files.files.into_iter() {
+                    final_files.push((path.join(&file), current_dir.join(file)));
+                }
+            }
+
+            app::command::create_symlink(app, final_files.into_iter())?.check(app);
         },
         'c' => {
             paste_files(
@@ -789,4 +806,35 @@ where
     }
 
     Ok(exists_files)
+}
+
+fn make_single_symlink(app: &mut App) -> io::Result<()> {
+    if app.marked_files.is_empty() {
+        OperationError::NoSelected.check(app);
+        return Ok(())
+    }
+
+    if app.marked_files.len() > 1 {
+        OperationError::Specific(
+            String::from("The number of marked files is more than one!")
+        ).check(app);
+        return Ok(())
+    }
+
+    for (path, files) in app.marked_files.iter() {
+        for (file, _) in files.files.iter() {
+            let original_file = path.join(file);
+            app.set_command_line(
+                format!(
+                    ":create_symlink {} -> {}",
+                    original_file.to_string_lossy(),
+                    app.current_path().join(file).to_string_lossy()
+                ),
+                CursorPos::End
+            );
+            return Ok(())
+        }
+    }
+
+    Ok(())
 }

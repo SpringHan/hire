@@ -11,7 +11,7 @@ use filesaver::{FileSaver, sort};
 use std::error;
 use std::borrow::Cow;
 use std::{env, fs, io};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, SubAssign};
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
@@ -40,6 +40,8 @@ pub struct App {
     // When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
     pub command_expand: bool,
+    pub command_scroll: Option<u16>, // Used for expanded mode.
+
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
 
@@ -65,6 +67,7 @@ impl Default for App {
             command_idx: None,
             option_key: OptionFor::None,
             command_error: false,
+            command_scroll: None,
             command_expand: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
@@ -283,12 +286,33 @@ impl App {
             }
         }
     }
+
+    /// Partly update the file browser block.
+    /// 
+    /// Update parent files & current files if the user is in root directory.
+    /// Otherwise update current & child files.
+    pub fn partly_update_block(&mut self) -> io::Result<()> {
+        if self.path.to_string_lossy() == "/" {
+            self.selected_item.parent_select(Some(0));
+            self.selected_item.current_select(Some(0));
+            self.init_parent_files()?;
+            self.init_current_files(Some(self.current_path()))?;
+        } else {
+            self.selected_item.current_select(Some(0));
+            self.selected_item.child_select(None);
+            self.init_current_files::<&str>(None)?;
+            self.init_child_files(None)?;
+        }
+        self.refresh_select_item(false);
+
+        Ok(())
+    }
 }
 
 // File Content
 impl App {
     pub fn set_file_content(&mut self) -> io::Result<()> {
-        use io::Read;
+        use io::{Read, ErrorKind};
 
         let selected_file = self.get_file_saver();
         if let Some(selected_file) = selected_file {
@@ -298,10 +322,13 @@ impl App {
 
             match fs::File::open(file_path) {
                 Err(e) => {
-                    if e.kind() != io::ErrorKind::PermissionDenied {
-                        return Err(e)
+                    match e.kind() {
+                        ErrorKind::NotFound => (),
+                        ErrorKind::PermissionDenied => {
+                            content = String::from("Permission Denied");
+                        },
+                        _ => return Err(e)
                     }
-                    content = String::from("Permission Denied");
                 },
                 Ok(ref mut file) => {
                     if let Err(e) = file.read_to_string(&mut content) {
@@ -379,6 +406,7 @@ impl App {
         if self.command_error {
             self.command_error = false;
             self.command_expand = false;
+            self.command_scroll = None;
         }
 
     }
@@ -505,6 +533,20 @@ impl App {
                         true
                     )?
                 },
+                ":create_symlink" => {
+                    self.marked_files.clear();
+                    self.marked_operation = FileOperation::None;
+
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files
+                        .split("->")
+                        .collect();
+                    command::create_symlink(
+                        self,
+                        [(files[0].trim(), files[1].trim())].into_iter()
+                    )?
+                },
                 _ => command::OperationError::UnvalidCommand
             };
 
@@ -515,6 +557,25 @@ impl App {
         }
 
         Ok(())
+    }
+
+    pub fn expand_init(&mut self) {
+        self.command_expand = true;
+        self.command_scroll = Some(0);
+    }
+
+    pub fn expand_scroll(&mut self, direct: Goto) {
+        if let Some(ref mut scroll) = self.command_scroll {
+            match direct {
+                Goto::Up => {
+                    if *scroll > 0 {
+                        scroll.sub_assign(1);
+                    }
+                },
+                Goto::Down => scroll.add_assign(1),
+                _ => panic!("Unknown error!")
+            }
+        }
     }
 }
 
