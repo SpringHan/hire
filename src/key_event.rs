@@ -75,6 +75,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         ":create_file ",
                         CursorPos::End
                     ),
+                    '-' => app.hide_or_show()?,
                     'p' => app.option_key = OptionFor::Paste,
                     's' => make_single_symlink(app)?,
                     _ => ()
@@ -223,7 +224,7 @@ fn directory_movement(direction: char,
             app.init_parent_files()?;
             // Normally, calling this function would initialize child_index.
             // So, use TRUE to keep it.
-            app.refresh_select_item(true);
+            app.refresh_select_item();
 
             if app.file_content.is_some() {
                 app.file_content = None;
@@ -266,9 +267,9 @@ fn directory_movement(direction: char,
                 }
             }
             if !current_empty {
-                app.init_child_files(None)?;
+                app.init_child_files()?;
             }
-            app.refresh_select_item(false);
+            app.refresh_select_item();
             app.clean_search_idx();
         },
         'u' => {
@@ -324,9 +325,8 @@ pub fn move_cursor(app: &mut App,
         if in_root {
             let current_file = app.get_file_saver().unwrap();
 
-            let extra_path = PathBuf::from(&current_file.name);
             if current_file.is_dir {
-                app.init_current_files(Some(extra_path))?;
+                app.init_current_files()?;
                 app.selected_item.current_select(Some(0));
                 if app.file_content.is_some() {
                     app.file_content = None;
@@ -337,8 +337,8 @@ pub fn move_cursor(app: &mut App,
             return Ok(())
         }
         
-        app.init_child_files(None)?;
-        app.refresh_select_item(false);
+        app.init_child_files()?;
+        app.refresh_select_item();
     }
 
     Ok(())
@@ -580,21 +580,21 @@ where I: Iterator<Item = (String, bool)>
         if in_root {
             let current_select = app.get_file_saver().unwrap();
             if current_select.is_dir {
-                app.init_current_files(Some(current_select.name.clone()))?;
+                app.init_current_files()?;
             } else {
                 app.selected_item.current_select(None);
                 app.current_files.clear();
             }
         } else {
-            app.init_child_files(None)?;
+            app.init_child_files()?;
             app.selected_item.child_select(None);
         }
-        app.init_child_files(None)?;
-        app.refresh_select_item(false);
+        app.init_child_files()?;
+        app.refresh_select_item();
     } else {
-        app.init_child_files(None)?;
+        app.init_child_files()?;
         app.selected_item.child_select(None);
-        app.refresh_select_item(false);
+        app.refresh_select_item();
     }
 
     Ok(())

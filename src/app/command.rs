@@ -194,11 +194,11 @@ where I: Iterator<Item = &'a str>
         idx.select(Some(0));
         if app.path.to_string_lossy() == "/" {
             // NOTE: The first item in root directory must be a dir.
-            app.init_current_files(Some(app.parent_files[0].name.to_owned()))?;
+            app.init_current_files()?;
             app.selected_item.current_select(Some(0));
         } else {
-            app.init_child_files(None)?;
-            app.refresh_select_item(false);
+            app.init_child_files()?;
+            app.refresh_select_item();
         }
     } else {
         idx.select(Some(
@@ -209,11 +209,11 @@ where I: Iterator<Item = &'a str>
                 .unwrap()
         ));
         if app.path.to_string_lossy() == "/" {
-            app.init_current_files(Some(prev_file_name))?;
+            app.init_current_files()?;
             app.selected_item.current_select(Some(0));
         } else {
-            app.init_child_files(None)?;
-            app.refresh_select_item(false);
+            app.init_child_files()?;
+            app.refresh_select_item();
         }
     }
 

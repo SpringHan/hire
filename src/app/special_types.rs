@@ -86,3 +86,9 @@ impl ItemIndex {
         self.child.select(idx);
     }
 }
+
+pub enum SearchFile {
+    Parent,
+    Current,
+    Child
+}

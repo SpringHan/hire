@@ -22,6 +22,7 @@ use ratatui::widgets::ListState;
 
 pub struct App {
     pub path: PathBuf,
+    pub hide_files: bool,
     pub selected_item: ItemIndex,
     pub parent_files: Vec<FileSaver>,
     pub current_files: Vec<FileSaver>,
@@ -56,6 +57,11 @@ impl Default for App {
     fn default() -> Self {
         let current_dir = env::current_dir()
             .expect("Cannot get current directory!");
+        let selected_block = if current_dir.to_string_lossy() == "/" {
+            Block::Browser(true)
+        } else {
+            Block::Browser(false)
+        };
         let host_info = get_host_info();
         App {
             path: current_dir,
@@ -63,6 +69,7 @@ impl Default for App {
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
+            hide_files: true,
             file_content: None,
             command_idx: None,
             option_key: OptionFor::None,
@@ -71,7 +78,7 @@ impl Default for App {
             command_expand: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
-            selected_block: Block::Browser(false),
+            selected_block,
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1),
             marked_files: HashMap::new(),
@@ -85,7 +92,7 @@ impl App {
     /// Only get the path path of current file, without its file name.
     pub fn current_path(&self) -> PathBuf {
         if self.path.to_string_lossy() == "/" {
-            let current_file = self.get_file_saver().unwrap();
+            let current_file = self.search_file(SearchFile::Parent).unwrap();
             if current_file.is_dir {
                 self.path.join(current_file.name.to_owned())
             } else {
@@ -102,58 +109,58 @@ impl App {
         self.init_parent_files()?;
 
         if self.parent_files.is_empty() {
-            return Ok(())
+            panic!("Unknown Error!");
         }
+
+        self.refresh_parent_item();
 
         // Current files
-        self.init_current_files::<&str>(None)?;
+        self.init_current_files()?;
+        self.refresh_current_item();
+
         if self.current_files.is_empty() {
-            self.refresh_select_item(false);
+            if self.path.to_string_lossy() == "/" {
+                let selected_file = self.get_file_saver().unwrap();
+                if !selected_file.is_dir {
+                    self.set_file_content()?;
+                    self.refresh_child_item();
+                }
+            }
             return Ok(())
         }
 
-        // NOTE: Initialize the selected_item of parent & current, which are required in
-        // function app.set_file_content.
-        self.refresh_select_item(true);
-
         // Child Files
-        let current_selected_file = self.current_files
-            .get(0)
-            .unwrap()
-            .clone();
-        self.init_child_files(
-            Some(&current_selected_file)
-        )?;
-
-        self.refresh_select_item(false);
+        if self.path.to_string_lossy() != "/" {
+            self.init_child_files()?;
+            self.refresh_child_item();
+        }
         
         Ok(())
     }
 
-    /// Refresh the selected item of parent dir & current file.
-    /// When CHILD_KEEP is true, the child index will not be changed forcibly.
-    pub fn refresh_select_item(&mut self, child_keep: bool) {
-        // Parent
+    pub fn refresh_parent_item(&mut self) {
         if let None = self.selected_item.parent_selected() {
-            let parent_dir = self.path.file_name()
-                .unwrap()
-                .to_string_lossy();
-            let idx = self.parent_files
-                .iter()
-                .position(|e| e.name == parent_dir).unwrap();
-            self.selected_item.parent_select(Some(idx));
+            if self.path.to_string_lossy() == "/" {
+                self.selected_item.parent_select(Some(0));
+            } else {
+                let parent_dir = self.path.file_name().unwrap().to_string_lossy();
+                let idx = self.parent_files
+                    .iter()
+                    .position(|e| e.name == parent_dir).unwrap();
+                self.selected_item.parent_select(Some(idx));
+            }
         }
-        
-        // Current
-        if let None = self.selected_item.current_selected() {
-            self.selected_item.current_select(Some(0));
-        }
-        
-        if child_keep {
-            return ()
-        }
+    }
 
-        // Child
+    pub fn refresh_current_item(&mut self) {
+        if let None = self.selected_item.current_selected() {
+            if !self.current_files.is_empty() {
+                self.selected_item.current_select(Some(0));
+            }
+        }
+    }
+
+    pub fn refresh_child_item(&mut self) {
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
             self.file_content = None;
@@ -163,6 +170,12 @@ impl App {
         if self.selected_item.child_selected().is_some() {
             self.selected_item.child_select(None);
         }
+    }
+
+    pub fn refresh_select_item(&mut self) {
+        self.refresh_parent_item();
+        self.refresh_current_item();
+        self.refresh_child_item();
     }
 
     pub fn init_parent_files(&mut self) -> io::Result<()> {
@@ -181,17 +194,13 @@ impl App {
     }
 
     /// The PATH is used when the user is in root directory.
-    pub fn init_current_files<T>(&mut self, path: Option<T>) -> io::Result<()>
-    where T: AsRef<Path>
-    {
+    pub fn init_current_files(&mut self) -> io::Result<()> {
         // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
-        let temp_path = if let Some(_path) = path {
-            self.path.join(_path.as_ref())
-        } else {
-            self.path.clone()
-        };
+        let temp_path = self.current_path();
 
-        let mut current_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
+        let mut current_files: Vec<FileSaver> = self
+            .read_files(temp_path.as_path())
+            .expect("Error for read_files on a file!");
 
         // To aovid the situation that current_files do not be refreshed
         // when reading a empty directory.
@@ -205,17 +214,11 @@ impl App {
         Ok(())
     }
 
-    /// To intialize child files, CURRENT_SELECT should be Some(FileSaver)
-    /// To update child files, the value should be None.
     /// It's your deal to ensure CURRENT_FILES is not empty.
-    pub fn init_child_files(&mut self,
-                            current_select: Option<&FileSaver>
-    ) -> io::Result<()>
+    pub fn init_child_files(&mut self) -> io::Result<()>
     {
         let temp_path = self.path.clone();
-        let current_select = if let Some(file) = current_select {
-            file
-        } else {
+        let current_select = {
             let file_saver = self.current_files.get(
                 self.selected_item.current_selected()
                     .expect("Failed to initialize child files.")
@@ -259,19 +262,9 @@ impl App {
 
     pub fn get_file_saver(&self) -> Option<&FileSaver> {
         if self.path.to_string_lossy() == "/" {
-            self.parent_files
-                .get(self.selected_item.parent_selected().unwrap())
+            self.search_file(SearchFile::Parent)
         } else {
-            if self.current_files.is_empty() {
-                None
-            } else {
-                let current_select = self.selected_item.current_selected();
-                if let Some(idx) = current_select {
-                    self.current_files.get(idx)
-                } else {
-                    None
-                }
-            }
+            self.search_file(SearchFile::Current)
         }
     }
 
@@ -296,15 +289,125 @@ impl App {
             self.selected_item.parent_select(Some(0));
             self.selected_item.current_select(Some(0));
             self.init_parent_files()?;
-            self.init_current_files(Some(self.current_path()))?;
+            self.init_current_files()?;
         } else {
             self.selected_item.current_select(Some(0));
             self.selected_item.child_select(None);
-            self.init_current_files::<&str>(None)?;
-            self.init_child_files(None)?;
+            self.init_current_files()?;
+            self.init_child_files()?;
         }
-        self.refresh_select_item(false);
+        self.refresh_select_item();
 
+        Ok(())
+    }
+
+    pub fn search_file(&self, file: SearchFile) -> Option<&FileSaver> {
+        match file {
+            SearchFile::Parent => {
+                self.parent_files.get(
+                    self.selected_item.parent_selected().unwrap()
+                )
+            },
+            SearchFile::Current => {
+                let idx = self.selected_item.current_selected();
+                if let Some(idx) = idx {
+                    self.current_files.get(idx)
+                } else {
+                    None
+                }
+            },
+            SearchFile::Child => {
+                let idx = self.selected_item.child_selected();
+                if let Some(idx) = idx {
+                    self.child_files.get(idx)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// When the previous selected file doesn't exist now, return false.
+    fn select_prev_file(&mut self, list: SearchFile, file: &String) -> bool
+    {
+        match list {
+            SearchFile::Parent => {
+                let file_idx = self.parent_files
+                    .iter()
+                    .position(|f| f.name == *file);
+                self.selected_item.parent_select(
+                    if file_idx.is_some() {
+                        file_idx
+                    } else {
+                        Some(0)
+                    }
+                );
+
+                if file_idx.is_none() {
+                    return false
+                }
+            },
+            SearchFile::Current => {
+                let file_idx = self.current_files
+                    .iter()
+                    .position(|f| f.name == *file);
+                self.selected_item.current_select(
+                    if file_idx.is_some() {
+                        file_idx
+                    } else {
+                        Some(0)
+                    }
+                );
+
+                if file_idx.is_none() {
+                    return false
+                }
+            },
+            SearchFile::Child => {
+                let file_idx = self.child_files
+                    .iter()
+                    .position(|f| f.name == *file);
+                self.selected_item.child_select(
+                    if file_idx.is_some() {
+                        file_idx
+                    } else {
+                        Some(0)
+                    }
+                );
+
+                if file_idx.is_none() {
+                    return false
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Update all files and still tick currently selected files.
+    /// This function do not care for the case that whether parent file is a hidden file.
+    pub fn update_with_prev_selected(&mut self) -> io::Result<()> {
+        let parent_file = self.search_file(SearchFile::Parent).unwrap();
+        let mut parent_is_dir = parent_file.is_dir;
+        let parent_file = parent_file.name.to_owned();
+
+        self.init_parent_files()?;
+        let parent_hidden_file = self.select_prev_file(
+            SearchFile::Parent,
+            &parent_file
+        );
+
+        Ok(())
+    }
+
+    pub fn hide_or_show(&mut self) -> io::Result<()> {
+        self.hide_files = if self.hide_files {
+            false
+        } else {
+           true
+        };
+
+        self.update_with_prev_selected()?;
         Ok(())
     }
 }
@@ -350,8 +453,14 @@ impl App {
 
         match temp_dir {
             Ok(dir) => {
-                let result: Vec<FileSaver> = dir.map(filesave_closure).collect();
-                Ok(result)
+                let result = dir.map(filesave_closure);
+                if self.hide_files {
+                    Ok(result
+                       .filter(|file| !file.name.starts_with("."))
+                       .collect())
+                } else {
+                    Ok(result.collect())
+                }
             }
             Err(err) => {
                 if err.kind() == io::ErrorKind::PermissionDenied {
@@ -677,8 +786,8 @@ impl App {
 
             self.init_parent_files()?;
             self.selected_item.parent_select(Some(0));
-            self.init_current_files(Some(self.parent_files[0].name.to_owned()))?;
-            self.refresh_select_item(false);
+            self.init_current_files()?;
+            self.refresh_select_item();
         } else {
             self.init_all_files()?;
             if !self.command_error {
