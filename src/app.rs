@@ -219,10 +219,8 @@ impl App {
     {
         let temp_path = self.path.clone();
         let current_select = {
-            let file_saver = self.current_files.get(
-                self.selected_item.current_selected()
-                    .expect("Failed to initialize child files.")
-            );
+            // TODO: Pay attention to here.
+            let file_saver = self.search_file(SearchFile::Current);
             if let Some(file_saver) = file_saver {
                 file_saver
             } else {
@@ -385,17 +383,89 @@ impl App {
     }
 
     /// Update all files and still tick currently selected files.
-    /// This function do not care for the case that whether parent file is a hidden file.
     pub fn update_with_prev_selected(&mut self) -> io::Result<()> {
-        let parent_file = self.search_file(SearchFile::Parent).unwrap();
-        let mut parent_is_dir = parent_file.is_dir;
-        let parent_file = parent_file.name.to_owned();
+        // Initialize variables.
+        let parent_file = self
+            .search_file(SearchFile::Parent)
+            .unwrap()
+            .name
+            .to_owned();
+        let current_file: Option<String> = if let
+            Some(file) = self.search_file(SearchFile::Current)
+        {
+            Some(file.name.to_owned())
+        } else {
+            None
+        };
+        let child_file = if let
+            Some(file) = self.search_file(SearchFile::Child)
+        {
+            Some(file.name.to_owned())
+        } else {
+            None
+        };
+        let has_file_content = if self.file_content.is_some() {
+            true
+        } else {
+            false
+        };
 
-        self.init_parent_files()?;
-        let parent_hidden_file = self.select_prev_file(
-            SearchFile::Parent,
-            &parent_file
-        );
+        self.selected_item = ItemIndex::default();
+        self.file_content = None;
+        self.init_all_files()?;
+
+        // The parent file is a hidden file, there's no need to find back its child files.
+        if !self.select_prev_file(SearchFile::Parent, &parent_file) {
+            return Ok(())
+        }
+
+        if self.path.to_string_lossy() == "/" {
+            if !has_file_content {
+                self.init_current_files()?;
+                if current_file.is_some() {
+                    self.select_prev_file(SearchFile::Current, &current_file.unwrap());
+                } else {
+                    self.refresh_current_item();
+                }
+
+                if self.file_content.is_some() {
+                    self.file_content = None;
+                }
+            } else {
+                self.set_file_content()?;
+                if !self.current_files.is_empty() {
+                    self.current_files.clear();
+                    self.selected_item.current_select(None);
+                }
+            }
+
+            return Ok(())
+        }
+
+        // When the path is not in the root directory.
+        self.init_current_files()?;
+        if !self.select_prev_file(SearchFile::Current, &current_file.unwrap()) {
+            return Ok(())
+        }
+
+        if !has_file_content {
+            self.init_child_files()?;
+            if child_file.is_some() {
+                self.select_prev_file(SearchFile::Child, &child_file.unwrap());
+            } else {
+                self.refresh_child_item();
+            }
+
+            if self.file_content.is_some() {
+                self.file_content = None;
+            }
+        } else {
+            self.set_file_content()?;
+            if !self.child_files.is_empty() {
+                self.child_files.clear();
+                self.selected_item.child_select(None);
+            }
+        }
 
         Ok(())
     }
@@ -404,7 +474,7 @@ impl App {
         self.hide_files = if self.hide_files {
             false
         } else {
-           true
+            true
         };
 
         self.update_with_prev_selected()?;
