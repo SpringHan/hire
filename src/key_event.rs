@@ -75,7 +75,7 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                         ":create_file ",
                         CursorPos::End
                     ),
-                    '-' => app.hide_or_show()?,
+                    '-' => app.hide_or_show(None)?,
                     'p' => app.option_key = OptionFor::Paste,
                     's' => make_single_symlink(app)?,
                     _ => ()

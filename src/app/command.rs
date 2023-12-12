@@ -89,13 +89,13 @@ pub fn rename_file(path: PathBuf,
                    new_name: String
 ) -> io::Result<OperationError>
 {
+    let hide_files = app.hide_files;
     let file = app.get_file_saver_mut();
     if let None = file {
         return Ok(OperationError::NoSelected);
     }
 
     let file = file.unwrap();
-    let is_dir = file.is_dir;
 
     if file.cannot_read || file.read_only() {
         return Ok(OperationError::PermissionDenied(None))
@@ -110,6 +110,11 @@ pub fn rename_file(path: PathBuf,
     fs::rename(origin_file, &new_file)?;
     file.name = new_name.to_owned();
 
+    if new_name.starts_with(".") && hide_files {
+        app.hide_or_show(Some(new_name))?;
+        return Ok(OperationError::None)
+    }
+
     // Refresh modified time
     let metadata = fs::metadata(new_file)?;
     file.set_modified(metadata.modified().unwrap());
@@ -120,7 +125,7 @@ pub fn rename_file(path: PathBuf,
     sort(&mut new_files);
     let new_index = new_files
         .iter()
-        .position(|x| x.name == new_name && x.is_dir == is_dir)
+        .position(|x| x.name == new_name)
         .unwrap();
     *directory = new_files;
     index.select(Some(new_index));
@@ -137,6 +142,7 @@ where I: Iterator<Item = &'a str>
     let path = app.current_path();
     let mut exists_files: Vec<String> = Vec::new();
     let mut new_files: Vec<FileSaver> = Vec::new();
+    let mut to_show_hidden_files = false;
 
     for file in files {
         let file = file.trim_start();
@@ -176,45 +182,50 @@ where I: Iterator<Item = &'a str>
                 }
             }
         }
+
+        if !to_show_hidden_files && file.starts_with(".") && app.hide_files {
+            to_show_hidden_files = true;
+        }
     }
 
     // Update render
-    let mut prev_file_name = String::from("");
-    let mut prev_is_dir = false;
-    let current_file = app.get_file_saver();
-    if let Some(current_file) = current_file {
-        prev_file_name = current_file.name.to_owned();
-        prev_is_dir = current_file.is_dir;
-    }
+    if !to_show_hidden_files {
+        let mut prev_file_name = String::from("");
+        let current_file = app.get_file_saver();
+        if let Some(current_file) = current_file {
+            prev_file_name = current_file.name.to_owned();
+        }
 
-    let (dir, idx) = app.get_directory_mut();
-    dir.extend(new_files.into_iter());
-    sort(dir);
-    if prev_file_name.is_empty() {
-        idx.select(Some(0));
-        if app.path.to_string_lossy() == "/" {
-            // NOTE: The first item in root directory must be a dir.
-            app.init_current_files()?;
-            app.selected_item.current_select(Some(0));
+        let (dir, idx) = app.get_directory_mut();
+        dir.extend(new_files.into_iter());
+        sort(dir);
+        if prev_file_name.is_empty() {
+            idx.select(Some(0));
+            if app.path.to_string_lossy() == "/" {
+                // NOTE: The first item in root directory must be a dir.
+                app.init_current_files()?;
+                app.selected_item.current_select(Some(0));
+            } else {
+                app.init_child_files()?;
+                app.refresh_select_item();
+            }
         } else {
-            app.init_child_files()?;
-            app.refresh_select_item();
+            idx.select(Some(
+                dir.iter()
+                    .position(|file|
+                              file.name == prev_file_name)
+                    .unwrap()
+            ));
+            if app.path.to_string_lossy() == "/" {
+                app.init_current_files()?;
+                app.selected_item.current_select(Some(0));
+            } else {
+                app.init_child_files()?;
+                app.refresh_select_item();
+            }
         }
     } else {
-        idx.select(Some(
-            dir.iter()
-                .position(|file|
-                          file.name == prev_file_name
-                          && file.is_dir == prev_is_dir)
-                .unwrap()
-        ));
-        if app.path.to_string_lossy() == "/" {
-            app.init_current_files()?;
-            app.selected_item.current_select(Some(0));
-        } else {
-            app.init_child_files()?;
-            app.refresh_select_item();
-        }
+        app.hide_or_show(None)?;
     }
 
     if !exists_files.is_empty() {
@@ -234,6 +245,7 @@ where
     let mut no_permission: Vec<String> = Vec::new();
     let mut not_found: Vec<String> = Vec::new();
     let mut exists_links: Vec<String> = Vec::new();
+    let mut to_show_hidden_files = false;
 
     for (file, target) in files {
         match symlink(&file, &target) {
@@ -251,10 +263,21 @@ where
                     _ => return Err(err)
                 }
             },
-            _ => ()
+            _ => {
+                if !to_show_hidden_files
+                    && target.as_ref().file_name().unwrap().to_string_lossy().starts_with(".")
+                    && app.hide_files
+                {
+                    to_show_hidden_files = true;
+                }
+            }
         }
     }
-    app.partly_update_block()?;
+    if to_show_hidden_files {
+        app.hide_or_show(None)?;
+    } else {
+        app.partly_update_block()?;
+    }
 
     if !no_permission.is_empty() {
         OperationError::PermissionDenied(Some(no_permission)).check(app);

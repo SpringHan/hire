@@ -383,7 +383,13 @@ impl App {
     }
 
     /// Update all files and still tick currently selected files.
-    pub fn update_with_prev_selected(&mut self) -> io::Result<()> {
+    /// 
+    /// When there's a file that should be selected out from this function,
+    /// use TARGET argument.
+    pub fn update_with_prev_selected(&mut self,
+                                     target: Option<String>
+    ) -> io::Result<()>
+    {
         // Initialize variables.
         let parent_file = self
             .search_file(SearchFile::Parent)
@@ -410,12 +416,21 @@ impl App {
             false
         };
 
+        // NOTE: When totally refresh all the files, calling the following codes.
         self.selected_item = ItemIndex::default();
         self.file_content = None;
         self.init_all_files()?;
 
         // The parent file is a hidden file, there's no need to find back its child files.
-        if !self.select_prev_file(SearchFile::Parent, &parent_file) {
+        if !self.select_prev_file(
+            SearchFile::Parent,
+            if target.is_some() && self.path.to_string_lossy() == "/"
+            {
+                &target.as_ref().unwrap()
+            } else {
+                &parent_file                
+            })
+        {
             return Ok(())
         }
 
@@ -444,8 +459,14 @@ impl App {
 
         // When the path is not in the root directory.
         self.init_current_files()?;
-        if !self.select_prev_file(SearchFile::Current, &current_file.unwrap()) {
-            return Ok(())
+        if target.is_some() {
+            self.select_prev_file(SearchFile::Current, &target.unwrap());
+        } else {
+            if current_file.is_none()
+                || !self.select_prev_file(SearchFile::Current, &current_file.unwrap())
+            {
+                return Ok(())
+            }
         }
 
         if !has_file_content {
@@ -470,14 +491,14 @@ impl App {
         Ok(())
     }
 
-    pub fn hide_or_show(&mut self) -> io::Result<()> {
+    pub fn hide_or_show(&mut self, target: Option<String>) -> io::Result<()> {
         self.hide_files = if self.hide_files {
             false
         } else {
             true
         };
 
-        self.update_with_prev_selected()?;
+        self.update_with_prev_selected(target)?;
         Ok(())
     }
 }
