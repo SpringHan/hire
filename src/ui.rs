@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use ratatui::{
     Frame,
     text::{Line, Span, Text},
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Alignment},
     style::{Color, Style, Modifier, Stylize},
     widgets::{Block, List, ListItem, Borders, Paragraph, Wrap}
 };
@@ -32,8 +32,16 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
         .split(frame.size());
 
     // Title
-    let title_block = Block::default().on_black();
-    let title_paragraph = Paragraph::new(
+    let title_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50)
+        ])
+        .split(chunks[0]);
+
+    let computer_info_block = Block::default().on_black();
+    let computer_info = Paragraph::new(
         Line::from(
             vec![
                 Span::raw(format!("{}@{}", app.user_name, app.computer_name))
@@ -43,7 +51,15 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                     .white()
                     .bold()
             ]))
-        .block(title_block);
+        .block(computer_info_block);
+
+    // Item list statistic information
+    let item_info_block = Block::default().on_black();
+    let item_num_info = Paragraph::new(Line::from(
+        Span::raw(get_item_num_para(app)).white()
+    ))
+        .alignment(Alignment::Right)
+        .block(item_info_block);
 
     // Expanded Commandline
     if app.command_expand {
@@ -57,7 +73,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                 .scroll((app.command_scroll.unwrap(), 0))
                 .block(command_block);
 
-            frame.render_widget(title_paragraph, chunks[0]);
+            frame.render_widget(computer_info, chunks[0]);
             frame.render_widget(command_errors, chunks[1]);
             return ()
         } else {
@@ -100,7 +116,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     );
     let parent_list = List::new(parent_items).block(parent_block);
 
-    frame.render_widget(title_paragraph, chunks[0]);
+    frame.render_widget(computer_info, title_layout[0]);
+    frame.render_widget(item_num_info, title_layout[1]);
     frame.render_stateful_widget(
         parent_list,
         browser_layout[0],
@@ -367,4 +384,26 @@ fn get_command_line_span_list(
     span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
 
     span_list
+}
+
+fn get_item_num_para(app: &App) -> String {
+    let info = if app.path.to_string_lossy() == "/" {
+        format!(
+            "{}/{}",
+            app.selected_item.parent_selected().unwrap() + 1,
+            app.parent_files.len()
+        )
+    } else {
+        if app.current_files.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "{}/{}",
+                app.selected_item.current_selected().unwrap() + 1,
+                app.current_files.len()
+            )
+        }
+    };
+
+    info
 }
