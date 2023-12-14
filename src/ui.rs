@@ -50,21 +50,21 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                     app.term_colors.executable_style
                 ),
                 Span::styled(
-                    format!("  {}", app.path.to_string_lossy()),
+                    format!(
+                        "  {}{}",
+                        app.path.to_string_lossy(),
+                        if app.path.to_string_lossy() == "/" {
+                            ""
+                        } else {
+                            "/"
+                        }
+                    ),
                     app.term_colors.dir_style
                 ),
                 {
                     let current_file = app.get_file_saver();
                     let file = if let Some(current_file) = current_file {
-                        format!(
-                            "{}{}",
-                            if app.path.to_string_lossy() == "/" {
-                                ""
-                            } else {
-                                "/"
-                            },
-                            &current_file.name
-                        )
+                        current_file.name.to_owned()
                     } else {
                         String::new()
                     };
