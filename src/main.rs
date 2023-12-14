@@ -50,12 +50,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    if key.code == KeyCode::Char('q') {
-                        if let app::Block::Browser(_) = app.selected_block {
+                    match key.code {
+                        KeyCode::Char('q') => {
+                            if let app::Block::Browser(_) = app.selected_block {
+                                break;
+                            }
+                        },
+                        KeyCode::Char('S') => {
+                            std::env::set_current_dir(&app.path)?;
                             break;
-                        }
+                        },
+                        other => handle_event(other, &mut app)?
                     }
-                    handle_event(key.code, &mut app)?;
                 }
             }
         }

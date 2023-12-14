@@ -3,10 +3,12 @@
 pub mod filesaver;
 pub mod special_types;
 pub mod command;
+pub mod color;
 pub use special_types::*;
 
 use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
+pub use color::{TermColors, reverse_style};
 
 use std::error;
 use std::borrow::Cow;
@@ -49,6 +51,9 @@ pub struct App {
     // Search file
     pub searched_idx: Arc<Mutex<Vec<usize>>>,
 
+    // ColorScheme
+    pub term_colors: TermColors,
+
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
 }
@@ -63,6 +68,7 @@ impl Default for App {
             Block::Browser(false)
         };
         let host_info = get_host_info();
+        let term_colors = TermColors::init();
         App {
             path: current_dir,
             selected_item: ItemIndex::default(),
@@ -79,6 +85,7 @@ impl Default for App {
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             selected_block,
+            term_colors,
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1),
             marked_files: HashMap::new(),
@@ -1022,4 +1029,24 @@ fn get_host_info() -> (String, String) {
     };
 
     (host_name, user_name)
+}
+
+#[cfg(test)]
+mod test {
+    use ratatui::style::{Color, Modifier, Style};
+
+    use super::*;
+
+    #[test]
+    fn test_color_init() {
+        let mut app = App::default();
+        assert_eq!(
+            app.term_colors.dir_style,
+            Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            app.term_colors.symlink_style,
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        );
+    }
 }

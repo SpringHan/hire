@@ -5,9 +5,10 @@ use std::time::SystemTime;
 use std::path::PathBuf;
 use std::fs::{self, Permissions};
 
+use is_executable::is_executable;
 use ratatui::{
     text::Span,
-    style::Stylize
+    style::{Stylize, Style}
 };
 
 /// The structure used to save file information.
@@ -15,13 +16,14 @@ use ratatui::{
 pub struct FileSaver {
     pub name: String,
     pub is_dir: bool,
+    pub executable: bool,
     pub cannot_read: bool,
     pub dangling_symlink: bool,
+    pub symlink_file: Option<PathBuf>,
 
     size: u64,
     permissions: Option<Permissions>,
     modified_time: Option<SystemTime>,
-    symlink_file: Option<PathBuf>
 }
 
 impl Default for FileSaver {
@@ -32,6 +34,7 @@ impl Default for FileSaver {
             cannot_read: false,
             dangling_symlink: false,
             size: 0,
+            executable: false,
             permissions: None,
             modified_time: None,
             symlink_file: None
@@ -79,6 +82,7 @@ impl FileSaver {
                 } else {
                     None
                 };
+                let executable = is_executable(&file_path);
 
                 FileSaver {
                     name: file_name.into(),
@@ -86,6 +90,7 @@ impl FileSaver {
                     is_dir: metadata.is_dir(),
                     dangling_symlink: false,
                     symlink_file,
+                    executable,
                     cannot_read: false,
                     modified_time: Some(
                         metadata.modified()
@@ -152,14 +157,14 @@ impl FileSaver {
         Span::raw(file_size::fit_4(self.size))
     }
 
-    pub fn symlink_span(&self) -> Span {
+    pub fn symlink_span(&self, style: Style) -> Span {
         let link_file = if let Some(ref file) = self.symlink_file {
             format!("-> {}", file.to_string_lossy())
         } else {
             "".into()
         };
 
-        Span::raw(link_file).light_cyan()
+        Span::styled(link_file, style)
     }
 
 }

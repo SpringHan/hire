@@ -2,6 +2,7 @@
 
 use crate::App;
 use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles, FileOperation};
+use crate::app::{TermColors, reverse_style};
 
 use std::ops::AddAssign;
 use std::collections::HashMap;
@@ -35,35 +36,55 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     let title_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50)
+            Constraint::Percentage(75),
+            Constraint::Percentage(25)
         ])
         .split(chunks[0]);
-
-    let computer_info_block = Block::default().on_black();
+    
+    let computer_info_block = Block::default();
     let computer_info = Paragraph::new(
         Line::from(
             vec![
-                Span::raw(format!("{}@{}", app.user_name, app.computer_name))
-                    .light_green()
-                    .bold(),
-                Span::raw(format!("  {}", app.path.to_string_lossy()))
-                    .white()
-                    .bold()
+                Span::styled(
+                    format!("{}@{}", app.user_name, app.computer_name),
+                    app.term_colors.executable_style
+                ),
+                Span::styled(
+                    format!("  {}", app.path.to_string_lossy()),
+                    app.term_colors.dir_style
+                ),
+                {
+                    let current_file = app.get_file_saver();
+                    let file = if let Some(current_file) = current_file {
+                        format!(
+                            "{}{}",
+                            if app.path.to_string_lossy() == "/" {
+                                ""
+                            } else {
+                                "/"
+                            },
+                            &current_file.name
+                        )
+                    } else {
+                        String::new()
+                    };
+                    Span::styled(file, app.term_colors.file_style)
+                        .add_modifier(Modifier::BOLD)
+                }
             ]))
         .block(computer_info_block);
 
     // Item list statistic information
-    let item_info_block = Block::default().on_black();
+    let item_info_block = Block::default();
     let item_num_info = Paragraph::new(Line::from(
-        Span::raw(get_item_num_para(app)).white()
+        Span::styled(get_item_num_para(app), app.term_colors.file_style)
     ))
         .alignment(Alignment::Right)
         .block(item_info_block);
 
     // Expanded Commandline
     if app.command_expand {
-        let command_block = Block::default().on_black();
+        let command_block = Block::default();
         if let app::Block::CommandLine(ref error, _) = app.selected_block {
             let command_errors = Paragraph::new(
                 Text::raw(error)
@@ -106,11 +127,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
     // Parent Block
     let parent_block = Block::default()
-        .borders(Borders::ALL)
-        .on_black();
+        .borders(Borders::ALL);
     let parent_items = render_list(
         app.parent_files.iter(),
         app.selected_item.parent_selected(),
+        &app.term_colors,
         None,
         FileOperation::None
     );
@@ -138,11 +159,11 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                 frame.render_widget(render_file_content(app),browser_layout[2]);
             } else {
                 let child_block = Block::default()
-                    .borders(Borders::ALL)
-                    .on_black();
+                    .borders(Borders::ALL);
                 let child_items = render_list(
                     app.child_files.iter(),
                     app.selected_item.child_selected(),
+                    &app.term_colors,
                     None,
                     FileOperation::None
                 );
@@ -160,8 +181,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     // Current Block
     // Move current block to here to make preparation for file content of parent file.
     let current_block = Block::default()
-        .borders(Borders::ALL)
-        .on_black();
+        .borders(Borders::ALL);
     let marked_items = if app.path.to_string_lossy() == "/" {
         let path = app.path
             .join(&app.get_file_saver().unwrap().name);
@@ -172,6 +192,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     let current_items = render_list(
         app.current_files.iter(),
         app.selected_item.current_selected(),
+        &app.term_colors,
         marked_items,
         app.marked_operation
     );
@@ -191,6 +212,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 /// Create a list of ListItem
 fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                    idx: Option<usize>,
+                   colors: &TermColors,
                    marked_items: Option<&'a MarkedFiles>,
                    marked_operation: FileOperation
 ) -> Vec<ListItem<'a>>
@@ -225,7 +247,7 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                     Some(i) => {
                         // Make the style of selected item
                         if marked_files.contains_key(&file.name) {
-                            ListItem::new(Line::from(
+                            let item = ListItem::new(Line::from(
                                 Span::raw(&file.name)
                                     .fg(if *num == i {
                                         Color::Black
@@ -238,32 +260,26 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                                     } else {
                                         Modifier::empty()
                                     })
-                            ))
-                                .bg(if *num == i {
-                                    num.add_assign(1);
-                                    Color::LightYellow
-                                } else {
-                                    num.add_assign(1);
-                                    Color::Black
-                                })
+                            ));
+                            if *num == i {
+                                num.add_assign(1);
+                                item.bg(Color::LightYellow)
+                            } else {
+                                num.add_assign(1);
+                                item
+                            }
                         } else if *num == i {
                             num.add_assign(1);
-                            ListItem::new(Line::from(Span::styled(
-                                &file.name,
-                                Style::default()
-                                    .fg(Color::Black)
-                                    .add_modifier(get_file_font_style(file.is_dir))
-                            )))
-                                .on_white()
+                            get_normal_item_color(file, colors, true)
                         } else {
                             num.add_assign(1);
-                            get_normal_item_color(file)
+                            get_normal_item_color(file, colors, false)
                         }
                     },
                     None => panic!("Unknow error!")
                 }
             } else {
-                get_normal_item_color(file)
+                get_normal_item_color(file, colors, false)
             }
         );
     }
@@ -274,10 +290,11 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
 /// Render current file content if the selected file is not a dir.
 fn render_file_content(app: &App) -> Paragraph {
     let file_block = Block::default()
-        .borders(Borders::ALL)
-        .on_black();
+        .borders(Borders::ALL);
     if let Some(ref content) = app.file_content {
-        Paragraph::new(content.as_str()).block(file_block)
+        Paragraph::new(content.as_str())
+            .style(app.term_colors.file_style)
+            .block(file_block)
     } else {
         panic!("Unknown error!")
     }
@@ -287,7 +304,7 @@ fn render_file_content(app: &App) -> Paragraph {
 fn render_command_line(app: &App) -> Paragraph {
     use app::Block as ABlock;
 
-    let block = Block::default().on_black();
+    let block = Block::default();
     let message = match app.selected_block {
         ABlock::Browser(_) => {
             let selected_file = app.get_file_saver();
@@ -297,7 +314,7 @@ fn render_command_line(app: &App) -> Paragraph {
                 } else if selected_file.dangling_symlink {
                     Line::styled(
                         "DANGLING_SYMLINK",
-                        Style::default().light_red()
+                        app.term_colors.orphan_style
                     )
                 } else {
                     Line::from(vec![
@@ -307,7 +324,7 @@ fn render_command_line(app: &App) -> Paragraph {
                         Span::raw(" "),
                         selected_file.size_span(),
                         Span::raw(" "),
-                        selected_file.symlink_span()
+                        selected_file.symlink_span(app.term_colors.symlink_style)
                     ])
                 }
             } else {
@@ -327,16 +344,29 @@ fn render_command_line(app: &App) -> Paragraph {
 }
 
 /// Return the item which has the style of normal file.
-fn get_normal_item_color(file: &FileSaver) -> ListItem {
-    ListItem::new(
-        Line::from(
-            Span::styled(
-                &file.name,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(get_file_font_style(file.is_dir))
-            )
-        )
+fn get_normal_item_color<'a>(file: &'a FileSaver,
+                             colors: &TermColors,
+                             reverse: bool
+) -> ListItem<'a>
+{
+    let style = if file.is_dir {
+        colors.dir_style
+    } else if file.dangling_symlink {
+        colors.orphan_style
+    } else if file.executable {
+        colors.executable_style
+    } else if file.symlink_file.is_some() {
+        colors.symlink_style
+    } else {
+        colors.file_style
+    };
+
+    ListItem::new(Line::raw(&file.name)).style(
+        if reverse {
+            reverse_style(style)
+        } else {
+            style
+        }
     )
 }
 
