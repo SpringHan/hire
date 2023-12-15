@@ -56,11 +56,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 break;
                             }
                         },
-                        KeyCode::Char('S') => {
-                            std::env::set_current_dir(&app.path)?;
-                            break;
-                        },
-                        other => handle_event(other, &mut app)?
+                        other => handle_event(
+                            other,
+                            &mut app,
+                            &mut terminal
+                        )?
                     }
                 }
             }

@@ -9,10 +9,14 @@ use std::mem::swap;
 use std::error::Error;
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Stderr};
 use std::ops::{SubAssign, AddAssign};
 
+use ratatui::Terminal as RTerminal;
+use ratatui::backend::CrosstermBackend;
 use crossterm::event::KeyCode;
+
+type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
 /// The enum that used to declare method to move.
 #[derive(PartialEq, Eq)]
@@ -22,9 +26,18 @@ pub enum Goto {
     Index(usize)
 }
 
+pub enum ShellCommand<'a> {
+    Shell,
+    Command(&'a str)
+}
+
 // NOTE: When quiting command-line mode, you're required to use quit_command_mode function!
 /// Handle KEY event.
-pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
+pub fn handle_event(key: KeyCode,
+                    app: &mut App,
+                    terminal: &mut Terminal
+) -> Result<(), Box<dyn Error>>
+{
     match key {
         KeyCode::Char(c) => {
             if let app::Block::Browser(in_root) = app.selected_block {
@@ -78,6 +91,12 @@ pub fn handle_event(key: KeyCode, app: &mut App) -> Result<(), Box<dyn Error>> {
                     '-' => app.hide_or_show(None)?,
                     'p' => app.option_key = OptionFor::Paste,
                     's' => make_single_symlink(app)?,
+                    'S' => shell_process(app, terminal, ShellCommand::Shell)?,
+                    'l' => shell_process(
+                        app,
+                        terminal,
+                        ShellCommand::Command("lazygit")
+                    )?,
                     _ => ()
                 }
             } else {
@@ -835,6 +854,44 @@ fn make_single_symlink(app: &mut App) -> io::Result<()> {
             return Ok(())
         }
     }
+
+    Ok(())
+}
+
+/// Start a shell process.
+pub fn shell_process(app: &App,
+                     terminal: &mut Terminal,
+                     command: ShellCommand
+) -> io::Result<()>
+{
+    use std::process::Command;
+    use std::io::stderr;
+
+    use crossterm::terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen,
+        enable_raw_mode, disable_raw_mode
+    };
+    use crossterm::cursor::{Show, Hide};
+    use crossterm::execute;
+
+    disable_raw_mode()?;
+    execute!(stderr(), LeaveAlternateScreen, Show)?;
+
+    let command = match command {
+        ShellCommand::Shell => {
+            std::env::var("SHELL")
+                .expect("Unable to get current command.")
+        },
+        ShellCommand::Command(c) => c.to_owned()
+    };
+    let mut process = Command::new(command)
+        .current_dir(&app.path)
+        .spawn()?;
+    process.wait()?;
+
+    enable_raw_mode()?;
+    execute!(stderr(), EnterAlternateScreen, Hide)?;
+    terminal.clear()?;
 
     Ok(())
 }
