@@ -859,7 +859,7 @@ fn make_single_symlink(app: &mut App) -> io::Result<()> {
 }
 
 /// Start a shell process.
-pub fn shell_process(app: &App,
+pub fn shell_process(app: &mut App,
                      terminal: &mut Terminal,
                      command: ShellCommand
 ) -> io::Result<()>
@@ -892,6 +892,8 @@ pub fn shell_process(app: &App,
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
+
+    app.goto_dir(app.current_path())?;
 
     Ok(())
 }
