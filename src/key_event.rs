@@ -98,6 +98,7 @@ pub fn handle_event(key: KeyCode,
                         ShellCommand::Command("lazygit", None),
                         true
                     )?,
+                    'w' => app.goto_dir(fetch_working_directory()?)?,
                     _ => ()
                 }
             } else {
@@ -953,4 +954,21 @@ where P: AsRef<Path>
     )?;
 
     Ok(())
+}
+
+pub fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
+    use std::io::Read;
+
+    let user_name = std::env::var("USER")?;
+    let mut working_dir_file = std::fs::File::open(
+        format!("/home/{}/.cache/st-working-directory", user_name)
+    )?;
+    let mut working_dir = String::new();
+    working_dir_file.read_to_string(&mut working_dir)?;
+
+    if working_dir.ends_with("/") {
+        working_dir = working_dir.strip_suffix("/").unwrap().to_owned();
+    }
+
+    return Ok(PathBuf::from(working_dir));
 }

@@ -4,8 +4,7 @@ mod key_event;
 
 use std::io::stderr;
 use std::error::Error;
-use std::path::PathBuf;
-use key_event::{handle_event, shell_process, ShellCommand};
+use key_event::{handle_event, shell_process, ShellCommand, fetch_working_directory};
 use ratatui::{
     backend::CrosstermBackend,
     Terminal
@@ -75,17 +74,4 @@ fn main() -> Result<(), Box<dyn Error>> {
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())
-}
-
-fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
-    use std::io::Read;
-
-    let user_name = std::env::var("USER")?;
-    let mut working_dir_file = std::fs::File::open(
-        format!("/home/{}/.cache/st-working-directory", user_name)
-    )?;
-    let mut working_dir = String::new();
-    working_dir_file.read_to_string(&mut working_dir)?;
-
-    return Ok(PathBuf::from(working_dir));
 }
