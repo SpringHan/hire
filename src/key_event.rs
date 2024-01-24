@@ -28,7 +28,7 @@ pub enum Goto {
 
 pub enum ShellCommand<'a> {
     Shell,
-    Command(&'a str)
+    Command(&'a str, Option<&'a str>)
 }
 
 // NOTE: When quiting command-line mode, you're required to use quit_command_mode function!
@@ -61,7 +61,7 @@ pub fn handle_event(key: KeyCode,
 
                 match c {
                     'n' | 'i' | 'u' | 'e' => directory_movement(
-                        c, app, in_root
+                        c, app, terminal, in_root
                     )?,
                     'g' => app.option_key = OptionFor::Goto,
                     'G' => {
@@ -91,11 +91,12 @@ pub fn handle_event(key: KeyCode,
                     '-' => app.hide_or_show(None)?,
                     'p' => app.option_key = OptionFor::Paste,
                     's' => make_single_symlink(app)?,
-                    'S' => shell_process(app, terminal, ShellCommand::Shell)?,
+                    'S' => shell_process(app, terminal, ShellCommand::Shell, true)?,
                     'l' => shell_process(
                         app,
                         terminal,
-                        ShellCommand::Command("lazygit")
+                        ShellCommand::Command("lazygit", None),
+                        true
                     )?,
                     _ => ()
                 }
@@ -214,6 +215,7 @@ pub fn handle_event(key: KeyCode,
 
 fn directory_movement(direction: char,
                       app: &mut App,
+                      terminal: &mut Terminal,
                       in_root: bool
 ) -> Result<(), Box<dyn Error>>
 {
@@ -269,9 +271,18 @@ fn directory_movement(direction: char,
                 }
 
                 let selected_file = selected_file.unwrap();
-                if !selected_file.is_dir || selected_file.cannot_read {
-                    return Ok(())
+                if !selected_file.is_dir {
+                    open_file_in_shell(
+                        app,
+                        terminal,
+                        app.current_path().join(&selected_file.name)
+                    )?;
+                    return Ok(());
                 }
+                
+                // if !selected_file.is_dir || selected_file.cannot_read {
+                //     return Ok(())
+                // }
 
                 app.path = app.path.join(selected_file.name.to_owned());
                 app.parent_files = Vec::new();
@@ -508,7 +519,7 @@ pub fn mark_operation(app: &mut App,
             } else {
                 app.append_marked_file(
                     selected_file.name.to_owned(),
-                        selected_file.is_dir
+                    selected_file.is_dir
                 );
             }
             move_cursor(app, Goto::Down, in_root)?;
@@ -726,9 +737,9 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
 }
 
 fn paste_files<'a, I, P>(app: &'a mut App,
-                     file_iter: I,
-                     target_path: P,
-                     overwrite: bool
+                         file_iter: I,
+                         target_path: P,
+                         overwrite: bool
 ) -> io::Result<HashMap<PathBuf, Vec<String>>>
 where
     I: Iterator<Item = (&'a PathBuf, &'a MarkedFiles)>,
@@ -861,7 +872,8 @@ fn make_single_symlink(app: &mut App) -> io::Result<()> {
 /// Start a shell process.
 pub fn shell_process(app: &mut App,
                      terminal: &mut Terminal,
-                     command: ShellCommand
+                     command: ShellCommand,
+                     refresh: bool
 ) -> io::Result<()>
 {
     use std::process::Command;
@@ -877,23 +889,68 @@ pub fn shell_process(app: &mut App,
     disable_raw_mode()?;
     execute!(stderr(), LeaveAlternateScreen, Show)?;
 
+
+    let mut command_arg: Option<&str> = None;
+
     let command = match command {
         ShellCommand::Shell => {
             std::env::var("SHELL")
                 .expect("Unable to get current command.")
         },
-        ShellCommand::Command(c) => c.to_owned()
+        ShellCommand::Command(c, arg) => {
+            if let Some(arg) = arg {
+                command_arg = Some(arg);
+            }
+            c.to_owned()
+        }
     };
-    let mut process = Command::new(command)
-        .current_dir(&app.path)
-        .spawn()?;
-    process.wait()?;
+
+    let mut process = Command::new(command);
+    process.current_dir(&app.path);
+
+    if let Some(arg) = command_arg {
+        process.arg(arg);
+    }
+    process.spawn()?.wait()?;
+
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
 
-    app.goto_dir(app.current_path())?;
+    if refresh {
+        app.goto_dir(app.current_path())?;
+    }
+
+    Ok(())
+}
+
+fn open_file_in_shell<P>(app: &mut App,
+                         terminal: &mut Terminal,
+                         file: P
+) -> io::Result<()>
+where P: AsRef<Path>
+{
+    let file_path = file.as_ref();
+    let file_type = file_path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap();
+
+    let shell_command = match file_type {
+        "jpg" | "jpge" | "png" => "feh",
+        _ => "bat"
+    };
+
+    shell_process(
+        app,
+        terminal,
+        ShellCommand::Command(
+            shell_command,
+            Some(file_path.to_str().unwrap()),
+        ),
+        false
+    )?;
 
     Ok(())
 }

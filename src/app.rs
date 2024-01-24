@@ -49,6 +49,7 @@ pub struct App {
     pub command_history: Vec<String>,
 
     // Search file
+    pub need_to_jump: bool,
     pub searched_idx: Arc<Mutex<Vec<usize>>>,
 
     // ColorScheme
@@ -84,12 +85,13 @@ impl Default for App {
             command_expand: false,
             command_history: Vec::new(),
             searched_idx: Arc::new(Mutex::new(Vec::new())),
+            need_to_jump: false,
             selected_block,
             term_colors,
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1),
             marked_files: HashMap::new(),
-            marked_operation: FileOperation::None
+            marked_operation: FileOperation::None,
         }
     }
 }
@@ -808,6 +810,7 @@ impl App {
                 i += 1;
             }
         });
+        self.need_to_jump = true;
     }
 
     pub fn prev_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
@@ -859,6 +862,10 @@ impl App {
 
         if let Some(idx) = target {
             move_cursor(self, Goto::Index(idx), in_root)?;
+        }
+
+        if self.need_to_jump {
+            self.need_to_jump = false;
         }
 
         Ok(())
@@ -1039,7 +1046,7 @@ mod test {
 
     #[test]
     fn test_color_init() {
-        let mut app = App::default();
+        let app = App::default();
         assert_eq!(
             app.term_colors.dir_style,
             Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD)

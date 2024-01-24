@@ -4,7 +4,8 @@ mod key_event;
 
 use std::io::stderr;
 use std::error::Error;
-use key_event::handle_event;
+use std::path::PathBuf;
+use key_event::{handle_event, shell_process, ShellCommand};
 use ratatui::{
     backend::CrosstermBackend,
     Terminal
@@ -24,28 +25,28 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut app = App::default();
     app.init_all_files()?;
-    // println!("{:#?} {:#?} {:#?}", app.parent_files, app.current_files, app.child_files);
-    // println!("{:#?}", app.current_files);
-    // println!("{}", app.selected_item.0);
-    // println!("{:?}", app.current_files[0].size);
 
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;
-    loop {
-        // NOTE: Debug
-        // use ratatui::text::{Span, Line};
-        // use ratatui::style::{Stylize, Modifier};
-        // use ratatui::widgets::Paragraph;
-        // terminal.draw(|frame| {
-        //     let a = vec![
-        //         Span::raw("Test").add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC),
-        //         Span::raw("Test").add_modifier(Modifier::BOLD),
-        //         Span::raw("Test").add_modifier(Modifier::ITALIC)
-        //     ];
-        //     let b = Line::from(a);
-        //     frame.render_widget(Paragraph::new(b), frame.size());
-        // })?;
 
+    // Check, whether to enable working directory mode.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 {
+        match args[1].as_ref() {
+            "--working-directory" => {
+                app.goto_dir(fetch_working_directory()?)?;
+                shell_process(
+                    &mut app,
+                    &mut terminal,
+                    ShellCommand::Shell,
+                    true
+                )?;
+            },
+            _ => ()
+        }
+    }
+
+    loop {
         terminal.draw(|frame| ui::ui(frame, &mut app))?;
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
@@ -65,9 +66,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
+
+        if app.need_to_jump {
+            app.next_candidate()?;
+        }
     }
     
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())
+}
+
+fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
+    use std::io::Read;
+
+    let user_name = std::env::var("USER")?;
+    let mut working_dir_file = std::fs::File::open(
+        format!("/home/{}/.cache/st-working-directory", user_name)
+    )?;
+    let mut working_dir = String::new();
+    working_dir_file.read_to_string(&mut working_dir)?;
+
+    return Ok(PathBuf::from(working_dir));
 }
