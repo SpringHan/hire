@@ -33,6 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.len() == 2 {
         match args[1].as_ref() {
             "--working-directory" => {
+                app.hide_files = false;
                 app.goto_dir(fetch_working_directory()?)?;
                 shell_process(
                     &mut app,

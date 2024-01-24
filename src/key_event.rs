@@ -98,7 +98,10 @@ pub fn handle_event(key: KeyCode,
                         ShellCommand::Command("lazygit", None),
                         true
                     )?,
-                    'w' => app.goto_dir(fetch_working_directory()?)?,
+                    'w' => {
+                        app.hide_files = false;
+                        app.goto_dir(fetch_working_directory()?)?;
+                    },
                     _ => ()
                 }
             } else {
