@@ -85,6 +85,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     // Expanded Commandline
     if app.command_expand {
         let command_block = Block::default();
+        // TODO: Add other command style.
         if let app::Block::CommandLine(ref error, _) = app.selected_block {
             let command_errors = Paragraph::new(
                 Text::raw(error)

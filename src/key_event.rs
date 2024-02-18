@@ -91,7 +91,12 @@ pub fn handle_event(key: KeyCode,
                     '-' => app.hide_or_show(None)?,
                     'p' => app.option_key = OptionFor::Paste,
                     's' => make_single_symlink(app)?,
-                    'S' => shell_process(app, terminal, ShellCommand::Shell, true)?,
+                    'S' => shell_process(
+                        app,
+                        terminal,
+                        ShellCommand::Shell,
+                        true
+                    )?,
                     'l' => shell_process(
                         app,
                         terminal,
@@ -105,16 +110,16 @@ pub fn handle_event(key: KeyCode,
                     _ => ()
                 }
             } else {
-                if app.command_error {
-                    match c {
-                        '+' => app.expand_init(),
-                        'e' => app.expand_scroll(Goto::Down),
-                        'u' => app.expand_scroll(Goto::Up),
-                        _ => ()
-                    }
-                } else {
-                    app.command_line_append(c);
-                }
+                // if app.command_error {
+                //     match c {
+                //         '+' => app.expand_init(),
+                //         'e' => app.expand_scroll(Goto::Down),
+                //         'u' => app.expand_scroll(Goto::Up),
+                //         _ => ()
+                //     }
+                // } else {
+                // }
+                app.command_line_append(c);
             }
         },
 
@@ -208,6 +213,25 @@ pub fn handle_event(key: KeyCode,
                     }
                     idx.add_assign(1);
                 }
+            }
+        },
+
+        KeyCode::Tab => {
+            // TODO: Pay attention to command_error.
+            if let app::Block::CommandLine(_, _) = app.selected_block {
+                app.expand_init();
+            }
+        },
+
+        KeyCode::F(1) => {
+            if app.command_expand {
+                app.expand_scroll(Goto::Up);
+            }
+        },
+
+        KeyCode::Delete => {
+            if app.command_expand {
+                app.expand_scroll(Goto::Down);
             }
         },
 
