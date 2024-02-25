@@ -4,6 +4,7 @@ use crate::App;
 use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles, FileOperation};
 use crate::app::{TermColors, reverse_style};
 
+use std::borrow::Cow;
 use std::ops::AddAssign;
 use std::collections::HashMap;
 
@@ -86,21 +87,19 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     if app.command_expand {
         let command_block = Block::default();
         // TODO: Add other command style.
-        if let app::Block::CommandLine(ref error, _) = app.selected_block {
-            let command_errors = Paragraph::new(
-                Text::raw(error)
-            )
-                .red()
-                .wrap(Wrap { trim: true })
-                .scroll((app.command_scroll.unwrap(), 0))
-                .block(command_block);
+        if let app::Block::CommandLine(ref msg, cursor) = app.selected_block {
+            let command_errors = get_command_line_style(
+                app,
+                msg,
+                cursor
+            ).block(command_block);
 
             frame.render_widget(computer_info, chunks[0]);
             frame.render_widget(command_errors, chunks[1]);
             return ()
-        } else {
-            app.quit_command_mode();
         }
+
+        app.quit_command_mode();
     }
 
 
@@ -381,16 +380,16 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
     }
 }
 
-fn get_command_line_span_list(
-    command: &String,
-    cursor: CursorPos,
-    error_msg: bool
-) -> Vec<Span>
+fn get_command_line_span_list<'a, S>(command: S,
+                              cursor: CursorPos,
+                              error_msg: bool
+) -> Vec<Span<'a>>
+where S: Into<Cow<'a, str>>
 {
     let mut span_list: Vec<Span> = Vec::new();
     if let CursorPos::Index(idx) = cursor {
         let mut i = 0;
-        for c in command.chars() {
+        for c in command.into().chars() {
             span_list.push(
                 if i == idx {
                     Span::raw(String::from(c))
@@ -437,4 +436,29 @@ fn get_item_num_para(app: &App) -> String {
     };
 
     info
+}
+
+/// Create Paragraph structure with different color.
+///
+/// Make the text red when it's an error message.
+fn get_command_line_style<'a, S>(app: &App,
+                                 content: S,
+                                 cursor: CursorPos
+) -> Paragraph<'a>
+where S: Into<Cow<'a, str>>
+{
+    if app.command_error {
+        Paragraph::new(
+            Text::raw(content)
+        )
+            .red()
+            .wrap(Wrap { trim: true })
+            .scroll((app.command_scroll.unwrap(), 0))
+    } else {
+        Paragraph::new(Line::from(
+            get_command_line_span_list(content, cursor, false)
+        ))
+            .wrap(Wrap { trim: true })
+            .scroll((app.command_scroll.unwrap(), 0))
+    }
 }

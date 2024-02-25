@@ -612,12 +612,14 @@ impl App {
             self.command_idx = None;
         }
 
-        if self.command_error {
-            self.command_error = false;
+        if self.command_expand {
             self.command_expand = false;
             self.command_scroll = None;
         }
 
+        if self.command_error {
+            self.command_error = false;
+        }
     }
     
     /// The function will change content in command line.
@@ -973,7 +975,7 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     }
 }
 
-// TODO: Delete commented code lines when the time is right.
+// TODO: Delete commented code lines when current code works well for a long time.
 #[inline]
 fn get_search_index<'a, T>(iter: T,
                            current: usize,
