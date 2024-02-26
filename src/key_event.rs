@@ -31,7 +31,9 @@ pub enum ShellCommand<'a> {
     Command(&'a str, Option<&'a str>)
 }
 
-// NOTE: When quiting command-line mode, you're required to use quit_command_mode function!
+// NOTE(for coding): When quiting command-line mode, you're required to use quit_command_mode function!
+// NOTE(for coding): DO NOT use return in the match control to skip specific code, which
+// could cause missing the following procedures.
 /// Handle KEY event.
 pub fn handle_event(key: KeyCode,
                     app: &mut App,
@@ -41,7 +43,7 @@ pub fn handle_event(key: KeyCode,
     match key {
         KeyCode::Char(c) => {
             if let app::Block::Browser(in_root) = app.selected_block {
-                // NOTE: All the function in the blocks below must be end with
+                // NOTE(for coding): All the function in the blocks below must be end with
                 // code to set OPTION_KEY to None.
                 match app.option_key {
                     OptionFor::Goto => {
@@ -110,15 +112,6 @@ pub fn handle_event(key: KeyCode,
                     _ => ()
                 }
             } else {
-                // if app.command_error {
-                //     match c {
-                //         '+' => app.expand_init(),
-                //         'e' => app.expand_scroll(Goto::Down),
-                //         'u' => app.expand_scroll(Goto::Up),
-                //         _ => ()
-                //     }
-                // } else {
-                // }
                 app.command_line_append(c);
             }
         },
@@ -171,13 +164,21 @@ pub fn handle_event(key: KeyCode,
 
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
-                app.command_select(Goto::Up);
+                if app.command_expand {
+                    app.expand_scroll(Goto::Up);
+                } else {
+                    app.command_select(Goto::Up);
+                }
             }
         },
 
         KeyCode::Down => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
-                app.command_select(Goto::Down);
+                if app.command_expand {
+                    app.expand_scroll(Goto::Down);
+                } else {
+                    app.command_select(Goto::Down);
+                }
             }
         },
 
@@ -217,21 +218,15 @@ pub fn handle_event(key: KeyCode,
         },
 
         KeyCode::Tab => {
-            // TODO: Pay attention to command_error.
+            // TODO(to be removed): Pay attention to command_error.
             if let app::Block::CommandLine(_, _) = app.selected_block {
-                app.expand_init();
-            }
-        },
-
-        KeyCode::F(1) => {
-            if app.command_expand {
-                app.expand_scroll(Goto::Up);
-            }
-        },
-
-        KeyCode::Delete => {
-            if app.command_expand {
-                app.expand_scroll(Goto::Down);
+                // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+                if app.command_expand {
+                    app.command_expand = false;
+                    app.command_scroll = None;
+                } else {
+                    app.expand_init();
+                }
             }
         },
 
@@ -465,7 +460,7 @@ fn delete_operation(app: &mut App,
 {
     match key {
         'd' => {
-            // NOTE: Check whether the target dir is accessible firstly.
+            // Check whether the target dir is accessible firstly.
             if app.marked_files.is_empty() {
                 let current_file = app.get_file_saver();
                 if let Some(current_file) = current_file {
@@ -554,7 +549,7 @@ pub fn mark_operation(app: &mut App,
             return Ok(())
         }
     } else if !app.current_files.is_empty() {
-        // NOTE: Maybe append all files to marked files could be implied in app method.
+        // NOTE(for refactoring): Maybe append all files to marked files could be implied in app method.
         if app.marked_file_contains_path() {
             app.clear_path_marked_files();
         } else {
