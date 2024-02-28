@@ -55,6 +55,9 @@ pub struct App {
     // ColorScheme
     pub term_colors: TermColors,
 
+    // Target directories
+    pub target_dir: HashMap<char, String>,
+
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
 }
@@ -72,26 +75,27 @@ impl Default for App {
         let term_colors = TermColors::init();
         App {
             path: current_dir,
+            hide_files: true,
             selected_item: ItemIndex::default(),
             parent_files: Vec::new(),
             current_files: Vec::new(),
             child_files: Vec::new(),
-            hide_files: true,
             file_content: None,
-            command_idx: None,
-            option_key: OptionFor::None,
-            command_error: false,
-            command_scroll: None,
-            command_expand: false,
-            command_history: Vec::new(),
-            searched_idx: Arc::new(Mutex::new(Vec::new())),
-            need_to_jump: false,
             selected_block,
-            term_colors,
-            computer_name: Cow::from(host_info.0),
-            user_name: Cow::from(host_info.1),
-            marked_files: HashMap::new(),
+            option_key: OptionFor::None,
             marked_operation: FileOperation::None,
+            marked_files: HashMap::new(),
+            command_error: false,
+            command_expand: false,
+            command_scroll: None,
+            command_idx: None,
+            command_history: Vec::new(),
+            need_to_jump: false,
+            searched_idx: Arc::new(Mutex::new(Vec::new())),
+            term_colors,
+            target_dir: HashMap::new(),
+            computer_name: Cow::from(host_info.0),
+            user_name: Cow::from(host_info.1)
         }
     }
 }
