@@ -8,6 +8,7 @@ mod shell_command;
 // Export
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
+pub use goto_operation::create_config_file;
 
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};

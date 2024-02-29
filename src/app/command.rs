@@ -41,7 +41,7 @@ impl OperationError {
                 if let Some(files) = files {
                     Some(format!("[Error]: Not found: {:?}", files))
                 } else {
-                    Some(String::from("[Error]: Not found file!"))
+                    Some(String::from("[Error]: The file/item cannot be found!"))
                 }
             },
             OperationError::Specific(err) => {

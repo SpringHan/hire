@@ -25,6 +25,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::default();
     app.init_all_files()?;
 
+    // Make sure config file exists.
+    // TODO: In the meanwhile, fetch all the target directories.
+    let config_path = key_event::create_config_file()?;
+    app.config_path = config_path;
+
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;
 

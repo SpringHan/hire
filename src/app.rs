@@ -58,6 +58,9 @@ pub struct App {
     // Target directories
     pub target_dir: HashMap<char, String>,
 
+    // Config Path
+    pub config_path: String,
+
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
 }
@@ -94,6 +97,7 @@ impl Default for App {
             searched_idx: Arc::new(Mutex::new(Vec::new())),
             term_colors,
             target_dir: HashMap::new(),
+            config_path: String::new(),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
         }
