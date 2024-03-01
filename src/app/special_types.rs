@@ -1,5 +1,7 @@
 // Special types used in App structure.
 
+use crate::key_event::GotoOperation;
+
 use std::collections::HashMap;
 
 use ratatui::widgets::ListState;
@@ -12,7 +14,7 @@ pub enum CursorPos {
 
 #[derive(PartialEq)]
 pub enum OptionFor {
-    Goto,
+    Goto(GotoOperation),
     Delete,
     Paste,
     None

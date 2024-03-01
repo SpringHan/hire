@@ -25,10 +25,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::default();
     app.init_all_files()?;
 
-    // Make sure config file exists.
-    // TODO: In the meanwhile, fetch all the target directories.
-    let config_path = key_event::create_config_file()?;
-    app.config_path = config_path;
+    // Init config information.
+    key_event::init_config(&mut app)?;
 
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;
@@ -38,7 +36,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.len() == 2 {
         match args[1].as_ref() {
             "--working-directory" => {
-                app.hide_files = false;
                 app.goto_dir(fetch_working_directory()?)?;
                 shell_process(
                     &mut app,

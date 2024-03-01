@@ -8,7 +8,7 @@ mod shell_command;
 // Export
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
-pub use goto_operation::create_config_file;
+pub use goto_operation::{init_config, GotoOperation};
 
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};
@@ -50,8 +50,8 @@ pub fn handle_event(key: KeyCode,
                 // NOTE(for coding): All the function in the blocks below must be end with
                 // code to set OPTION_KEY to None.
                 match app.option_key {
-                    OptionFor::Goto => {
-                        goto_operation(app, c, in_root)?;
+                    OptionFor::Goto(modifying) => {
+                        goto_operation(app, c, modifying, in_root)?;
                         return Ok(())
                     },
                     OptionFor::Delete => {
@@ -69,7 +69,7 @@ pub fn handle_event(key: KeyCode,
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, terminal, in_root
                     )?,
-                    'g' => app.option_key = OptionFor::Goto,
+                    'g' => app.option_key = OptionFor::Goto(GotoOperation::None),
                     'G' => {
                         let last_idx = if in_root {
                             app.parent_files.len() - 1
@@ -109,10 +109,7 @@ pub fn handle_event(key: KeyCode,
                         ShellCommand::Command("lazygit", None),
                         true
                     )?,
-                    'w' => {
-                        app.hide_files = false;
-                        app.goto_dir(fetch_working_directory()?)?;
-                    },
+                    'w' => app.goto_dir(fetch_working_directory()?)?,
                     _ => ()
                 }
             } else {

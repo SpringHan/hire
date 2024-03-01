@@ -160,7 +160,10 @@ impl App {
             if self.path.to_string_lossy() == "/" {
                 self.selected_item.parent_select(Some(0));
             } else {
-                let parent_dir = self.path.file_name().unwrap().to_string_lossy();
+                let parent_dir = self.path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy();
                 let idx = self.parent_files
                     .iter()
                     .position(|e| e.name == parent_dir).unwrap();
@@ -893,6 +896,7 @@ impl App {
         self.selected_item = ItemIndex::default();
         self.file_content = None;
         self.child_files.clear();
+        self.hide_files = false;
 
         if dir.as_ref().to_string_lossy() == "/" {
             if !self.command_error {
