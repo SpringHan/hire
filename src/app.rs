@@ -896,7 +896,10 @@ impl App {
         self.selected_item = ItemIndex::default();
         self.file_content = None;
         self.child_files.clear();
-        self.hide_files = false;
+
+        if path_is_hidden(&self.path) {
+            self.hide_files = false;
+        }
 
         if dir.as_ref().to_string_lossy() == "/" {
             if !self.command_error {
@@ -973,6 +976,12 @@ impl App {
         let path = self.current_path();
         self.marked_files.remove(&path);
     }
+}
+
+/// Check whether `path` is in hidden directories.
+pub fn path_is_hidden<P: AsRef<Path>>(path: P) -> bool {
+    let path = path.as_ref().to_string_lossy();
+    path.contains("/.")
 }
 
 #[inline]
