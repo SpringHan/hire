@@ -1,6 +1,6 @@
 // Special types used in App structure.
 
-use crate::key_event::GotoOperation;
+use crate::key_event::{GotoOperation, SwitchCase};
 
 use std::collections::HashMap;
 
@@ -12,9 +12,10 @@ pub enum CursorPos {
     End
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum OptionFor {
     Goto(GotoOperation),
+    Switch(SwitchCase),
     Delete,
     Paste,
     None

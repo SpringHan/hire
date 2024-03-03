@@ -4,11 +4,13 @@ mod cursor_movement;
 mod file_operations;
 mod goto_operation;
 mod shell_command;
+mod switch_operation;
 
 // Export
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
 pub use goto_operation::{init_config, GotoOperation};
+pub use switch_operation::SwitchCase;
 
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};
@@ -52,6 +54,10 @@ pub fn handle_event(key: KeyCode,
                 match app.option_key {
                     OptionFor::Goto(modifying) => {
                         goto_operation(app, c, modifying, in_root)?;
+                        return Ok(())
+                    },
+                    OptionFor::Switch(case) => {
+                        switch_operation::switch_match(app, case, c)?;
                         return Ok(())
                     },
                     OptionFor::Delete => {
