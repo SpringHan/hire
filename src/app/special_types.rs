@@ -9,7 +9,8 @@ use ratatui::widgets::ListState;
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CursorPos {
     Index(usize),
-    End
+    End,
+    None
 }
 
 #[derive(PartialEq, Eq)]

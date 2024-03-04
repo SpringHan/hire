@@ -381,8 +381,8 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
 }
 
 fn get_command_line_span_list<'a, S>(command: S,
-                              cursor: CursorPos,
-                              error_msg: bool
+                                     cursor: CursorPos,
+                                     error_msg: bool
 ) -> Vec<Span<'a>>
 where S: Into<Cow<'a, str>>
 {
@@ -411,7 +411,10 @@ where S: Into<Cow<'a, str>>
     } else {
         Color::White
     }));
-    span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
+
+    if let CursorPos::End = cursor {
+        span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
+    }
 
     span_list
 }
@@ -447,17 +450,24 @@ fn get_command_line_style<'a, S>(app: &App,
 ) -> Paragraph<'a>
 where S: Into<Cow<'a, str>>
 {
-    if app.command_error {
-        Paragraph::new(
+    if let CursorPos::None = cursor {
+        let temp = Paragraph::new(
             Text::raw(content)
         )
-            .red()
             .wrap(Wrap { trim: true })
-            .scroll((app.command_scroll.unwrap(), 0))
+            .scroll((app.command_scroll.unwrap(), 0));
+
+        if app.command_error {
+            return temp.red()
+        }
+
+        temp
     } else {
-        Paragraph::new(Line::from(
-            get_command_line_span_list(content, cursor, false)
-        ))
+        Paragraph::new(Line::from(get_command_line_span_list(
+            content,
+            cursor,
+            app.command_error
+        )))
             .wrap(Wrap { trim: true })
             .scroll((app.command_scroll.unwrap(), 0))
     }

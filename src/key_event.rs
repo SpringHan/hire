@@ -5,12 +5,14 @@ mod file_operations;
 mod goto_operation;
 mod shell_command;
 mod switch_operation;
+mod tab;
 
 // Export
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
 pub use goto_operation::{init_config, GotoOperation};
 pub use switch_operation::SwitchCase;
+pub use tab::TabList;
 
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};
@@ -130,14 +132,18 @@ pub fn handle_event(key: KeyCode,
                     ref mut cursor
                 ) = app.selected_block
             {
-                if let app::CursorPos::Index(idx) = cursor {
-                    if *idx == 0 {
-                        return Ok(())
-                    }
-                    origin.remove(*idx - 1);
-                    idx.sub_assign(1);
-                } else {
-                    origin.pop();
+                match cursor {
+                    app::CursorPos::Index(idx) => {
+                        if *idx == 0 {
+                            return Ok(())
+                        }
+                        origin.remove(*idx - 1);
+                        idx.sub_assign(1);
+                    },
+                    app::CursorPos::End => {
+                        origin.pop();
+                    },
+                    _ => ()
                 }
             }
         },
@@ -196,13 +202,17 @@ pub fn handle_event(key: KeyCode,
                     ref mut cursor
                 ) = app.selected_block
             {
-                if let CursorPos::Index(idx) = cursor {
-                    if *idx == 0 {
-                        return Ok(())
-                    }
-                    idx.sub_assign(1);
-                } else {
-                    *cursor = CursorPos::Index(command.len() - 1);
+                match cursor {
+                    CursorPos::Index(idx) => {
+                        if *idx == 0 {
+                            return Ok(())
+                        }
+                        idx.sub_assign(1);
+                    },
+                    CursorPos::End => {
+                        *cursor = CursorPos::Index(command.len() - 1);
+                    },
+                    _ => ()
                 }
             }
         },

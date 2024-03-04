@@ -65,22 +65,28 @@ impl OperationError {
                     error.push_str(&format!("\n{}", msg));
                 } else {
                     *error = msg;
-                    *cursor = CursorPos::End;
+                    *cursor = CursorPos::None;
+                    app.command_error = true;
+                }
+
+                // Turn off Switch mode.
+                if let super::OptionFor::Switch(_) = app.option_key {
+                    app.option_key = super::OptionFor::None;
                 }
             } else {
-                app.set_command_line(msg, CursorPos::End);
-            }
-        } else {
-            // Though current error not exists, but previous errors exist.
-            if app.command_error {
-                return false
+                app.set_command_line(msg, CursorPos::None);
+                app.command_error = true;
             }
 
-            return true
+            return false
         }
-        app.command_error = true;
 
-        false
+        // Though current error not exists, but previous errors exist.
+        if app.command_error {
+            return false
+        }
+
+        true
     }
 }
 

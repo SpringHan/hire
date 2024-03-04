@@ -61,6 +61,9 @@ pub struct App {
     // Config Path
     pub config_path: String,
 
+    // Tab
+    pub tab_list: crate::key_event::TabList,
+
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
 }
@@ -98,6 +101,7 @@ impl Default for App {
             term_colors,
             target_dir: HashMap::new(),
             config_path: String::new(),
+            tab_list: crate::key_event::TabList::default(),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
         }
