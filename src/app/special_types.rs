@@ -17,6 +17,7 @@ pub enum CursorPos {
 pub enum OptionFor {
     Goto(GotoOperation),
     Switch(SwitchCase),
+    Tab,
     Delete,
     Paste,
     None

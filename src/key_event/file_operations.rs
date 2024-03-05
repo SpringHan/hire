@@ -51,11 +51,8 @@ pub fn append_file_name(app: &mut App, to_end: bool) {
 }
 
 
-pub fn delete_operation(app: &mut App,
-                        key: char,
-                        in_root: bool
-) -> Result<(), Box<dyn Error>>
-{
+pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
+    let in_root = app.path.to_string_lossy() == "/";
     match key {
         'd' => {
             // Check whether the target dir is accessible firstly.

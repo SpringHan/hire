@@ -10,7 +10,12 @@ type FuncPointer = fn(&mut App, char) -> Result<(), Box<dyn Error>>;
 pub struct SwitchCase(FuncPointer);
 
 impl SwitchCase {
-    fn new(app: &mut App, func: FuncPointer, msg: String) {
+    pub fn new(app: &mut App, func: FuncPointer, msg: String) {
+        if app.command_error {
+            app.command_error = false;
+        }
+
+        app.expand_init();
         app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);
         app.option_key = app::OptionFor::Switch(SwitchCase(func));
     }
@@ -24,6 +29,7 @@ pub fn switch_match(
 {
     let SwitchCase(func) = case;
     func(app, key)?;
+    app.quit_command_mode();
 
     Ok(())
 }

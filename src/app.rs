@@ -77,8 +77,12 @@ impl Default for App {
         } else {
             Block::Browser(false)
         };
+        let tab_list = crate::key_event::TabList::new(
+            current_dir.to_owned()
+        );
         let host_info = get_host_info();
         let term_colors = TermColors::init();
+
         App {
             path: current_dir,
             hide_files: true,
@@ -101,7 +105,7 @@ impl Default for App {
             term_colors,
             target_dir: HashMap::new(),
             config_path: String::new(),
-            tab_list: crate::key_event::TabList::default(),
+            tab_list,
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
         }
@@ -635,6 +639,8 @@ impl App {
         if self.command_error {
             self.command_error = false;
         }
+
+        self.option_key = OptionFor::None;
     }
     
     /// The function will change content in command line.

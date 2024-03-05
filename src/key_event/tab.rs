@@ -1,25 +1,51 @@
 // Tab.
 
 use super::SwitchCase;
-use crate::app::App;
+use crate::app::{self, App};
 use crate::app::command::OperationError;
 
 use std::io;
+use std::error::Error;
 use std::path::PathBuf;
-use std::ops::{AddAssign, SubAssign};
 
 pub struct TabList {
     list: Vec<PathBuf>,
     current: usize
 }
 
-impl Default for TabList {
-    fn default() -> Self {
+impl TabList {
+    pub fn new(path: PathBuf) -> Self {
         TabList {
-            list: Vec::new(),
+            list: vec![path],
             current: 0
         }
     }
+}
+
+pub fn tab_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
+    match key {
+        'n' => create(app),
+        'f' => next(app)?,
+        'b' => prev(app)?,
+        'c' => remove_base(app, app.tab_list.current)?,
+        's' => {
+            app.tab_list.list[app.tab_list.current] = app.path.to_owned();
+            let msg = tab_string_list(app.tab_list.list.iter());
+            SwitchCase::new(app, switch, msg);
+            return Ok(())
+        },
+        'd' => {
+            app.tab_list.list[app.tab_list.current] = app.path.to_owned();
+            let msg = tab_string_list(app.tab_list.list.iter());
+            SwitchCase::new(app, remove_export, msg);
+            return Ok(())
+        },
+        _ => ()
+    }
+
+    app.option_key = app::OptionFor::None;
+
+    Ok(())
 }
 
 fn next(app: &mut App) -> io::Result<()> {
@@ -30,7 +56,7 @@ fn next(app: &mut App) -> io::Result<()> {
     }
 
     tab.list[tab.current] = app.path.to_owned();
-    tab.current.add_assign(1);
+    tab.current += 1;
 
     let target_tab = tab.list
         .get(tab.current)
@@ -49,7 +75,7 @@ fn prev(app: &mut App) -> io::Result<()> {
     }
 
     tab.list[tab.current] = app.path.to_owned();
-    tab.current.sub_assign(1);
+    tab.current -= 1;
 
     let target_tab = tab.list
         .get(tab.current)
@@ -61,15 +87,16 @@ fn prev(app: &mut App) -> io::Result<()> {
 }
 
 // NOTE: As the new tab is created with current directory, there's no need to call goto function.
-fn insert(app: &mut App) {
+fn create(app: &mut App) {
     let tab = &mut app.tab_list;
     tab.list[tab.current] = app.path.to_owned();
     tab.list.push(app.path.to_owned());
-    tab.current.add_assign(1);
+    tab.current += 1;
 }
 
-fn remove(app: &mut App, idx: usize) -> io::Result<()> {
+fn remove_base(app: &mut App, idx: usize) -> io::Result<()> {
     let tab = &mut app.tab_list;
+
     if idx == tab.current {
         if tab.list.len() == 1 {
             OperationError::Specific("There's only one tab!".to_owned()).check(app);
@@ -79,7 +106,7 @@ fn remove(app: &mut App, idx: usize) -> io::Result<()> {
 
         // Focus the previous tab.
         if idx != 0 {
-            tab.current.sub_assign(1);
+            tab.current -= 1;
         }
         let target_tab = tab.list
             .get(tab.current)
@@ -90,15 +117,58 @@ fn remove(app: &mut App, idx: usize) -> io::Result<()> {
         return Ok(())
     }
 
+    if tab.current != 0 {
+        tab.current -= 1;
+    }
     tab.list.remove(idx);
 
     Ok(())
 }
 
-fn switch(app: &mut App, idx: usize) -> io::Result<()> {
+fn remove_export(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
+    let idx = idx
+        .to_digit(10)
+        .expect("Failed to parse char to usize!") as usize;
+    remove_base(app, idx - 1)?;
+
     Ok(())
 }
 
-pub fn tab_operation(app: &mut App, key: char) -> io::Result<()> {
+fn switch(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
+    let idx = idx
+        .to_digit(10)
+        .expect("Failed to parse char to usize!") as usize;
+    let tab = &mut app.tab_list;
+    if let Some(path) = tab.list.get(idx - 1).cloned() {
+        tab.current = idx - 1;
+        app.goto_dir(path)?;
+        return Ok(())
+    }
+
+    OperationError::NotFound(None).check(app);
+
     Ok(())
+}
+
+fn tab_string_list<'a, I>(iter: I) -> String
+where I: Iterator<Item = &'a PathBuf>
+{
+    let mut msg = String::new();
+    let mut idx = 1;
+
+    for e in iter {
+        msg.push_str(&format!("[{}]: {}\n", idx, e.to_string_lossy()));
+        idx += 1;
+    }
+
+    msg
+}
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test() {
+        assert_eq!('1'.to_digit(10).unwrap(), 1);
+    }
 }

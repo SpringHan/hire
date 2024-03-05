@@ -20,12 +20,15 @@ pub enum GotoOperation {
 
 pub fn goto_operation(app: &mut App,
                       key: char,
-                      operation: GotoOperation,
-                      in_root: bool
+                      operation: GotoOperation
 ) -> Result<(), Box<dyn Error>>
 {
     match key {
-        'g' => super::cursor_movement::move_cursor(app, Goto::Index(0), in_root)?,
+        'g' => super::cursor_movement::move_cursor(
+            app,
+            Goto::Index(0),
+            app.path.to_string_lossy() == "/"
+        )?,
         '+' => {
             app.option_key = OptionFor::Goto(GotoOperation::Add);
             return Ok(())

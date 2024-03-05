@@ -14,6 +14,7 @@ pub use goto_operation::{init_config, GotoOperation};
 pub use switch_operation::SwitchCase;
 pub use tab::TabList;
 
+use crate::key_event::tab::tab_operation;
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};
 
@@ -50,29 +51,37 @@ pub fn handle_event(key: KeyCode,
 
     match key {
         KeyCode::Char(c) => {
-            if let app::Block::Browser(in_root) = app.selected_block {
-                // NOTE(for coding): All the function in the blocks below must be end with
-                // code to set OPTION_KEY to None.
-                match app.option_key {
-                    OptionFor::Goto(modifying) => {
-                        goto_operation(app, c, modifying, in_root)?;
-                        return Ok(())
-                    },
-                    OptionFor::Switch(case) => {
-                        switch_operation::switch_match(app, case, c)?;
-                        return Ok(())
-                    },
-                    OptionFor::Delete => {
-                        delete_operation(app, c, in_root)?;
-                        return Ok(())
-                    },
-                    OptionFor::Paste => {
-                        paste_operation(app, c)?;
-                        return Ok(())
-                    },
-                    OptionFor::None => ()
-                }
+            if app.command_error {
+                app.quit_command_mode();
+                return Ok(())
+            }
 
+            // NOTE(for coding): All the function in the blocks below must be end with
+            // code to set OPTION_KEY to None.
+            match app.option_key {
+                OptionFor::Goto(modifying) => {
+                    goto_operation(app, c, modifying)?;
+                    return Ok(())
+                },
+                OptionFor::Switch(case) => {
+                    switch_operation::switch_match(app, case, c)?;
+                    return Ok(())
+                },
+                OptionFor::Delete => {
+                    delete_operation(app, c)?;
+                    return Ok(())
+                },
+                OptionFor::Paste => {
+                    paste_operation(app, c)?;
+                    return Ok(())
+                },
+                OptionFor::Tab => {
+                    tab_operation(app, c)?;
+                    return Ok(())
+                },
+                OptionFor::None => ()
+            }
+            if let app::Block::Browser(in_root) = app.selected_block {
                 match c {
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, terminal, in_root
@@ -118,6 +127,7 @@ pub fn handle_event(key: KeyCode,
                         true
                     )?,
                     'w' => app.goto_dir(fetch_working_directory()?)?,
+                    't' => app.option_key = OptionFor::Tab,
                     _ => ()
                 }
             } else {
