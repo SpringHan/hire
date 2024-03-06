@@ -55,7 +55,7 @@ pub fn goto_operation(app: &mut App,
                 GotoOperation::None => {
                     let target_path = app.target_dir.get(&k).cloned();
                     if let Some(path) = target_path {
-                        app.goto_dir(path)?;
+                        app.goto_dir(path, None)?;
                     }
                 },
             }

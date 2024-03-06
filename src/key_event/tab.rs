@@ -9,14 +9,14 @@ use std::error::Error;
 use std::path::PathBuf;
 
 pub struct TabList {
-    list: Vec<PathBuf>,
+    list: Vec<(PathBuf, bool)>, // Store current path & whether hiding files.
     current: usize
 }
 
 impl TabList {
     pub fn new(path: PathBuf) -> Self {
         TabList {
-            list: vec![path],
+            list: vec![(path, false)],
             current: 0
         }
     }
@@ -29,13 +29,19 @@ pub fn tab_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
         'b' => prev(app)?,
         'c' => remove_base(app, app.tab_list.current)?,
         's' => {
-            app.tab_list.list[app.tab_list.current] = app.path.to_owned();
+            app.tab_list.list[app.tab_list.current] = (
+                app.path.to_owned(),
+                app.hide_files
+            );
             let msg = tab_string_list(app.tab_list.list.iter());
             SwitchCase::new(app, switch, msg);
             return Ok(())
         },
         'd' => {
-            app.tab_list.list[app.tab_list.current] = app.path.to_owned();
+            app.tab_list.list[app.tab_list.current] = (
+                app.path.to_owned(),
+                app.hide_files
+            );
             let msg = tab_string_list(app.tab_list.list.iter());
             SwitchCase::new(app, remove_export, msg);
             return Ok(())
@@ -55,14 +61,17 @@ fn next(app: &mut App) -> io::Result<()> {
         return Ok(())
     }
 
-    tab.list[tab.current] = app.path.to_owned();
+    tab.list[tab.current] = (
+        app.path.to_owned(),
+        app.hide_files
+    );
     tab.current += 1;
 
     let target_tab = tab.list
         .get(tab.current)
         .expect("Unable to get next tab!")
         .to_owned();
-    app.goto_dir(target_tab)?;
+    app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
     Ok(())
 }
@@ -74,14 +83,17 @@ fn prev(app: &mut App) -> io::Result<()> {
         return Ok(())
     }
 
-    tab.list[tab.current] = app.path.to_owned();
+    tab.list[tab.current] = (
+        app.path.to_owned(),
+        app.hide_files
+    );
     tab.current -= 1;
 
     let target_tab = tab.list
         .get(tab.current)
         .expect("Unable to get prev tab!")
         .to_owned();
-    app.goto_dir(target_tab)?;
+    app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
     Ok(())
 }
@@ -89,8 +101,11 @@ fn prev(app: &mut App) -> io::Result<()> {
 // NOTE: As the new tab is created with current directory, there's no need to call goto function.
 fn create(app: &mut App) {
     let tab = &mut app.tab_list;
-    tab.list[tab.current] = app.path.to_owned();
-    tab.list.push(app.path.to_owned());
+    tab.list[tab.current] = (
+        app.path.to_owned(),
+        app.hide_files
+    );
+    tab.list.push((app.path.to_owned(), app.hide_files));
     tab.current += 1;
 }
 
@@ -112,7 +127,7 @@ fn remove_base(app: &mut App, idx: usize) -> io::Result<()> {
             .get(tab.current)
             .expect("Failed to switch to nearby tabs!")
             .to_owned();
-        app.goto_dir(target_tab)?;
+        app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
         return Ok(())
     }
@@ -141,7 +156,7 @@ fn switch(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
     let tab = &mut app.tab_list;
     if let Some(path) = tab.list.get(idx - 1).cloned() {
         tab.current = idx - 1;
-        app.goto_dir(path)?;
+        app.goto_dir(path.0, Some(path.1))?;
         return Ok(())
     }
 
@@ -151,13 +166,13 @@ fn switch(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
 }
 
 fn tab_string_list<'a, I>(iter: I) -> String
-where I: Iterator<Item = &'a PathBuf>
+where I: Iterator<Item = &'a (PathBuf, bool)>
 {
     let mut msg = String::new();
     let mut idx = 1;
 
     for e in iter {
-        msg.push_str(&format!("[{}]: {}\n", idx, e.to_string_lossy()));
+        msg.push_str(&format!("[{}]: {}\n", idx, e.0.to_string_lossy()));
         idx += 1;
     }
 

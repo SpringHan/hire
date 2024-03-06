@@ -126,7 +126,7 @@ pub fn handle_event(key: KeyCode,
                         ShellCommand::Command("lazygit", None),
                         true
                     )?,
-                    'w' => app.goto_dir(fetch_working_directory()?)?,
+                    'w' => app.goto_dir(fetch_working_directory()?, None)?,
                     't' => app.option_key = OptionFor::Tab,
                     _ => ()
                 }

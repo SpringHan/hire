@@ -66,7 +66,7 @@ pub fn shell_process(app: &mut App,
     terminal.clear()?;
 
     if refresh {
-        app.goto_dir(app.current_path())?;
+        app.goto_dir(app.current_path(), None)?;
     }
 
     Ok(())

@@ -29,7 +29,10 @@ pub fn switch_match(
 {
     let SwitchCase(func) = case;
     func(app, key)?;
-    app.quit_command_mode();
+    // Avoid missing error message.
+    if !app.command_error {
+        app.quit_command_mode();
+    }
 
     Ok(())
 }

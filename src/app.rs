@@ -901,15 +901,21 @@ impl App {
 
 // Other Action
 impl App {
-    pub fn goto_dir<P: AsRef<Path>>(&mut self, dir: P) -> io::Result<()> {
+    pub fn goto_dir<P: AsRef<Path>>(&mut self,
+                                    dir: P,
+                                    hide_files: Option<bool>
+    ) -> io::Result<()>
+    {
         self.path = PathBuf::from(dir.as_ref());
         self.selected_item = ItemIndex::default();
         self.file_content = None;
         self.child_files.clear();
 
-        if path_is_hidden(&self.path) {
-            self.hide_files = false;
-        }
+        self.hide_files = if let Some(hide) = hide_files {
+            hide
+        } else {
+            !path_is_hidden(&self.path)
+        };
 
         if dir.as_ref().to_string_lossy() == "/" {
             if !self.command_error {

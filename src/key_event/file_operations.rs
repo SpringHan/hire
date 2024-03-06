@@ -86,7 +86,7 @@ pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> 
                         in_root
                     )?;
                 }
-                app.goto_dir(current_dir)?;
+                app.goto_dir(current_dir, None)?;
                 app.marked_files.clear();
 
                 app.option_key = OptionFor::None;
@@ -350,7 +350,7 @@ pub fn paste_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
     app.marked_files.clear();
     app.option_key = OptionFor::None;
     app.marked_operation = FileOperation::None;
-    app.goto_dir(app.current_path())?;
+    app.goto_dir(app.current_path(), None)?;
     Ok(())
 }
 
