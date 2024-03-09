@@ -128,6 +128,16 @@ pub fn handle_event(key: KeyCode,
                     )?,
                     'w' => app.goto_dir(fetch_working_directory()?, None)?,
                     't' => app.option_key = OptionFor::Tab,
+                    'R' => app.goto_dir(app.path.to_owned(), None)?,
+                    'P' => {
+                        if let Some(path) = app.path.to_str() {
+                            SwitchCase::new(
+                                app,
+                                |_, _| Ok(()),
+                                path.to_owned()
+                            );
+                        }
+                    },
                     _ => ()
                 }
             } else {
