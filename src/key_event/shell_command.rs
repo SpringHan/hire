@@ -82,7 +82,7 @@ where P: AsRef<Path>
     let file_type = file_path
         .extension()
         .and_then(std::ffi::OsStr::to_str)
-        .unwrap();
+        .unwrap_or_default();
 
     let shell_command = match file_type {
         "jpg" | "jpge" | "png" => "feh",
