@@ -14,7 +14,6 @@ pub use goto_operation::{init_config, GotoOperation};
 pub use switch_operation::SwitchCase;
 pub use tab::TabList;
 
-use crate::key_event::shell_command::set_working_directory;
 use crate::key_event::tab::tab_operation;
 use crate::App;
 use crate::app::{self, CursorPos, OptionFor, FileOperation};
@@ -128,7 +127,9 @@ pub fn handle_event(key: KeyCode,
                         true
                     )?,
                     'w' => app.goto_dir(fetch_working_directory()?, None)?,
-                    'W' => set_working_directory(app.path.to_owned())?,
+                    'W' => shell_command::set_working_directory(
+                        app.path.to_owned()
+                    )?,
                     't' => app.option_key = OptionFor::Tab,
                     'R' => app.goto_dir(app.path.to_owned(), None)?,
                     'P' => {
