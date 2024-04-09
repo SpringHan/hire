@@ -105,9 +105,8 @@ where P: AsRef<Path>
 pub fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
     use std::io::Read;
 
-    let user_name = std::env::var("USER")?;
     let mut working_dir_file = std::fs::File::open(
-        format!("/home/{}/.cache/st-working-directory", user_name)
+        working_dir_cache_path()?
     )?;
     let mut working_dir = String::new();
     working_dir_file.read_to_string(&mut working_dir)?;
@@ -117,4 +116,32 @@ pub fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
     }
 
     Ok(PathBuf::from(working_dir))
+}
+
+pub fn set_working_directory<P>(path: P) -> Result<(), Box<dyn Error>>
+where P: AsRef<Path>
+{
+    use std::io::Write;
+
+    let working_dir_file = working_dir_cache_path()?;
+
+    let mut working_dir_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(working_dir_file)?;
+
+    working_dir_file.write(path.as_ref().to_string_lossy().as_bytes())?;
+
+    Ok(())
+}
+
+
+fn working_dir_cache_path() -> Result<String, Box<dyn Error>> {
+    let user_name = std::env::var("USER")?;
+    if &user_name == "root" {
+        Ok(String::from("/root/.cache/st-working-directory"))
+    } else {
+        Ok(format!("/home/{}/.cache/st-working-directory", user_name))
+    }
 }
