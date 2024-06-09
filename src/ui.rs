@@ -53,7 +53,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                 Span::styled(
                     format!(
                         "  {}{}",
-                        app.path.to_string_lossy(),
+                        short_display_path(app),
+                        // Show a slash when needed.
                         if app.path.to_string_lossy() == "/" {
                             ""
                         } else {
@@ -471,4 +472,28 @@ where S: Into<Cow<'a, str>>
             .wrap(Wrap { trim: true })
             .scroll((app.command_scroll.unwrap(), 0))
     }
+}
+
+fn short_display_path(app: &App) -> String {
+    let path = app.path.to_string_lossy();
+    let file = if let Some(file_saver) = app.get_file_saver() {
+        &file_saver.name
+    } else {
+        ""
+    };
+
+    if path.len() + file.len() <= 68 {
+        return path.into()
+    }
+
+    let mut splited_path: Vec<&str> = path.split("/").collect();
+    splited_path.remove(0);     // Remove the empty string.
+
+    for i in 0..(splited_path.len() - 1) {
+        splited_path[i] = splited_path[i].get(0..1).unwrap();
+    }
+
+    let shorted_path = splited_path.join("/");
+
+    format!("/{}", shorted_path)
 }
