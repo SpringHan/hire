@@ -6,6 +6,7 @@ mod goto_operation;
 mod shell_command;
 mod switch_operation;
 mod tab;
+mod simple_operations;
 
 // Export
 pub use cursor_movement::move_cursor;
@@ -131,7 +132,12 @@ pub fn handle_event(key: KeyCode,
                         app.path.to_owned()
                     )?,
                     't' => app.option_key = OptionFor::Tab,
+
+                    // Print current full path.
+                    'r' => simple_operations::print_full_path(app),
+
                     'R' => app.goto_dir(app.path.to_owned(), None)?,
+
                     'P' => {
                         if let Some(path) = app.path.to_str() {
                             SwitchCase::new(

@@ -53,18 +53,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') => {
-                            if let app::Block::Browser(_) = app.selected_block {
-                                break;
-                            }
-                        },
-                        other => handle_event(
-                            other,
-                            &mut app,
-                            &mut terminal
-                        )?
+                    if key.code == KeyCode::Char('q') {
+                        if let app::Block::Browser(_) = app.selected_block {
+                            break;
+                        }
                     }
+
+                    handle_event(key.code, &mut app, &mut terminal)?
                 }
             }
         }
