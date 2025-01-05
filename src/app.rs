@@ -690,9 +690,8 @@ impl App {
                         .position(|x| x == current)
                 },
                 Goto::Down => {
-                    self.command_history
-                        .iter()
-                        .position(|x| x == current)
+                    // The command search function can only be executed by UP key.
+                    return ()
                 },
                 _ => panic!("Unvalid value!")
             };

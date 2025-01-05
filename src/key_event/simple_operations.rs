@@ -18,5 +18,5 @@ pub fn print_full_path(app: &mut App) {
         format!("{}/{}", full_path, file_name)
     };
 
-    SwitchCase::new(app, |_, _| Ok(()), full_path)
+    SwitchCase::new(app, |_, _, _| Ok(()), full_path, None::<bool>)
 }

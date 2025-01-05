@@ -22,34 +22,14 @@ impl TabList {
     }
 }
 
-pub fn tab_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
-    match key {
-        'n' => create(app),
-        'f' => next(app)?,
-        'b' => prev(app)?,
-        'c' => remove_base(app, app.tab_list.current)?,
-        's' => {
-            app.tab_list.list[app.tab_list.current] = (
-                app.path.to_owned(),
-                app.hide_files
-            );
-            let msg = tab_string_list(app.tab_list.list.iter());
-            SwitchCase::new(app, switch, msg);
-            return Ok(())
-        },
-        'd' => {
-            app.tab_list.list[app.tab_list.current] = (
-                app.path.to_owned(),
-                app.hide_files
-            );
-            let msg = tab_string_list(app.tab_list.list.iter());
-            SwitchCase::new(app, remove_export, msg);
-            return Ok(())
-        },
-        _ => ()
-    }
+pub fn tab_operation(app: &mut App) -> Result<(), Box<dyn Error>> {
+    // Update tab status in current tab
+    app.tab_list.list[app.tab_list.current] = (
+        app.path.to_owned(),
+        app.hide_files
+    );
 
-    app.option_key = app::OptionFor::None;
+    SwitchCase::new(app, switch, generate_msg(app), Some(false));
 
     Ok(())
 }
@@ -149,21 +129,56 @@ fn remove_export(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn switch(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
-    let idx = idx
-        .to_digit(10)
-        .expect("Failed to parse char to usize!") as usize;
-    let tab = &mut app.tab_list;
-    if let Some(path) = tab.list.get(idx - 1).cloned() {
-        tab.current = idx - 1;
-        app.goto_dir(path.0, Some(path.1))?;
-        return Ok(())
+fn switch(app: &mut App, key: char, to_delete: Option<bool>) -> Result<bool, Box<dyn Error>> {
+    if to_delete.is_none() {
+        panic!("Unexpected situation at switch funciton in tab.rs.")
     }
 
-    OperationError::NotFound(None).check(app);
+    let to_delete = to_delete.unwrap();
+    match key {
+        'n' => create(app),
+        'f' => next(app)?,
+        'b' => prev(app)?,
+        'c' => remove_base(app, app.tab_list.current)?,
+        'd' => {
+            let mut msg = generate_msg(app);
+            msg.insert_str(0, "Deleting tab!\n");
 
-    Ok(())
+            app.tab_list.list[app.tab_list.current] = (
+                app.path.to_owned(),
+                app.hide_files
+            );
+            // let msg = tab_string_list(app.tab_list.list.iter());
+            // SwitchCase::new(app, remove_export, msg);
+            return Ok(true)
+        },
+        '1'..='9' => {
+            let idx = key
+                .to_digit(10)
+                .expect("Failed to parse char to usize!") as usize;
+            let tab = &mut app.tab_list;
+            if let Some(path) = tab.list.get(idx - 1).cloned() {
+                tab.current = idx - 1;
+                app.goto_dir(path.0, Some(path.1))?;
+                return Ok(true)
+            }
+
+            OperationError::NotFound(None).check(app);
+        },
+        _ => ()
+    }
+
+    Ok(true)
 }
+
+fn generate_msg(app: &App) -> String {
+    let mut msg = tab_string_list(app.tab_list.list.iter());
+    msg.insert_str(0, "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
+[d] delete tab with number");
+
+    msg
+}
+
 
 fn tab_string_list<'a, I>(iter: I) -> String
 where I: Iterator<Item = &'a (PathBuf, bool)>

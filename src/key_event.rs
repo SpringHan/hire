@@ -76,10 +76,6 @@ pub fn handle_event(key: KeyCode,
                     paste_operation(app, c)?;
                     return Ok(())
                 },
-                OptionFor::Tab => {
-                    tab_operation(app, c)?;
-                    return Ok(())
-                },
                 OptionFor::None => ()
             }
             if let app::Block::Browser(in_root) = app.selected_block {
@@ -131,7 +127,7 @@ pub fn handle_event(key: KeyCode,
                     'W' => shell_command::set_working_directory(
                         app.path.to_owned()
                     )?,
-                    't' => app.option_key = OptionFor::Tab,
+                    't' => tab_operation(app)?,
 
                     // Print current full path.
                     'r' => simple_operations::print_full_path(app),
@@ -142,8 +138,9 @@ pub fn handle_event(key: KeyCode,
                         if let Some(path) = app.path.to_str() {
                             SwitchCase::new(
                                 app,
-                                |_, _| Ok(()),
-                                path.to_owned()
+                                |_, _, _| Ok(true),
+                                path.to_owned(),
+                                None::<_>
                             );
                         }
                     },
@@ -214,6 +211,7 @@ pub fn handle_event(key: KeyCode,
             }
         },
 
+        // BUG: Switch to undefined items when continuously switching down
         KeyCode::Down => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {

@@ -4,33 +4,34 @@ use crate::app::{self, App};
 
 use std::error::Error;
 
-type FuncPointer = fn(&mut App, char) -> Result<(), Box<dyn Error>>;
+type FuncPointer<T> = fn(&mut App, char, Option<T>) -> Result<bool, Box<dyn Error>>;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-pub struct SwitchCase(FuncPointer);
+pub struct SwitchCase<T>(FuncPointer<T>, Option<T>);
 
-impl SwitchCase {
-    pub fn new(app: &mut App, func: FuncPointer, msg: String) {
+impl<T> SwitchCase<T> {
+    pub fn new(app: &mut App, func: FuncPointer<T>, msg: String, data: Option<T>) {
         if app.command_error {
             app.command_error = false;
         }
 
         app.expand_init();
         app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);
-        app.option_key = app::OptionFor::Switch(SwitchCase(func));
+        app.option_key = app::OptionFor::Switch(SwitchCase(func, data));
     }
 }
 
-pub fn switch_match(
+pub fn switch_match<T>(
     app: &mut App,
-    case: SwitchCase,
+    case: SwitchCase<T>,
     key: char
 ) -> Result<(), Box<dyn Error>>
 {
-    let SwitchCase(func) = case;
-    func(app, key)?;
+    let SwitchCase(func, data) = case;
+
     // Avoid missing error message.
-    if !app.command_error {
+    // In the meanwhile, do not quit command mode if the function returned false.
+    if !app.command_error && func(app, key, data)? {
         app.quit_command_mode();
     }
 
