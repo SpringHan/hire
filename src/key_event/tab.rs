@@ -1,8 +1,8 @@
 // Tab.
 
-use super::SwitchCase;
-use crate::app::{self, App};
+use crate::app::App;
 use crate::app::command::OperationError;
+use super::{SwitchCase, SwitchCaseData};
 
 use std::io;
 use std::error::Error;
@@ -29,16 +29,16 @@ pub fn tab_operation(app: &mut App) -> Result<(), Box<dyn Error>> {
         app.hide_files
     );
 
-    SwitchCase::new(app, switch, generate_msg(app), Some(false));
+    SwitchCase::new(app, switch, generate_msg(app), SwitchCaseData::Bool(false));
 
     Ok(())
 }
 
-fn next(app: &mut App) -> io::Result<()> {
+fn next(app: &mut App) -> io::Result<bool> {
     let tab = &mut app.tab_list;
     if tab.list.len() == tab.current + 1 {
         OperationError::Specific("There's no other tabs!".to_owned()).check(app);
-        return Ok(())
+        return Ok(false)
     }
 
     tab.list[tab.current] = (
@@ -53,14 +53,14 @@ fn next(app: &mut App) -> io::Result<()> {
         .to_owned();
     app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
-    Ok(())
+    Ok(true)
 }
 
-fn prev(app: &mut App) -> io::Result<()> {
+fn prev(app: &mut App) -> io::Result<bool> {
     let tab = &mut app.tab_list;
     if tab.current == 0 {
         OperationError::Specific("There's no other tabs!".to_owned()).check(app);
-        return Ok(())
+        return Ok(false)
     }
 
     tab.list[tab.current] = (
@@ -75,7 +75,7 @@ fn prev(app: &mut App) -> io::Result<()> {
         .to_owned();
     app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
-    Ok(())
+    Ok(true)
 }
 
 // NOTE: As the new tab is created with current directory, there's no need to call goto function.
@@ -89,13 +89,14 @@ fn create(app: &mut App) {
     tab.current += 1;
 }
 
-fn remove_base(app: &mut App, idx: usize) -> io::Result<()> {
+// Remove tab with its idx. Return false if failed to remove tab.
+fn remove_base(app: &mut App, idx: usize) -> io::Result<bool> {
     let tab = &mut app.tab_list;
 
     if idx == tab.current {
         if tab.list.len() == 1 {
             OperationError::Specific("There's only one tab!".to_owned()).check(app);
-            return Ok(())
+            return Ok(false)
         }
         tab.list.remove(idx);
 
@@ -109,7 +110,7 @@ fn remove_base(app: &mut App, idx: usize) -> io::Result<()> {
             .to_owned();
         app.goto_dir(target_tab.0, Some(target_tab.1))?;
 
-        return Ok(())
+        return Ok(true)
     }
 
     if tab.current != 0 {
@@ -117,53 +118,59 @@ fn remove_base(app: &mut App, idx: usize) -> io::Result<()> {
     }
     tab.list.remove(idx);
 
-    Ok(())
+    Ok(true)
 }
 
-fn remove_export(app: &mut App, idx: char) -> Result<(), Box<dyn Error>> {
-    let idx = idx
-        .to_digit(10)
-        .expect("Failed to parse char to usize!") as usize;
-    remove_base(app, idx - 1)?;
-
-    Ok(())
-}
-
-fn switch(app: &mut App, key: char, to_delete: Option<bool>) -> Result<bool, Box<dyn Error>> {
-    if to_delete.is_none() {
+fn switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dyn Error>> {
+    let to_delete = if let SwitchCaseData::Bool(_data) = data {
+        _data
+    } else {
         panic!("Unexpected situation at switch funciton in tab.rs.")
-    }
+    };
 
-    let to_delete = to_delete.unwrap();
     match key {
         'n' => create(app),
-        'f' => next(app)?,
-        'b' => prev(app)?,
-        'c' => remove_base(app, app.tab_list.current)?,
+        'f' => {
+            return Ok(next(app)?)
+        },
+        'b' => {
+            return Ok(prev(app)?)
+        },
+        'c' => {
+            return Ok(remove_base(app, app.tab_list.current)?)
+        },
         'd' => {
-            let mut msg = generate_msg(app);
-            msg.insert_str(0, "Deleting tab!\n");
-
             app.tab_list.list[app.tab_list.current] = (
                 app.path.to_owned(),
                 app.hide_files
             );
-            // let msg = tab_string_list(app.tab_list.list.iter());
-            // SwitchCase::new(app, remove_export, msg);
-            return Ok(true)
+
+            let mut msg = generate_msg(app);
+            msg.insert_str(0, "Deleting tab!\n");
+
+            SwitchCase::new(app, switch, msg, SwitchCaseData::Bool(true));
+            return Ok(false)
         },
         '1'..='9' => {
             let idx = key
                 .to_digit(10)
                 .expect("Failed to parse char to usize!") as usize;
+
+            if app.tab_list.list.len() < idx {
+                OperationError::NotFound(None).check(app);
+                return Ok(false)
+            }
+
+            if to_delete {
+                return Ok(remove_base(app, idx - 1)?);
+            }
+
             let tab = &mut app.tab_list;
             if let Some(path) = tab.list.get(idx - 1).cloned() {
                 tab.current = idx - 1;
                 app.goto_dir(path.0, Some(path.1))?;
                 return Ok(true)
             }
-
-            OperationError::NotFound(None).check(app);
         },
         _ => ()
     }
@@ -174,7 +181,7 @@ fn switch(app: &mut App, key: char, to_delete: Option<bool>) -> Result<bool, Box
 fn generate_msg(app: &App) -> String {
     let mut msg = tab_string_list(app.tab_list.list.iter());
     msg.insert_str(0, "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
-[d] delete tab with number");
+[d] delete tab with number  [o] delete other tabs\n\n");
 
     msg
 }

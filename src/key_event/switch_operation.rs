@@ -4,13 +4,28 @@ use crate::app::{self, App};
 
 use std::error::Error;
 
-type FuncPointer<T> = fn(&mut App, char, Option<T>) -> Result<bool, Box<dyn Error>>;
+#[allow(unused)]
+#[derive(PartialEq, Eq, Clone)]
+pub enum SwitchCaseData {
+    None,
+    Bool(bool),
+    Number(i32),
+    DString(String)
+}
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub struct SwitchCase<T>(FuncPointer<T>, Option<T>);
+type FuncPointer = fn(&mut App, char, SwitchCaseData) -> Result<bool, Box<dyn Error>>;
 
-impl<T> SwitchCase<T> {
-    pub fn new(app: &mut App, func: FuncPointer<T>, msg: String, data: Option<T>) {
+#[derive(PartialEq, Eq, Clone)]
+pub struct SwitchCase(FuncPointer, SwitchCaseData);
+
+impl SwitchCase {
+    pub fn new(
+        app: &mut App,
+        func: FuncPointer,
+        msg: String,
+        data: SwitchCaseData
+    )
+    {
         if app.command_error {
             app.command_error = false;
         }
@@ -21,9 +36,9 @@ impl<T> SwitchCase<T> {
     }
 }
 
-pub fn switch_match<T>(
+pub fn switch_match(
     app: &mut App,
-    case: SwitchCase<T>,
+    case: SwitchCase,
     key: char
 ) -> Result<(), Box<dyn Error>>
 {

@@ -12,7 +12,7 @@ mod simple_operations;
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
 pub use goto_operation::{init_config, GotoOperation};
-pub use switch_operation::SwitchCase;
+pub use switch_operation::{SwitchCase, SwitchCaseData};
 pub use tab::TabList;
 
 use crate::key_event::tab::tab_operation;
@@ -64,7 +64,8 @@ pub fn handle_event(key: KeyCode,
                     goto_operation(app, c, modifying)?;
                     return Ok(())
                 },
-                OptionFor::Switch(case) => {
+                OptionFor::Switch(ref case) => {
+                    let case = case.to_owned();
                     switch_operation::switch_match(app, case, c)?;
                     return Ok(())
                 },
@@ -140,7 +141,7 @@ pub fn handle_event(key: KeyCode,
                                 app,
                                 |_, _, _| Ok(true),
                                 path.to_owned(),
-                                None::<_>
+                                SwitchCaseData::None
                             );
                         }
                     },

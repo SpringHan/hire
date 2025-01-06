@@ -14,9 +14,9 @@ pub enum CursorPos {
 }
 
 #[derive(PartialEq, Eq)]
-pub enum OptionFor<T> {
+pub enum OptionFor {
     Goto(GotoOperation),
-    Switch(SwitchCase<T>),
+    Switch(SwitchCase),
     Delete,
     Paste,
     None
