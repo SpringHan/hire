@@ -10,7 +10,8 @@ pub enum SwitchCaseData {
     None,
     Bool(bool),
     Number(i32),
-    DString(String)
+    Char(char)
+    // DString(String)
 }
 
 type FuncPointer = fn(&mut App, char, SwitchCaseData) -> Result<bool, Box<dyn Error>>;

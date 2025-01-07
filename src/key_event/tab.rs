@@ -1,7 +1,7 @@
 // Tab.
 
 use crate::app::App;
-use crate::app::command::OperationError;
+use crate::app::command::{OperationError, NotFoundType};
 use super::{SwitchCase, SwitchCaseData};
 
 use std::io;
@@ -22,7 +22,7 @@ impl TabList {
     }
 }
 
-pub fn tab_operation(app: &mut App) -> Result<(), Box<dyn Error>> {
+pub fn tab_operation(app: &mut App) {
     // Update tab status in current tab
     app.tab_list.list[app.tab_list.current] = (
         app.path.to_owned(),
@@ -30,8 +30,6 @@ pub fn tab_operation(app: &mut App) -> Result<(), Box<dyn Error>> {
     );
 
     SwitchCase::new(app, switch, generate_msg(app), SwitchCaseData::Bool(false));
-
-    Ok(())
 }
 
 fn next(app: &mut App) -> io::Result<bool> {
@@ -157,7 +155,7 @@ fn switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dy
                 .expect("Failed to parse char to usize!") as usize;
 
             if app.tab_list.list.len() < idx {
-                OperationError::NotFound(None).check(app);
+                OperationError::NotFound(NotFoundType::None).check(app);
                 return Ok(false)
             }
 

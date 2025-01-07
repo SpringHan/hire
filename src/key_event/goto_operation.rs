@@ -1,8 +1,10 @@
 // Goto Operation.
 
 use super::Goto;
-use crate::app::command::OperationError;
-use crate::app::{App, OptionFor};
+use super::{SwitchCase, SwitchCaseData};
+
+use crate::app::App;
+use crate::app::command::{OperationError, NotFoundType};
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -11,18 +13,22 @@ use std::io::{self, ErrorKind, Read, Write};
 
 use toml_edit::{value, Document};
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum GotoOperation {
-    Add,
-    Remove,
-    None
+pub fn goto_operation(app: &mut App) {
+    SwitchCase::new(
+        app,
+        goto_switch,
+        generate_msg(app, '\0'),
+        SwitchCaseData::Char('\0')
+    );
 }
 
-pub fn goto_operation(app: &mut App,
-                      key: char,
-                      operation: GotoOperation
-) -> Result<(), Box<dyn Error>>
-{
+fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dyn Error>> {
+    let modify_type = if let SwitchCaseData::Char(_data) = data {
+        _data
+    } else {
+        panic!("[1] Unexpected error at goto_switch function in goto_operation.rs.")
+    };
+
     match key {
         'g' => super::cursor_movement::move_cursor(
             app,
@@ -30,17 +36,28 @@ pub fn goto_operation(app: &mut App,
             app.path.to_string_lossy() == "/"
         )?,
         '+' => {
-            app.option_key = OptionFor::Goto(GotoOperation::Add);
-            return Ok(())
+            SwitchCase::new(
+                app,
+                goto_switch,
+                generate_msg(app, '+'),
+                SwitchCaseData::Char('+')
+            );
+
+            return Ok(false)
         },
         '-' => {
-            // TODO: Decide whether to add a display of all the target directories.
-            app.option_key = OptionFor::Goto(GotoOperation::Remove);
-            return Ok(())
+            SwitchCase::new(
+                app,
+                goto_switch,
+                generate_msg(app, '-'),
+                SwitchCaseData::Char('-')
+            );
+
+            return Ok(false)
         },
         k => {
-            match operation {
-                GotoOperation::Add => {
+            match modify_type {
+                '+' => {
                     add_target_dir(
                         app,
                         key,
@@ -51,20 +68,34 @@ pub fn goto_operation(app: &mut App,
                         }
                     )?;
                 },
-                GotoOperation::Remove => remove_target_dir(app, key)?,
-                GotoOperation::None => {
+                '-' => remove_target_dir(app, key)?,
+                '\0' => {
                     let target_path = app.target_dir.get(&k).cloned();
                     if let Some(path) = target_path {
                         app.goto_dir(path, None)?;
                     }
                 },
+                _ => panic!("[2] Unexpected error at goto_switch in goto_operation.rs.")
             }
         }
     }
 
-    app.option_key = OptionFor::None;
+    Ok(true)
+}
 
-    Ok(())
+fn generate_msg(app: &App, status: char) -> String {
+    let mut msg = String::from("[g] goto top  [+] add directory  [-] remove directory\n\n");
+    match status {
+        '+' => msg.insert_str(0, "Adding Directory!\n"),
+        '-' => msg.insert_str(0, "Deleting Directory!\n"),
+        _ => ()
+    }
+
+    for (key, path) in app.target_dir.iter() {
+        msg.push_str(&format!("[{}] {}\n", key, path));
+    }
+
+    msg
 }
 
 fn add_target_dir(app: &mut App, key: char, path: PathBuf) -> io::Result<()> {
@@ -103,7 +134,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     read_file.read_to_string(&mut config)?;
 
     if config.trim().is_empty() {
-        OperationError::NotFound(None).check(app);
+        OperationError::NotFound(NotFoundType::None).check(app);
         return Ok(())
     }
 
@@ -113,7 +144,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     if let Some(target_dir) = toml_config.get_mut("target_dir") {
         target_dir[&String::from(key)] = toml_edit::Item::None;
     } else {
-        OperationError::NotFound(None).check(app);
+        OperationError::NotFound(NotFoundType::None).check(app);
         return Ok(())
     }
 

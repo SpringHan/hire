@@ -1,6 +1,6 @@
 // Special types used in App structure.
 
-use crate::key_event::{GotoOperation, SwitchCase};
+use crate::key_event::SwitchCase;
 
 use std::collections::HashMap;
 
@@ -15,10 +15,8 @@ pub enum CursorPos {
 
 #[derive(PartialEq, Eq)]
 pub enum OptionFor {
-    Goto(GotoOperation),
     Switch(SwitchCase),
     Delete,
-    Paste,
     None
 }
 
@@ -36,6 +34,7 @@ pub enum FileOperation {
     None
 }
 
+/// Store file's name and whether it's a directory.
 #[derive(Clone)]
 pub struct MarkedFiles {
     pub files: HashMap<String, bool>,

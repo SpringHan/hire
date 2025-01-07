@@ -7,11 +7,12 @@ mod shell_command;
 mod switch_operation;
 mod tab;
 mod simple_operations;
+mod paste_operation;
 
 // Export
 pub use cursor_movement::move_cursor;
 pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
-pub use goto_operation::{init_config, GotoOperation};
+pub use goto_operation::init_config;
 pub use switch_operation::{SwitchCase, SwitchCaseData};
 pub use tab::TabList;
 
@@ -60,10 +61,6 @@ pub fn handle_event(key: KeyCode,
             // NOTE(for coding): All the function in the blocks below must be end with
             // code to set OPTION_KEY to None.
             match app.option_key {
-                OptionFor::Goto(modifying) => {
-                    goto_operation(app, c, modifying)?;
-                    return Ok(())
-                },
                 OptionFor::Switch(ref case) => {
                     let case = case.to_owned();
                     switch_operation::switch_match(app, case, c)?;
@@ -73,10 +70,6 @@ pub fn handle_event(key: KeyCode,
                     delete_operation(app, c)?;
                     return Ok(())
                 },
-                OptionFor::Paste => {
-                    paste_operation(app, c)?;
-                    return Ok(())
-                },
                 OptionFor::None => ()
             }
             if let app::Block::Browser(in_root) = app.selected_block {
@@ -84,7 +77,7 @@ pub fn handle_event(key: KeyCode,
                     'n' | 'i' | 'u' | 'e' => directory_movement(
                         c, app, terminal, in_root
                     )?,
-                    'g' => app.option_key = OptionFor::Goto(GotoOperation::None),
+                    'g' => goto_operation(app),
                     'G' => {
                         let last_idx = if in_root {
                             app.parent_files.len() - 1
@@ -110,8 +103,8 @@ pub fn handle_event(key: KeyCode,
                         CursorPos::End
                     ),
                     '-' => app.hide_or_show(None)?,
-                    'p' => app.option_key = OptionFor::Paste,
-                    's' => make_single_symlink(app)?,
+                    'p' => paste_operation::paste_operation(app),
+                    's' => paste_operation::make_single_symlink(app)?,
                     'S' => shell_process(
                         app,
                         terminal,
@@ -128,7 +121,7 @@ pub fn handle_event(key: KeyCode,
                     'W' => shell_command::set_working_directory(
                         app.path.to_owned()
                     )?,
-                    't' => tab_operation(app)?,
+                    't' => tab_operation(app),
 
                     // Print current full path.
                     'r' => simple_operations::print_full_path(app),

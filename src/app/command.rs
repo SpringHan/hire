@@ -7,13 +7,20 @@ use std::io::ErrorKind;
 use std::{io, fs};
 use std::path::{PathBuf, Path};
 
+/// The three cases matching not found error.
+pub enum NotFoundType {
+    Files(Vec<String>),
+    Item(String),
+    None
+}
+
 /// This enum is used for the errors that will not destroy program.
 pub enum OperationError {
     PermissionDenied(Option<Vec<String>>),
     UnvalidCommand,
     FileExists(Vec<String>),
     NoSelected,
-    NotFound(Option<Vec<String>>),
+    NotFound(NotFoundType),
     Specific(String),
     None
 }
@@ -22,7 +29,7 @@ impl OperationError {
     pub fn error_value(&self) -> Option<String> {
         match self {
             OperationError::NoSelected => {
-                Some(String::from("[Error]: No item to be selected and operated!"),)
+                Some(String::from("[Error]: No item to be selected and operated!"))
             },
             OperationError::FileExists(files) => {
                 Some(format!("[Error]: File {:?} already exists!", files))
@@ -37,11 +44,11 @@ impl OperationError {
                     Some(String::from("[Error]: Permission Denied!"))
                 }                
             },
-            OperationError::NotFound(files) => {
-                if let Some(files) = files {
-                    Some(format!("[Error]: Not found: {:?}", files))
-                } else {
-                    Some(String::from("[Error]: The file/item cannot be found!"))
+            OperationError::NotFound(data) => {
+                match data {
+                    NotFoundType::Files(files) => Some(format!("[Error]: Not found: {:?}", files)),
+                    NotFoundType::Item(item) => Some(format!("[Error]: Not found: {}", item)),
+                    NotFoundType::None => Some(String::from("[Error]: The file/item cannot be found!")),
                 }
             },
             OperationError::Specific(err) => {
@@ -294,7 +301,7 @@ where
     }
 
     if !not_found.is_empty() {
-        return Ok(OperationError::NotFound(Some(not_found)))
+        return Ok(OperationError::NotFound(NotFoundType::Files(not_found)))
     }
 
     Ok(OperationError::None)
