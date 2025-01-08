@@ -16,7 +16,6 @@ pub enum CursorPos {
 #[derive(PartialEq, Eq)]
 pub enum OptionFor {
     Switch(SwitchCase),
-    Delete,
     None
 }
 

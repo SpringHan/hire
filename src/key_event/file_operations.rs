@@ -2,8 +2,10 @@
 
 use crate::app::{App, CursorPos, FileOperation, OptionFor};
 use crate::app::command::{OperationError, NotFoundType};
+
 use super::Goto;
 use super::cursor_movement;
+use super::{SwitchCase, SwitchCaseData};
 
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
@@ -11,6 +13,7 @@ use std::path::PathBuf;
 use std::error::Error;
 use std::collections::HashMap;
 
+// File name modify
 pub fn append_file_name(app: &mut App, to_end: bool) {
     let file_saver = app.get_file_saver();
     if let Some(file_saver) = file_saver {
@@ -49,9 +52,19 @@ pub fn append_file_name(app: &mut App, to_end: bool) {
     }
 }
 
+// Delete operation
+pub fn delete_operation(app: &mut App) {
+    SwitchCase::new(app, delete_switch, generate_msg(), SwitchCaseData::None);
+}
 
-pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> {
+fn delete_switch(
+    app: &mut App,
+    key: char,
+    _: SwitchCaseData
+) -> Result<bool, Box<dyn Error>>
+{
     let in_root = app.path.to_string_lossy() == "/";
+
     match key {
         'd' => {
             // Check whether the target dir is accessible firstly.
@@ -64,8 +77,7 @@ pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> 
                     );
                 } else {
                     OperationError::NoSelected.check(app);
-                    app.option_key = OptionFor::None;
-                    return Ok(())
+                    return Ok(false)
                 }
             }
 
@@ -88,16 +100,14 @@ pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> 
                 app.goto_dir(current_dir, None)?;
                 app.marked_files.clear();
 
-                app.option_key = OptionFor::None;
-                return Ok(())
+                return Ok(true)
             }
 
             let current_file = app.get_file_saver();
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
                     OperationError::PermissionDenied(None).check(app);
-                    app.option_key = OptionFor::None;
-                    return Ok(())
+                    return Ok(false)
                 }
 
                 let mut temp_hashmap = HashMap::new();
@@ -112,14 +122,21 @@ pub fn delete_operation(app: &mut App, key: char) -> Result<(), Box<dyn Error>> 
                 )?;
             } else {
                 OperationError::NoSelected.check(app);
+                return Ok(false)
             }
         },
         _ => ()
     }
 
-    app.option_key = OptionFor::None;
-    Ok(())
+    Ok(true)
 }
+
+fn generate_msg() -> String {
+    let msg = String::from("[d] mark files  [D] delete files");
+
+    msg
+}
+
 
 /// Execute mark operation.
 /// single is a boolean which indicates whether to mark all files in current dir.

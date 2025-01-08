@@ -66,10 +66,6 @@ pub fn handle_event(key: KeyCode,
                     switch_operation::switch_match(app, case, c)?;
                     return Ok(())
                 },
-                OptionFor::Delete => {
-                    delete_operation(app, c)?;
-                    return Ok(())
-                },
                 OptionFor::None => ()
             }
             if let app::Block::Browser(in_root) = app.selected_block {
@@ -86,7 +82,7 @@ pub fn handle_event(key: KeyCode,
                         };
                         move_cursor(app, Goto::Index(last_idx), in_root)?;
                     },
-                    'd' => app.option_key = OptionFor::Delete,
+                    'd' => delete_operation(app),
                     '/' => app.set_command_line("/", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
