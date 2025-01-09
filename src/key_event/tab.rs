@@ -1,7 +1,6 @@
 // Tab.
 
-use crate::app::App;
-use crate::app::command::{OperationError, NotFoundType};
+use crate::app::{App, ErrorType, NotFoundType};
 use super::{SwitchCase, SwitchCaseData};
 
 use std::io;
@@ -35,7 +34,7 @@ pub fn tab_operation(app: &mut App) {
 fn next(app: &mut App) -> io::Result<bool> {
     let tab = &mut app.tab_list;
     if tab.list.len() == tab.current + 1 {
-        OperationError::Specific("There's no other tabs!".to_owned()).check(app);
+        ErrorType::Specific("There's no other tabs!".to_owned()).check(app);
         return Ok(false)
     }
 
@@ -57,7 +56,7 @@ fn next(app: &mut App) -> io::Result<bool> {
 fn prev(app: &mut App) -> io::Result<bool> {
     let tab = &mut app.tab_list;
     if tab.current == 0 {
-        OperationError::Specific("There's no other tabs!".to_owned()).check(app);
+        ErrorType::Specific("There's no other tabs!".to_owned()).check(app);
         return Ok(false)
     }
 
@@ -93,7 +92,7 @@ fn remove_base(app: &mut App, idx: usize) -> io::Result<bool> {
 
     if idx == tab.current {
         if tab.list.len() == 1 {
-            OperationError::Specific("There's only one tab!".to_owned()).check(app);
+            ErrorType::Specific("There's only one tab!".to_owned()).check(app);
             return Ok(false)
         }
         tab.list.remove(idx);
@@ -155,7 +154,7 @@ fn switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dy
                 .expect("Failed to parse char to usize!") as usize;
 
             if app.tab_list.list.len() < idx {
-                OperationError::NotFound(NotFoundType::None).check(app);
+                ErrorType::NotFound(NotFoundType::None).check(app);
                 return Ok(false)
             }
 

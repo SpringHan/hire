@@ -3,8 +3,7 @@
 use super::Goto;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::App;
-use crate::app::command::{OperationError, NotFoundType};
+use crate::app::{App, ErrorType, NotFoundType};
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -134,7 +133,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     read_file.read_to_string(&mut config)?;
 
     if config.trim().is_empty() {
-        OperationError::NotFound(NotFoundType::None).check(app);
+        ErrorType::NotFound(NotFoundType::None).check(app);
         return Ok(())
     }
 
@@ -144,7 +143,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     if let Some(target_dir) = toml_config.get_mut("target_dir") {
         target_dir[&String::from(key)] = toml_edit::Item::None;
     } else {
-        OperationError::NotFound(NotFoundType::None).check(app);
+        ErrorType::NotFound(NotFoundType::None).check(app);
         return Ok(())
     }
 

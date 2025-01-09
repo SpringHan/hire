@@ -1,121 +1,37 @@
 // Command functions
 
 use super::filesaver::{sort, FileSaver};
-use super::{App, Block, CursorPos};
+use super::{App, AppResult, AppError, ErrorType, NotFoundType};
 
 use std::io::ErrorKind;
 use std::{io, fs};
 use std::path::{PathBuf, Path};
 
-/// The three cases matching not found error.
-pub enum NotFoundType {
-    Files(Vec<String>),
-    Item(String),
-    None
-}
-
-/// This enum is used for the errors that will not destroy program.
-pub enum OperationError {
-    PermissionDenied(Option<Vec<String>>),
-    UnvalidCommand,
-    FileExists(Vec<String>),
-    NoSelected,
-    NotFound(NotFoundType),
-    Specific(String),
-    None
-}
-
-impl OperationError {
-    pub fn error_value(&self) -> Option<String> {
-        match self {
-            OperationError::NoSelected => {
-                Some(String::from("[Error]: No item to be selected and operated!"))
-            },
-            OperationError::FileExists(files) => {
-                Some(format!("[Error]: File {:?} already exists!", files))
-            },
-            OperationError::UnvalidCommand => {
-                Some(String::from("[Error]: Unvalid Command!"))
-            },
-            OperationError::PermissionDenied(files) => {
-                if let Some(files) = files {
-                    Some(format!("[Error]: Permission Denied: {:?}", files))
-                } else {
-                    Some(String::from("[Error]: Permission Denied!"))
-                }                
-            },
-            OperationError::NotFound(data) => {
-                match data {
-                    NotFoundType::Files(files) => Some(format!("[Error]: Not found: {:?}", files)),
-                    NotFoundType::Item(item) => Some(format!("[Error]: Not found: {}", item)),
-                    NotFoundType::None => Some(String::from("[Error]: The file/item cannot be found!")),
-                }
-            },
-            OperationError::Specific(err) => {
-                Some(format!("[Error]: {}", err))
-            }
-            OperationError::None => None
-        }
-    }
-
-    /// Check whether the OperationError is None
-    /// If it's None, return true. If previous errors exist, still return false.
-    pub fn check(self, app: &mut App) -> bool {
-        if let Some(msg) = self.error_value() {
-            if let
-                Block::CommandLine(
-                    ref mut error,
-                    ref mut cursor
-                ) = app.selected_block
-            {
-                if app.command_error {
-                    error.push_str(&format!("\n{}", msg));
-                } else {
-                    *error = msg;
-                    *cursor = CursorPos::None;
-                    app.command_error = true;
-                }
-
-                // Turn off Switch mode.
-                if let super::OptionFor::Switch(_) = app.option_key {
-                    app.option_key = super::OptionFor::None;
-                }
-            } else {
-                app.set_command_line(msg, CursorPos::None);
-                app.command_error = true;
-            }
-
-            return false
-        }
-
-        // Though current error not exists, but previous errors exist.
-        if app.command_error {
-            return false
-        }
-
-        true
-    }
-}
-
 pub fn rename_file(path: PathBuf,
                    app: &mut App,
                    new_name: String
-) -> io::Result<OperationError>
+) -> AppResult<()>
 {
     let hide_files = app.hide_files;
     let file = app.get_file_saver_mut();
     if let None = file {
-        return Ok(OperationError::NoSelected);
+        return Err(ErrorType::NoSelected.pack());
     }
 
     let file = file.unwrap();
 
     if file.cannot_read || file.read_only() {
-        return Ok(OperationError::PermissionDenied(None))
+        return Err(
+            ErrorType::Specific("Permission denied".to_owned()).pack()
+        )
     }
 
     if file.name == new_name {
-        return Ok(OperationError::FileExists(vec![new_name]))
+        return Err(
+            ErrorType::Specific(
+                format!("{} already exists", new_name)
+            ).pack()
+        )
     }
 
     let origin_file = path.join(&file.name);
@@ -125,7 +41,7 @@ pub fn rename_file(path: PathBuf,
 
     if new_name.starts_with(".") && hide_files {
         app.hide_or_show(Some(new_name))?;
-        return Ok(OperationError::None)
+        return Ok(())
     }
 
     // Refresh modified time
@@ -143,17 +59,19 @@ pub fn rename_file(path: PathBuf,
     *directory = new_files;
     index.select(Some(new_index));
 
-    Ok(OperationError::None)
+    Ok(())
 }
 
 pub fn create_file<'a, I>(app: &mut App,
                           files: I,
                           is_dir: bool
-) -> io::Result<OperationError>
+) -> AppResult<()>
 where I: Iterator<Item = &'a str>
 {
     let path = app.current_path();
-    let mut exists_files: Vec<String> = Vec::new();
+    let mut errors = AppError::new();
+
+    // let mut exists_files: Vec<String> = Vec::new();
     let mut new_files: Vec<FileSaver> = Vec::new();
     let mut to_show_hidden_files = false;
 
@@ -162,11 +80,12 @@ where I: Iterator<Item = &'a str>
         if is_dir {
             match fs::create_dir(path.join(file)) {
                 Err(err) => {
-                    if err.kind() == ErrorKind::PermissionDenied {
-                        return Ok(OperationError::PermissionDenied(None))
-                    } else if err.kind() == ErrorKind::AlreadyExists {
-                        exists_files.push(file.into());
-                    }
+                    // if err.kind() == ErrorKind::PermissionDenied {
+                    //     return Ok(ErrorType::PermissionDenied(None))
+                    // } else if err.kind() == ErrorKind::AlreadyExists {
+                    //     exists_files.push(file.into());
+                    // }
+                    errors.add_error(err);
                 },
                 Ok(_) => new_files.push(FileSaver::new(
                     file,
@@ -187,11 +106,12 @@ where I: Iterator<Item = &'a str>
                     ));
                 },
                 Err(err) => {
-                    if err.kind() == ErrorKind::PermissionDenied {
-                        return Ok(OperationError::PermissionDenied(None))
-                    } else if err.kind() == ErrorKind::AlreadyExists {
-                        exists_files.push(file.into());
-                    }
+                    // if err.kind() == ErrorKind::PermissionDenied {
+                    //     return Ok(ErrorType::PermissionDenied(None))
+                    // } else if err.kind() == ErrorKind::AlreadyExists {
+                    //     exists_files.push(file.into());
+                    // }
+                    errors.add_error(err);
                 }
             }
         }
@@ -241,14 +161,15 @@ where I: Iterator<Item = &'a str>
         app.hide_or_show(None)?;
     }
 
-    if !exists_files.is_empty() {
-        return Ok(OperationError::FileExists(exists_files))
+    if !errors.is_empty() {
+        return Err(errors)
     }
 
-    Ok(OperationError::None)
+    Ok(())
 }
 
-pub fn create_symlink<I, P>(app: &mut App, files: I) -> io::Result<OperationError>
+// TODO: 1.10 start from here
+pub fn create_symlink<I, P>(app: &mut App, files: I) -> io::Result<ErrorType>
 where
     I: Iterator<Item = (P, P)>,
     P: AsRef<Path>
@@ -293,16 +214,16 @@ where
     }
 
     if !no_permission.is_empty() {
-        OperationError::PermissionDenied(Some(no_permission)).check(app);
+        ErrorType::PermissionDenied(Some(no_permission)).check(app);
     }
 
     if !exists_links.is_empty() {
-        OperationError::FileExists(exists_links).check(app);
+        ErrorType::FileExists(exists_links).check(app);
     }
 
     if !not_found.is_empty() {
-        return Ok(OperationError::NotFound(NotFoundType::Files(not_found)))
+        return Ok(ErrorType::NotFound(NotFoundType::Files(not_found)))
     }
 
-    Ok(OperationError::None)
+    Ok(ErrorType::None)
 }

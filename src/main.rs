@@ -59,7 +59,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
 
-                    handle_event(key.code, &mut app, &mut terminal)?
+                    let result = handle_event(key.code, &mut app, &mut terminal);
+                    if let Err(err) = result {
+                        // TODO: Change this logic.
+                        println!("{}", err.to_string());
+                    }
                 }
             }
         }

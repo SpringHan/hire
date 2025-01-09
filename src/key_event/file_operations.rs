@@ -1,7 +1,13 @@
 // File operations.
 
-use crate::app::{App, CursorPos, FileOperation, OptionFor};
-use crate::app::command::{OperationError, NotFoundType};
+use crate::app::{
+    App,
+    CursorPos,
+    FileOperation,
+    OptionFor,
+    ErrorType,
+    NotFoundType
+};
 
 use super::Goto;
 use super::cursor_movement;
@@ -48,7 +54,7 @@ pub fn append_file_name(app: &mut App, to_end: bool) {
             }
         );
     } else {
-        OperationError::NoSelected.check(app);
+        ErrorType::NoSelected.check(app);
     }
 }
 
@@ -76,7 +82,7 @@ fn delete_switch(
                         current_file.is_dir
                     );
                 } else {
-                    OperationError::NoSelected.check(app);
+                    ErrorType::NoSelected.check(app);
                     return Ok(false)
                 }
             }
@@ -106,7 +112,7 @@ fn delete_switch(
             let current_file = app.get_file_saver();
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
-                    OperationError::PermissionDenied(None).check(app);
+                    ErrorType::PermissionDenied(None).check(app);
                     return Ok(false)
                 }
 
@@ -121,7 +127,7 @@ fn delete_switch(
                     in_root
                 )?;
             } else {
-                OperationError::NoSelected.check(app);
+                ErrorType::NoSelected.check(app);
                 return Ok(false)
             }
         },
@@ -169,7 +175,7 @@ pub fn mark_operation(app: &mut App,
         return Ok(())
     }
 
-    OperationError::NoSelected.check(app);
+    ErrorType::NoSelected.check(app);
     Ok(())
 }
 
@@ -216,11 +222,11 @@ where I: Iterator<Item = (String, bool)>
     }
 
     if !no_permission_files.is_empty() {
-        OperationError::PermissionDenied(Some(no_permission_files)).check(app);
+        ErrorType::PermissionDenied(Some(no_permission_files)).check(app);
     }
 
     if !not_found_files.is_empty() {
-        OperationError::NotFound(
+        ErrorType::NotFound(
             NotFoundType::Files(not_found_files)
         ).check(app);
     }

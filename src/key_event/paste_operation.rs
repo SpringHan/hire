@@ -1,8 +1,13 @@
 // Paste operation.
 
 use crate::App;
-use crate::app::command::{OperationError, NotFoundType};
-use crate::app::{CursorPos, FileOperation, MarkedFiles};
+use crate::app::{
+    CursorPos,
+    FileOperation,
+    MarkedFiles,
+    ErrorType,
+    NotFoundType
+};
 
 use super::SwitchCase;
 use super::file_operations::delete_file;
@@ -15,7 +20,7 @@ use std::collections::HashMap;
 
 pub fn paste_operation(app: &mut App) {
     if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
-        OperationError::NoSelected.check(app);
+        ErrorType::NoSelected.check(app);
         return ()
     }
 
@@ -120,7 +125,7 @@ where
     }
 
     if !permission_err.is_empty() {
-        OperationError::PermissionDenied(Some(permission_err)).check(app);
+        ErrorType::PermissionDenied(Some(permission_err)).check(app);
     }
 
     Ok(exists_files)
@@ -128,12 +133,12 @@ where
 
 pub fn make_single_symlink(app: &mut App) -> io::Result<()> {
     if app.marked_files.is_empty() {
-        OperationError::NoSelected.check(app);
+        ErrorType::NoSelected.check(app);
         return Ok(())
     }
 
     if app.marked_files.len() > 1 {
-        OperationError::Specific(
+        ErrorType::Specific(
             String::from("The number of marked files is more than one!")
         ).check(app);
         return Ok(())
@@ -205,7 +210,7 @@ fn paste_switch(
             }
 
             if !files_for_error.is_empty() {
-                OperationError::FileExists(files_for_error).check(app);
+                ErrorType::FileExists(files_for_error).check(app);
                 restore_status(app)?;
                 return Ok(false)
             }
@@ -256,7 +261,7 @@ fn paste_switch(
         },
         'x' => (),
         _ => {
-            OperationError::NotFound(
+            ErrorType::NotFound(
                 NotFoundType::Item(format!("key {}", key))
             ).check(app);
 

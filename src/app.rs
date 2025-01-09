@@ -4,7 +4,9 @@ pub mod filesaver;
 pub mod special_types;
 pub mod command;
 pub mod color;
+pub mod app_result;
 pub use special_types::*;
+pub use app_result::*;
 
 use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
@@ -64,6 +66,9 @@ pub struct App {
     // Tab
     pub tab_list: crate::key_event::TabList,
 
+    // AppErrors
+    pub app_error: AppError,
+
     pub computer_name: Cow<'static, str>,
     pub user_name: Cow<'static, str>
 }
@@ -106,6 +111,7 @@ impl Default for App {
             target_dir: HashMap::new(),
             config_path: String::new(),
             tab_list,
+            app_error: AppError::new(),
             computer_name: Cow::from(host_info.0),
             user_name: Cow::from(host_info.1)
         }
@@ -734,57 +740,59 @@ impl App {
 
             self.command_history.push(command.to_owned());
             let mut command_slices: Vec<&str> = command.split(" ").collect();
-            let ready_for_check = match command_slices[0] {
-                ":rename" => {
-                    command_slices.remove(0);
-                    let file_name = command_slices.join(" ");
-                    command::rename_file(
-                        self.path.to_owned(),
-                        self,
-                        file_name
-                    )?
-                },
-                ":create_file" => {
-                    command_slices.remove(0);
-                    let files = command_slices.join(" ");
-                    let files: Vec<&str> = files.split(",").collect();
-                    command::create_file(
-                        self,
-                        files.into_iter(),
-                        false
-                    )?
-                },
-                ":create_dir" => {
-                    command_slices.remove(0);
-                    let files = command_slices.join(" ");
-                    let files: Vec<&str> = files.split(",").collect();
-                    command::create_file(
-                        self,
-                        files.into_iter(),
-                        true
-                    )?
-                },
-                ":create_symlink" => {
-                    self.marked_files.clear();
-                    self.marked_operation = FileOperation::None;
 
-                    command_slices.remove(0);
-                    let files = command_slices.join(" ");
-                    let files: Vec<&str> = files
-                        .split("->")
-                        .collect();
-                    command::create_symlink(
-                        self,
-                        [(files[0].trim(), files[1].trim())].into_iter()
-                    )?
-                },
-                _ => command::OperationError::UnvalidCommand
-            };
+            // TODO: Modify here
+            // let ready_for_check = match command_slices[0] {
+            //     ":rename" => {
+            //         command_slices.remove(0);
+            //         let file_name = command_slices.join(" ");
+            //         command::rename_file(
+            //             self.path.to_owned(),
+            //             self,
+            //             file_name
+            //         )?
+            //     },
+            //     ":create_file" => {
+            //         command_slices.remove(0);
+            //         let files = command_slices.join(" ");
+            //         let files: Vec<&str> = files.split(",").collect();
+            //         command::create_file(
+            //             self,
+            //             files.into_iter(),
+            //             false
+            //         )?
+            //     },
+            //     ":create_dir" => {
+            //         command_slices.remove(0);
+            //         let files = command_slices.join(" ");
+            //         let files: Vec<&str> = files.split(",").collect();
+            //         command::create_file(
+            //             self,
+            //             files.into_iter(),
+            //             true
+            //         )?
+            //     },
+            //     ":create_symlink" => {
+            //         self.marked_files.clear();
+            //         self.marked_operation = FileOperation::None;
 
-            // When result of check is false, there would be errors, which should be displayed.
-            if ready_for_check.check(self) {
-                self.quit_command_mode();
-            }
+            //         command_slices.remove(0);
+            //         let files = command_slices.join(" ");
+            //         let files: Vec<&str> = files
+            //             .split("->")
+            //             .collect();
+            //         command::create_symlink(
+            //             self,
+            //             [(files[0].trim(), files[1].trim())].into_iter()
+            //         )?
+            //     },
+            //     _ => ErrorType::UnvalidCommand
+            // };
+
+            // // When result of check is false, there would be errors, which should be displayed.
+            // if ready_for_check.check(self) {
+            //     self.quit_command_mode();
+            // }
         }
 
         Ok(())
