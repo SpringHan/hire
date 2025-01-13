@@ -1,8 +1,6 @@
 // Switch Operation.
 
-use crate::app::{self, App};
-
-use std::error::Error;
+use crate::app::{self, App, AppResult};
 
 #[allow(unused)]
 #[derive(PartialEq, Eq, Clone)]
@@ -14,7 +12,7 @@ pub enum SwitchCaseData {
     // DString(String)
 }
 
-type FuncPointer = fn(&mut App, char, SwitchCaseData) -> Result<bool, Box<dyn Error>>;
+type FuncPointer = fn(&mut App, char, SwitchCaseData) -> AppResult<bool>;
 
 #[derive(PartialEq, Eq, Clone)]
 pub struct SwitchCase(FuncPointer, SwitchCaseData);
@@ -41,7 +39,7 @@ pub fn switch_match(
     app: &mut App,
     case: SwitchCase,
     key: char
-) -> Result<(), Box<dyn Error>>
+) -> AppResult<()>
 {
     let SwitchCase(func, data) = case;
 

@@ -4,7 +4,9 @@ use crate::app::{
     App,
     CursorPos,
     FileOperation,
-    OptionFor,
+    // OptionFor,
+    AppResult,
+    AppError,
     ErrorType,
     NotFoundType
 };
@@ -20,7 +22,7 @@ use std::error::Error;
 use std::collections::HashMap;
 
 // File name modify
-pub fn append_file_name(app: &mut App, to_end: bool) {
+pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
     let file_saver = app.get_file_saver();
     if let Some(file_saver) = file_saver {
         let current_file = &file_saver.name;
@@ -30,7 +32,7 @@ pub fn append_file_name(app: &mut App, to_end: bool) {
                 format!(":rename {}", current_file),
                 CursorPos::End
             );
-            return ()
+            return Ok(())
         }
 
         let cursor_pos = current_file
@@ -54,8 +56,11 @@ pub fn append_file_name(app: &mut App, to_end: bool) {
             }
         );
     } else {
-        ErrorType::NoSelected.check(app);
+        // ErrorType::NoSelected.check(app);
+        return Err(ErrorType::NoSelected.pack())
     }
+
+    Ok(())
 }
 
 // Delete operation
@@ -67,7 +72,7 @@ fn delete_switch(
     app: &mut App,
     key: char,
     _: SwitchCaseData
-) -> Result<bool, Box<dyn Error>>
+) -> AppResult<bool>
 {
     let in_root = app.path.to_string_lossy() == "/";
 
@@ -82,13 +87,15 @@ fn delete_switch(
                         current_file.is_dir
                     );
                 } else {
-                    ErrorType::NoSelected.check(app);
-                    return Ok(false)
+                    return Err(ErrorType::NoSelected.pack())
+                    // ErrorType::NoSelected.check(app);
+                    // return Ok(false)
                 }
             }
 
             app.marked_operation = FileOperation::Move;
-            cursor_movement::move_cursor(app, Goto::Down, in_root)?;
+            // TODO: Modify here
+            // cursor_movement::move_cursor(app, Goto::Down, in_root)?;
         },
         'D' => {
             if !app.marked_files.is_empty() {
@@ -112,8 +119,9 @@ fn delete_switch(
             let current_file = app.get_file_saver();
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
-                    ErrorType::PermissionDenied(None).check(app);
-                    return Ok(false)
+                    return Err(ErrorType::PermissionDenied(None).pack())
+                    // ErrorType::PermissionDenied(None).check(app);
+                    // return Ok(false)
                 }
 
                 let mut temp_hashmap = HashMap::new();
@@ -127,8 +135,9 @@ fn delete_switch(
                     in_root
                 )?;
             } else {
-                ErrorType::NoSelected.check(app);
-                return Ok(false)
+                return Err(ErrorType::NoSelected.pack())
+                // ErrorType::NoSelected.check(app);
+                // return Ok(false)
             }
         },
         _ => ()
@@ -149,7 +158,7 @@ fn generate_msg() -> String {
 pub fn mark_operation(app: &mut App,
                       single: bool,
                       in_root: bool
-) -> Result<(), Box<dyn Error>>
+) -> AppResult<()>
 {
     if single {
         let selected_file = app.get_file_saver();
@@ -162,7 +171,8 @@ pub fn mark_operation(app: &mut App,
                     selected_file.is_dir
                 );
             }
-            cursor_movement::move_cursor(app, Goto::Down, in_root)?;
+            // TODO: Modify here
+            // cursor_movement::move_cursor(app, Goto::Down, in_root)?;
             return Ok(())
         }
     } else if !app.current_files.is_empty() {
@@ -175,8 +185,9 @@ pub fn mark_operation(app: &mut App,
         return Ok(())
     }
 
-    ErrorType::NoSelected.check(app);
-    Ok(())
+    Err(ErrorType::NoSelected.pack())
+    // ErrorType::NoSelected.check(app);
+    // Ok(())
 }
 
 pub fn delete_file<I>(app: &mut App,
@@ -184,13 +195,14 @@ pub fn delete_file<I>(app: &mut App,
                       file_iter: I,
                       single_file: bool,
                       in_root: bool
-) -> io::Result<()>
+) -> AppResult<()>
 where I: Iterator<Item = (String, bool)>
 {
     use std::fs::{remove_file, remove_dir_all};
 
-    let mut no_permission_files: Vec<String> = Vec::new();
-    let mut not_found_files: Vec<String> = Vec::new();
+    let mut errors = AppError::new();
+    // let mut no_permission_files: Vec<String> = Vec::new();
+    // let mut not_found_files: Vec<String> = Vec::new();
 
     for file in file_iter {
         let is_dir = file.1;
@@ -204,32 +216,36 @@ where I: Iterator<Item = (String, bool)>
 
         match remove_result {
             Err(err) => {
-                if err.kind() == ErrorKind::PermissionDenied {
-                    no_permission_files.push(file.0);
-                } else if err.kind() != ErrorKind::NotFound {
-                    not_found_files.push(file.0);
-                }
+                // if err.kind() == ErrorKind::PermissionDenied {
+                //     no_permission_files.push(file.0);
+                // } else if err.kind() != ErrorKind::NotFound {
+                //     not_found_files.push(file.0);
+                // }
+                errors.add_error(err);
 
                 // When the file does not exist, maybe the path is deleted.
                 // If it's true, do not return error for stably running.
-                if single_file {
-                    app.option_key = OptionFor::None;
-                    return Ok(())
-                }
+                // if single_file {
+                //     app.option_key = OptionFor::None;
+                //     return Ok(())
+                // }
             },
             Ok(_) => (),
         }
     }
 
-    if !no_permission_files.is_empty() {
-        ErrorType::PermissionDenied(Some(no_permission_files)).check(app);
+    if !errors.is_empty() {
+        return Err(errors)
     }
+    // if !no_permission_files.is_empty() {
+    //     ErrorType::PermissionDenied(Some(no_permission_files)).check(app);
+    // }
 
-    if !not_found_files.is_empty() {
-        ErrorType::NotFound(
-            NotFoundType::Files(not_found_files)
-        ).check(app);
-    }
+    // if !not_found_files.is_empty() {
+    //     ErrorType::NotFound(
+    //         NotFoundType::Files(not_found_files)
+    //     ).check(app);
+    // }
 
     if !single_file {
         return Ok(())

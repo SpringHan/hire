@@ -63,7 +63,8 @@ pub fn handle_event(key: KeyCode,
             match app.option_key {
                 OptionFor::Switch(ref case) => {
                     let case = case.to_owned();
-                    switch_operation::switch_match(app, case, c)?;
+                    // TODO: Uncomment this line
+                    // switch_operation::switch_match(app, case, c)?;
                     return Ok(())
                 },
                 OptionFor::None => ()
@@ -86,10 +87,12 @@ pub fn handle_event(key: KeyCode,
                     '/' => app.set_command_line("/", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
-                    'a' => append_file_name(app, false),
-                    'A' => append_file_name(app, true),
-                    ' ' => mark_operation(app, true, in_root)?,
-                    'm' => mark_operation(app, false, in_root)?,
+                    // TODO: Uncomment from here
+                    // 'a' => append_file_name(app, false)?,
+                    // 'A' => append_file_name(app, true)?,
+                    // ' ' => mark_operation(app, true, in_root)?,
+                    // 'm' => mark_operation(app, false, in_root)?,
+                    // End here
                     '+' => app.set_command_line(
                         ":create_dir ",
                         CursorPos::End
@@ -100,7 +103,9 @@ pub fn handle_event(key: KeyCode,
                     ),
                     '-' => app.hide_or_show(None)?,
                     'p' => paste_operation::paste_operation(app),
-                    's' => paste_operation::make_single_symlink(app)?,
+                    // TODO: Uncomment from here
+                    // 's' => paste_operation::make_single_symlink(app)?,
+                    // End here
                     'S' => shell_process(
                         app,
                         terminal,

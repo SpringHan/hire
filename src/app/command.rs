@@ -3,8 +3,8 @@
 use super::filesaver::{sort, FileSaver};
 use super::{App, AppResult, AppError, ErrorType, NotFoundType};
 
-use std::io::ErrorKind;
-use std::{io, fs};
+// use std::io::{self, ErrorKind};
+use std::fs;
 use std::path::{PathBuf, Path};
 
 pub fn rename_file(path: PathBuf,
@@ -168,34 +168,35 @@ where I: Iterator<Item = &'a str>
     Ok(())
 }
 
-// TODO: 1.10 start from here
-pub fn create_symlink<I, P>(app: &mut App, files: I) -> io::Result<ErrorType>
+pub fn create_symlink<I, P>(app: &mut App, files: I) -> AppResult<()>
 where
     I: Iterator<Item = (P, P)>,
     P: AsRef<Path>
 {
     use std::os::unix::fs::symlink;
 
-    let mut no_permission: Vec<String> = Vec::new();
-    let mut not_found: Vec<String> = Vec::new();
-    let mut exists_links: Vec<String> = Vec::new();
+    // let mut no_permission: Vec<String> = Vec::new();
+    // let mut not_found: Vec<String> = Vec::new();
+    // let mut exists_links: Vec<String> = Vec::new();
+    let mut errors = AppError::new();
     let mut to_show_hidden_files = false;
 
     for (file, target) in files {
         match symlink(&file, &target) {
             Err(err) => {
-                match err.kind() {
-                    ErrorKind::PermissionDenied => no_permission.push(
-                        file.as_ref().to_string_lossy().into()
-                    ),
-                    ErrorKind::NotFound => not_found.push(
-                        file.as_ref().to_string_lossy().into()
-                    ),
-                    ErrorKind::AlreadyExists => exists_links.push(
-                        file.as_ref().to_string_lossy().into()
-                    ),
-                    _ => return Err(err)
-                }
+                // match err.kind() {
+                //     ErrorKind::PermissionDenied => no_permission.push(
+                //         file.as_ref().to_string_lossy().into()
+                //     ),
+                //     ErrorKind::NotFound => not_found.push(
+                //         file.as_ref().to_string_lossy().into()
+                //     ),
+                //     ErrorKind::AlreadyExists => exists_links.push(
+                //         file.as_ref().to_string_lossy().into()
+                //     ),
+                //     _ => return Err(err)
+                // }
+                errors.add_error(err);
             },
             _ => {
                 if !to_show_hidden_files
@@ -213,17 +214,22 @@ where
         app.partly_update_block()?;
     }
 
-    if !no_permission.is_empty() {
-        ErrorType::PermissionDenied(Some(no_permission)).check(app);
+    if !errors.is_empty() {
+        return Err(errors);
     }
 
-    if !exists_links.is_empty() {
-        ErrorType::FileExists(exists_links).check(app);
-    }
+    // if !no_permission.is_empty() {
+    //     ErrorType::PermissionDenied(Some(no_permission)).check(app);
+    // }
 
-    if !not_found.is_empty() {
-        return Ok(ErrorType::NotFound(NotFoundType::Files(not_found)))
-    }
+    // if !exists_links.is_empty() {
+    //     ErrorType::FileExists(exists_links).check(app);
+    // }
 
-    Ok(ErrorType::None)
+    // if !not_found.is_empty() {
+    //     return Ok(ErrorType::NotFound(NotFoundType::Files(not_found)))
+    // }
+
+    // Ok(ErrorType::None)
+    Ok(())
 }

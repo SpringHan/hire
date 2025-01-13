@@ -5,6 +5,8 @@ use crate::app::{
     CursorPos,
     FileOperation,
     MarkedFiles,
+    AppResult,
+    AppError,
     ErrorType,
     NotFoundType
 };
@@ -31,7 +33,7 @@ pub fn paste_files<'a, I, P>(app: &'a mut App,
                              file_iter: I,
                              target_path: P,
                              overwrite: bool
-) -> io::Result<HashMap<PathBuf, Vec<String>>>
+) -> AppResult<HashMap<PathBuf, Vec<String>>>
 where
     I: Iterator<Item = (&'a PathBuf, &'a MarkedFiles)>,
     P: AsRef<Path>
@@ -39,18 +41,18 @@ where
     use copy_dir::copy_dir;
 
     // TODO: Record the existed files, return them. Make sure they're not deleted.
-    let mut permission_err: Vec<String> = Vec::new();
+    // let mut permission_err: Vec<String> = Vec::new();
+    let mut errors = AppError::new();
     let mut exists_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
     macro_rules! file_action {
         ($func:expr, $file:expr, $from:expr $(, $to:expr )*) => {
             match $func($from, $( $to )*) {
-                Err(err) if err.kind() == ErrorKind::PermissionDenied => {
-                    permission_err.push($file.0.to_owned());
+                Err(err) => {
+                    errors.add_error(err);
                     continue;
                 },
-                Ok(_) => (),
-                Err(err)=> return Err(err)
+                Ok(_) => ()
             }
         }
     }
@@ -67,12 +69,10 @@ where
             match target_file {
                 Err(err) => {
                     match err.kind() {
-                        ErrorKind::PermissionDenied => {
-                            permission_err.push(file.0.to_owned());
-                            continue;
-                        },
                         ErrorKind::NotFound => (), // Nice find.
-                        _ => panic!("Unknown error!")
+                        _ => {
+                            errors.add_error(err);
+                        }
                     }
                 },
                 Ok(metadata) => {
@@ -124,24 +124,28 @@ where
         }
     }
 
-    if !permission_err.is_empty() {
-        ErrorType::PermissionDenied(Some(permission_err)).check(app);
+    if !errors.is_empty() {
+        return Err(errors)
     }
+
+    // if !permission_err.is_empty() {
+    //     ErrorType::PermissionDenied(Some(permission_err)).check(app);
+    // }
 
     Ok(exists_files)
 }
 
-pub fn make_single_symlink(app: &mut App) -> io::Result<()> {
+pub fn make_single_symlink(app: &mut App) -> AppResult<()> {
     if app.marked_files.is_empty() {
-        ErrorType::NoSelected.check(app);
-        return Ok(())
+        return Err(ErrorType::NoSelected.pack())
     }
 
     if app.marked_files.len() > 1 {
-        ErrorType::Specific(
-            String::from("The number of marked files is more than one!")
-        ).check(app);
-        return Ok(())
+        return Err(
+            ErrorType::Specific(
+                String::from("The number of marked files is more than one!")
+            ).pack()
+        )
     }
 
     for (path, files) in app.marked_files.iter() {
@@ -166,7 +170,7 @@ fn paste_switch(
     app: &mut App,
     key: char,
     _: super::SwitchCaseData
-) -> Result<bool, Box<dyn Error>>
+) -> AppResult<bool>
 {
     let current_dir = app.current_path();
     let files = app.marked_files.to_owned();
@@ -210,9 +214,8 @@ fn paste_switch(
             }
 
             if !files_for_error.is_empty() {
-                ErrorType::FileExists(files_for_error).check(app);
                 restore_status(app)?;
-                return Ok(false)
+                return Err(ErrorType::FileExists(files_for_error).pack())
             }
         },
         's' => {
@@ -223,7 +226,7 @@ fn paste_switch(
                 }
             }
 
-            crate::app::command::create_symlink(app, final_files.into_iter())?.check(app);
+            crate::app::command::create_symlink(app, final_files.into_iter())?;
         },
         'c' => {
             paste_files(
@@ -261,11 +264,11 @@ fn paste_switch(
         },
         'x' => (),
         _ => {
-            ErrorType::NotFound(
-                NotFoundType::Item(format!("key {}", key))
-            ).check(app);
-
-            return Ok(false)
+            return Err(
+                ErrorType::NotFound(
+                    NotFoundType::Item(format!("key {}", key))
+                ).pack()
+            )
         }
     }
 
@@ -294,8 +297,7 @@ fn generate_msg(app: &App) -> String {
     msg
 }
 
-
-fn restore_status(app: &mut App) -> io::Result<()> {
+fn restore_status(app: &mut App) -> AppResult<()> {
     app.marked_files.clear();
     app.marked_operation = FileOperation::None;
     app.goto_dir(app.current_path(), None)?;

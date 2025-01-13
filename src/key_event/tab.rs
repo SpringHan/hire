@@ -1,7 +1,7 @@
 // Tab.
 
-use crate::app::{App, ErrorType, NotFoundType};
 use super::{SwitchCase, SwitchCaseData};
+use crate::app::{App, AppResult, ErrorType, NotFoundType};
 
 use std::io;
 use std::error::Error;
@@ -31,11 +31,10 @@ pub fn tab_operation(app: &mut App) {
     SwitchCase::new(app, switch, generate_msg(app), SwitchCaseData::Bool(false));
 }
 
-fn next(app: &mut App) -> io::Result<bool> {
+fn next(app: &mut App) -> AppResult<bool> {
     let tab = &mut app.tab_list;
     if tab.list.len() == tab.current + 1 {
-        ErrorType::Specific("There's no other tabs!".to_owned()).check(app);
-        return Ok(false)
+        return Err(ErrorType::Specific("There's no other tabs!".to_owned()).pack())
     }
 
     tab.list[tab.current] = (
@@ -53,11 +52,14 @@ fn next(app: &mut App) -> io::Result<bool> {
     Ok(true)
 }
 
-fn prev(app: &mut App) -> io::Result<bool> {
+fn prev(app: &mut App) -> AppResult<bool> {
     let tab = &mut app.tab_list;
     if tab.current == 0 {
-        ErrorType::Specific("There's no other tabs!".to_owned()).check(app);
-        return Ok(false)
+        return Err(
+            ErrorType::Specific(
+                "There's no other tabs!".to_owned()
+            ).pack()
+        )
     }
 
     tab.list[tab.current] = (
@@ -87,13 +89,12 @@ fn create(app: &mut App) {
 }
 
 // Remove tab with its idx. Return false if failed to remove tab.
-fn remove_base(app: &mut App, idx: usize) -> io::Result<bool> {
+fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
     let tab = &mut app.tab_list;
 
     if idx == tab.current {
         if tab.list.len() == 1 {
-            ErrorType::Specific("There's only one tab!".to_owned()).check(app);
-            return Ok(false)
+            return Err(ErrorType::Specific("There's only one tab!".to_owned()).pack())
         }
         tab.list.remove(idx);
 
@@ -118,7 +119,7 @@ fn remove_base(app: &mut App, idx: usize) -> io::Result<bool> {
     Ok(true)
 }
 
-fn switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dyn Error>> {
+fn switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool> {
     let to_delete = if let SwitchCaseData::Bool(_data) = data {
         _data
     } else {
@@ -154,8 +155,7 @@ fn switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dy
                 .expect("Failed to parse char to usize!") as usize;
 
             if app.tab_list.list.len() < idx {
-                ErrorType::NotFound(NotFoundType::None).check(app);
-                return Ok(false)
+                return Err(ErrorType::NotFound(NotFoundType::None).pack())
             }
 
             if to_delete {
@@ -182,7 +182,6 @@ fn generate_msg(app: &App) -> String {
 
     msg
 }
-
 
 fn tab_string_list<'a, I>(iter: I) -> String
 where I: Iterator<Item = &'a (PathBuf, bool)>

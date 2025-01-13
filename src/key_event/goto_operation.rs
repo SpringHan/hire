@@ -3,7 +3,7 @@
 use super::Goto;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::{App, ErrorType, NotFoundType};
+use crate::app::{App, AppResult, AppError, ErrorType, NotFoundType};
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ pub fn goto_operation(app: &mut App) {
     );
 }
 
-fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, Box<dyn Error>> {
+fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool> {
     let modify_type = if let SwitchCaseData::Char(_data) = data {
         _data
     } else {
@@ -29,11 +29,12 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> Result<bool, B
     };
 
     match key {
-        'g' => super::cursor_movement::move_cursor(
-            app,
-            Goto::Index(0),
-            app.path.to_string_lossy() == "/"
-        )?,
+        // TODO: Uncomment here
+        // 'g' => super::cursor_movement::move_cursor(
+        //     app,
+        //     Goto::Index(0),
+        //     app.path.to_string_lossy() == "/"
+        // )?,
         '+' => {
             SwitchCase::new(
                 app,
@@ -125,7 +126,7 @@ fn add_target_dir(app: &mut App, key: char, path: PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
+fn remove_target_dir(app: &mut App, key: char) -> AppResult<()> {
     let mut file_open = OpenOptions::new();
 
     let mut read_file = file_open.read(true).open(&app.config_path)?;
@@ -133,8 +134,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     read_file.read_to_string(&mut config)?;
 
     if config.trim().is_empty() {
-        ErrorType::NotFound(NotFoundType::None).check(app);
-        return Ok(())
+        return Err(ErrorType::NotFound(NotFoundType::None).pack())
     }
 
     let mut toml_config: Document = config
@@ -143,8 +143,7 @@ fn remove_target_dir(app: &mut App, key: char) -> io::Result<()> {
     if let Some(target_dir) = toml_config.get_mut("target_dir") {
         target_dir[&String::from(key)] = toml_edit::Item::None;
     } else {
-        ErrorType::NotFound(NotFoundType::None).check(app);
-        return Ok(())
+        return Err(ErrorType::NotFound(NotFoundType::None).pack())
     }
 
     let mut write_file = file_open

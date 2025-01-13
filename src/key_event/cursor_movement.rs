@@ -1,6 +1,6 @@
 // Cursor Movement.
 
-use crate::app::{self, App};
+use crate::app::{self, App, AppResult};
 use super::Goto;
 
 use std::mem::swap;
