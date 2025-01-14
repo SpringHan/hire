@@ -15,22 +15,21 @@ use super::SwitchCase;
 use super::file_operations::delete_file;
 
 use std::fs;
-use std::error::Error;
-use std::io::{self, ErrorKind};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
-pub fn paste_operation(app: &mut App) {
+pub fn paste_operation(app: &mut App) -> AppResult<()> {
     if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
-        ErrorType::NoSelected.check(app);
-        return ()
+        return Err(ErrorType::NoSelected.pack())
     }
 
     SwitchCase::new(app, paste_switch, generate_msg(app), super::SwitchCaseData::None);
+
+    Ok(())
 }
 
-pub fn paste_files<'a, I, P>(app: &'a mut App,
-                             file_iter: I,
+pub fn paste_files<'a, I, P>(file_iter: I,
                              target_path: P,
                              overwrite: bool
 ) -> AppResult<HashMap<PathBuf, Vec<String>>>
@@ -40,8 +39,6 @@ where
 {
     use copy_dir::copy_dir;
 
-    // TODO: Record the existed files, return them. Make sure they're not deleted.
-    // let mut permission_err: Vec<String> = Vec::new();
     let mut errors = AppError::new();
     let mut exists_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
@@ -88,7 +85,7 @@ where
                 }
             }
 
-            // TODO: If the exists_file is a directory and the original one is not, cancel this action
+            // NOTE: If the exists_file is a directory and the original one is not, cancel this action
             // and vice versa.
             if target_exists {
                 if target_is_dir {
@@ -127,10 +124,6 @@ where
     if !errors.is_empty() {
         return Err(errors)
     }
-
-    // if !permission_err.is_empty() {
-    //     ErrorType::PermissionDenied(Some(permission_err)).check(app);
-    // }
 
     Ok(exists_files)
 }
@@ -178,7 +171,6 @@ fn paste_switch(
     match key {
         'p' => {
             let exists_files = paste_files(
-                app,
                 files.iter(),
                 current_dir,
                 false
@@ -230,7 +222,6 @@ fn paste_switch(
         },
         'c' => {
             paste_files(
-                app,
                 files.iter(),
                 current_dir,
                 false
@@ -238,7 +229,6 @@ fn paste_switch(
         },
         'o' => {
             paste_files(
-                app,
                 files.iter(),
                 current_dir,
                 true
@@ -246,7 +236,6 @@ fn paste_switch(
         },
         'O' => {
             paste_files(
-                app,
                 files.iter(),
                 current_dir,
                 true

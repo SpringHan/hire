@@ -1,7 +1,5 @@
 // App Result
 
-use crate::app::App;
-
 use std::io;
 use std::convert::From;
 
@@ -15,7 +13,7 @@ pub struct AppError {
 /// The three cases matching not found error.
 #[derive(Debug)]
 pub enum NotFoundType {
-    Files(Vec<String>),
+    // Files(Vec<String>),
     Item(String),
     None
 }
@@ -29,8 +27,9 @@ pub enum ErrorType {
     NoSelected,
     NotFound(NotFoundType),
     Specific(String),
-    Io(io::ErrorKind, String),
-    Fatal(String)
+
+    #[allow(unused)]
+    Io(io::ErrorKind, String)
 }
 
 impl AppError {
@@ -42,8 +41,8 @@ impl AppError {
         self.errors.is_empty()
     }
 
-    pub fn get_iter<'a>(&'a self) -> impl Iterator<Item = &'a ErrorType> {
-        self.errors.iter()
+    pub fn iter(self) -> impl Iterator<Item = ErrorType> {
+        self.errors.into_iter()
     }
 
     pub fn add_error<E: Into<ErrorType>>(&mut self, error: E) {
@@ -58,6 +57,18 @@ impl AppError {
 
     pub fn clear(&mut self) {
         self.errors.clear();
+    }
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut final_msg: Vec<String> = Vec::new();
+
+        for err in self.errors.iter() {
+            final_msg.push(err.error_value());
+        }
+
+        write!(f, "{}", final_msg.join("\n"))
     }
 }
 
@@ -98,58 +109,19 @@ impl ErrorType {
             },
             ErrorType::NotFound(data) => {
                 match data {
-                    NotFoundType::Files(files) => format!("[Error]: Not found: {:?}", files),
+                    // NotFoundType::Files(files) => format!("[Error]: Not found: {:?}", files),
                     NotFoundType::Item(item) => format!("[Error]: Not found: {}", item),
-                    NotFoundType::None => String::from("[Error]: The file/item cannot be found!"),
+                    NotFoundType::None => String::from("[Error]: The file/item cannot be found!")
                 }
             },
             ErrorType::Specific(err) => {
                 format!("[Error]: {}", err)
             }
-            ErrorType::Io(_, msg) => msg.to_owned(),
-            ErrorType::Fatal(err) => panic!("{}", err),
+            ErrorType::Io(_, msg) => msg.to_owned()
         }
     }
 
     pub fn pack(self) -> AppError {
         AppError { errors: vec![self] }
-    }
-
-    /// Check whether the OperationError is None
-    /// If it's None, return true. If previous errors exist, still return false.
-    pub fn check(self, app: &mut App) -> bool {
-        // if let Some(msg) = self.error_value() {
-        //     if let
-        //         Block::CommandLine(
-        //             ref mut error,
-        //             ref mut cursor
-        //         ) = app.selected_block
-        //     {
-        //         if app.command_error {
-        //             error.push_str(&format!("\n{}", msg));
-        //         } else {
-        //             *error = msg;
-        //             *cursor = CursorPos::None;
-        //             app.command_error = true;
-        //         }
-
-        //         // Turn off Switch mode.
-        //         if let super::OptionFor::Switch(_) = app.option_key {
-        //             app.option_key = super::OptionFor::None;
-        //         }
-        //     } else {
-        //         app.set_command_line(msg, CursorPos::None);
-        //         app.command_error = true;
-        //     }
-
-        //     return false
-        // }
-
-        // // Though current error not exists, but previous errors exist.
-        // if app.command_error {
-        //     return false
-        // }
-
-        true
     }
 }

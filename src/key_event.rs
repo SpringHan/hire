@@ -18,10 +18,9 @@ pub use tab::TabList;
 
 use crate::key_event::tab::tab_operation;
 use crate::App;
-use crate::app::{self, CursorPos, OptionFor, FileOperation};
+use crate::app::{self, AppResult, CursorPos, OptionFor, FileOperation};
 
 use std::io::Stderr;
-use std::error::Error;
 use std::ops::{SubAssign, AddAssign};
 
 use ratatui::Terminal as RTerminal;
@@ -45,7 +44,7 @@ pub enum Goto {
 pub fn handle_event(key: KeyCode,
                     app: &mut App,
                     terminal: &mut Terminal
-) -> Result<(), Box<dyn Error>>
+) -> AppResult<()>
 {
     use cursor_movement::*;
     use file_operations::*;
@@ -63,8 +62,7 @@ pub fn handle_event(key: KeyCode,
             match app.option_key {
                 OptionFor::Switch(ref case) => {
                     let case = case.to_owned();
-                    // TODO: Uncomment this line
-                    // switch_operation::switch_match(app, case, c)?;
+                    switch_operation::switch_match(app, case, c)?;
                     return Ok(())
                 },
                 OptionFor::None => ()
@@ -87,12 +85,10 @@ pub fn handle_event(key: KeyCode,
                     '/' => app.set_command_line("/", CursorPos::End),
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
-                    // TODO: Uncomment from here
-                    // 'a' => append_file_name(app, false)?,
-                    // 'A' => append_file_name(app, true)?,
-                    // ' ' => mark_operation(app, true, in_root)?,
-                    // 'm' => mark_operation(app, false, in_root)?,
-                    // End here
+                    'a' => append_file_name(app, false)?,
+                    'A' => append_file_name(app, true)?,
+                    ' ' => mark_operation(app, true, in_root)?,
+                    'm' => mark_operation(app, false, in_root)?,
                     '+' => app.set_command_line(
                         ":create_dir ",
                         CursorPos::End
@@ -102,10 +98,8 @@ pub fn handle_event(key: KeyCode,
                         CursorPos::End
                     ),
                     '-' => app.hide_or_show(None)?,
-                    'p' => paste_operation::paste_operation(app),
-                    // TODO: Uncomment from here
-                    // 's' => paste_operation::make_single_symlink(app)?,
-                    // End here
+                    'p' => paste_operation::paste_operation(app)?,
+                    's' => paste_operation::make_single_symlink(app)?,
                     'S' => shell_process(
                         app,
                         terminal,
@@ -206,7 +200,6 @@ pub fn handle_event(key: KeyCode,
             }
         },
 
-        // BUG: Switch to undefined items when continuously switching down
         KeyCode::Down => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {

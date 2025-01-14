@@ -12,7 +12,6 @@ use crate::key_event::Goto;
 use filesaver::{FileSaver, sort};
 pub use color::{TermColors, reverse_style};
 
-use std::error;
 use std::borrow::Cow;
 use std::{env, fs, io};
 use std::ops::{AddAssign, SubAssign};
@@ -430,20 +429,22 @@ impl App {
             .unwrap()
             .name
             .to_owned();
-        let current_file: Option<String> = if let
-            Some(file) = self.search_file(SearchFile::Current)
+        let current_file: Option<String> = if
+            let Some(file) = self.search_file(SearchFile::Current)
         {
             Some(file.name.to_owned())
         } else {
             None
         };
-        let child_file = if let
-            Some(file) = self.search_file(SearchFile::Child)
+
+        let child_file = if
+            let Some(file) = self.search_file(SearchFile::Child)
         {
             Some(file.name.to_owned())
         } else {
             None
         };
+
         let has_file_content = if self.file_content.is_some() {
             true
         } else {
@@ -559,11 +560,15 @@ impl App {
                     }
                 },
                 Ok(ref mut file) => {
-                    if let Err(e) = file.read_to_string(&mut content) {
-                        if e.kind() != io::ErrorKind::InvalidData {
-                            return Err(e)
+                    if selected_file.is_file {
+                        if let Err(e) = file.read_to_string(&mut content) {
+                            if e.kind() != io::ErrorKind::InvalidData {
+                                return Err(e)
+                            }
+                            content = String::from("Non-UTF-8 Data");
                         }
-                        content = String::from("Non-UTF-8 Data");
+                    } else {
+                        content = String::from("Non Normal File");
                     }
                 },
             };
@@ -573,7 +578,7 @@ impl App {
         Ok(())
     }
 
-    fn read_files(&mut self, path: &Path) -> Result<Vec<FileSaver>, io::Error> {
+    fn read_files(&mut self, path: &Path) -> io::Result<Vec<FileSaver>> {
         let temp_dir = fs::read_dir(path);
 
         match temp_dir {
@@ -731,7 +736,7 @@ impl App {
         }
     }
     
-    pub fn command_parse(&mut self) -> io::Result<()> {
+    pub fn command_parse(&mut self) -> AppResult<()> {
         if let Block::CommandLine(ref command, _) = self.selected_block {
             if command.starts_with("/") {
                 self.file_search(command[1..].to_owned());
@@ -741,58 +746,54 @@ impl App {
             self.command_history.push(command.to_owned());
             let mut command_slices: Vec<&str> = command.split(" ").collect();
 
-            // TODO: Modify here
-            // let ready_for_check = match command_slices[0] {
-            //     ":rename" => {
-            //         command_slices.remove(0);
-            //         let file_name = command_slices.join(" ");
-            //         command::rename_file(
-            //             self.path.to_owned(),
-            //             self,
-            //             file_name
-            //         )?
-            //     },
-            //     ":create_file" => {
-            //         command_slices.remove(0);
-            //         let files = command_slices.join(" ");
-            //         let files: Vec<&str> = files.split(",").collect();
-            //         command::create_file(
-            //             self,
-            //             files.into_iter(),
-            //             false
-            //         )?
-            //     },
-            //     ":create_dir" => {
-            //         command_slices.remove(0);
-            //         let files = command_slices.join(" ");
-            //         let files: Vec<&str> = files.split(",").collect();
-            //         command::create_file(
-            //             self,
-            //             files.into_iter(),
-            //             true
-            //         )?
-            //     },
-            //     ":create_symlink" => {
-            //         self.marked_files.clear();
-            //         self.marked_operation = FileOperation::None;
+            match command_slices[0] {
+                ":rename" => {
+                    command_slices.remove(0);
+                    let file_name = command_slices.join(" ");
+                    command::rename_file(
+                        self.path.to_owned(),
+                        self,
+                        file_name
+                    )?
+                },
+                ":create_file" => {
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files.split(",").collect();
+                    command::create_file(
+                        self,
+                        files.into_iter(),
+                        false
+                    )?
+                },
+                ":create_dir" => {
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files.split(",").collect();
+                    command::create_file(
+                        self,
+                        files.into_iter(),
+                        true
+                    )?
+                },
+                ":create_symlink" => {
+                    self.marked_files.clear();
+                    self.marked_operation = FileOperation::None;
 
-            //         command_slices.remove(0);
-            //         let files = command_slices.join(" ");
-            //         let files: Vec<&str> = files
-            //             .split("->")
-            //             .collect();
-            //         command::create_symlink(
-            //             self,
-            //             [(files[0].trim(), files[1].trim())].into_iter()
-            //         )?
-            //     },
-            //     _ => ErrorType::UnvalidCommand
-            // };
+                    command_slices.remove(0);
+                    let files = command_slices.join(" ");
+                    let files: Vec<&str> = files
+                        .split("->")
+                        .collect();
+                    command::create_symlink(
+                        self,
+                        [(files[0].trim(), files[1].trim())].into_iter()
+                    )?
+                },
+                _ => return Err(ErrorType::UnvalidCommand.pack())
+            }
 
-            // // When result of check is false, there would be errors, which should be displayed.
-            // if ready_for_check.check(self) {
-            //     self.quit_command_mode();
-            // }
+            self.quit_command_mode();
         }
 
         Ok(())
@@ -843,13 +844,15 @@ impl App {
         self.need_to_jump = true;
     }
 
-    pub fn prev_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+    pub fn prev_candidate(&mut self) -> AppResult<()> {
         self.move_candidate(false)?;
+
         Ok(())
     }
 
-    pub fn next_candidate(&mut self) -> Result<(), Box<dyn error::Error>> {
+    pub fn next_candidate(&mut self) -> AppResult<()> {
         self.move_candidate(true)?;
+
         Ok(())
     }
 
@@ -857,7 +860,8 @@ impl App {
     /// When NEXT is true, searching the next. Otherwise the previous.
     fn move_candidate(&mut self,
                       next: bool
-    ) -> Result<(), Box<dyn error::Error>> {
+    ) -> AppResult<()>
+    {
         use crate::key_event::move_cursor;
 
         let candidates = Arc::clone(&self.searched_idx);
@@ -870,6 +874,7 @@ impl App {
         } else {
             false
         };
+
         let current_idx = if in_root {
             self.selected_item.parent.selected().unwrap()
         } else {

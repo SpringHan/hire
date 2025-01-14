@@ -1,9 +1,8 @@
 // Command functions
 
 use super::filesaver::{sort, FileSaver};
-use super::{App, AppResult, AppError, ErrorType, NotFoundType};
+use super::{App, AppResult, AppError, ErrorType};
 
-// use std::io::{self, ErrorKind};
 use std::fs;
 use std::path::{PathBuf, Path};
 
@@ -26,7 +25,7 @@ pub fn rename_file(path: PathBuf,
         )
     }
 
-    if file.name == new_name {
+    if file_exists(path.join(new_name.to_owned()))? {
         return Err(
             ErrorType::Specific(
                 format!("{} already exists", new_name)
@@ -71,7 +70,6 @@ where I: Iterator<Item = &'a str>
     let path = app.current_path();
     let mut errors = AppError::new();
 
-    // let mut exists_files: Vec<String> = Vec::new();
     let mut new_files: Vec<FileSaver> = Vec::new();
     let mut to_show_hidden_files = false;
 
@@ -80,11 +78,6 @@ where I: Iterator<Item = &'a str>
         if is_dir {
             match fs::create_dir(path.join(file)) {
                 Err(err) => {
-                    // if err.kind() == ErrorKind::PermissionDenied {
-                    //     return Ok(ErrorType::PermissionDenied(None))
-                    // } else if err.kind() == ErrorKind::AlreadyExists {
-                    //     exists_files.push(file.into());
-                    // }
                     errors.add_error(err);
                 },
                 Ok(_) => new_files.push(FileSaver::new(
@@ -106,11 +99,6 @@ where I: Iterator<Item = &'a str>
                     ));
                 },
                 Err(err) => {
-                    // if err.kind() == ErrorKind::PermissionDenied {
-                    //     return Ok(ErrorType::PermissionDenied(None))
-                    // } else if err.kind() == ErrorKind::AlreadyExists {
-                    //     exists_files.push(file.into());
-                    // }
                     errors.add_error(err);
                 }
             }
@@ -175,27 +163,12 @@ where
 {
     use std::os::unix::fs::symlink;
 
-    // let mut no_permission: Vec<String> = Vec::new();
-    // let mut not_found: Vec<String> = Vec::new();
-    // let mut exists_links: Vec<String> = Vec::new();
     let mut errors = AppError::new();
     let mut to_show_hidden_files = false;
 
     for (file, target) in files {
         match symlink(&file, &target) {
             Err(err) => {
-                // match err.kind() {
-                //     ErrorKind::PermissionDenied => no_permission.push(
-                //         file.as_ref().to_string_lossy().into()
-                //     ),
-                //     ErrorKind::NotFound => not_found.push(
-                //         file.as_ref().to_string_lossy().into()
-                //     ),
-                //     ErrorKind::AlreadyExists => exists_links.push(
-                //         file.as_ref().to_string_lossy().into()
-                //     ),
-                //     _ => return Err(err)
-                // }
                 errors.add_error(err);
             },
             _ => {
@@ -218,18 +191,18 @@ where
         return Err(errors);
     }
 
-    // if !no_permission.is_empty() {
-    //     ErrorType::PermissionDenied(Some(no_permission)).check(app);
-    // }
-
-    // if !exists_links.is_empty() {
-    //     ErrorType::FileExists(exists_links).check(app);
-    // }
-
-    // if !not_found.is_empty() {
-    //     return Ok(ErrorType::NotFound(NotFoundType::Files(not_found)))
-    // }
-
-    // Ok(ErrorType::None)
     Ok(())
+}
+
+pub fn file_exists(file: PathBuf) -> std::io::Result<bool> {
+    match fs::metadata(file) {
+        Ok(_) => Ok(true),
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                return Ok(false)
+            }
+
+            Err(err)
+        }
+    }
 }

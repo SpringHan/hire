@@ -1,8 +1,7 @@
 // Shell Command.
 
-use crate::app::App;
+use crate::app::{App, AppResult, ErrorType};
 
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::io::{self, Stderr};
 
@@ -102,8 +101,8 @@ where P: AsRef<Path>
     Ok(())
 }
 
-pub fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
-    use std::io::Read;
+pub fn fetch_working_directory() -> AppResult<PathBuf> {
+    use io::Read;
 
     let mut working_dir_file = std::fs::File::open(
         working_dir_cache_path()?
@@ -118,7 +117,7 @@ pub fn fetch_working_directory() -> Result<PathBuf, Box<dyn Error>> {
     Ok(PathBuf::from(working_dir))
 }
 
-pub fn set_working_directory<P>(path: P) -> Result<(), Box<dyn Error>>
+pub fn set_working_directory<P>(path: P) -> AppResult<()>
 where P: AsRef<Path>
 {
     use std::io::Write;
@@ -137,11 +136,21 @@ where P: AsRef<Path>
 }
 
 
-fn working_dir_cache_path() -> Result<String, Box<dyn Error>> {
-    let user_name = std::env::var("USER")?;
-    if &user_name == "root" {
-        Ok(String::from("/root/.cache/st-working-directory"))
-    } else {
-        Ok(format!("/home/{}/.cache/st-working-directory", user_name))
+fn working_dir_cache_path() -> AppResult<String> {
+    match std::env::var("USER") {
+        Ok(user_name) => {
+            if &user_name == "root" {
+                Ok(String::from("/root/.cache/st-working-directory"))
+            } else {
+                Ok(format!("/home/{}/.cache/st-working-directory", user_name))
+            }
+        },
+        Err(err) => {
+            Err(
+                ErrorType::Specific(
+                    format!("Cannot get current user as: {}", err)
+                ).pack()
+            )
+        }
     }
 }

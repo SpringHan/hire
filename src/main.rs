@@ -36,7 +36,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.len() == 2 {
         match args[1].as_ref() {
             "--working-directory" => {
-                app.goto_dir(fetch_working_directory()?, None)?;
+                app.goto_dir(
+                    fetch_working_directory().expect("Cannot fetch working directory!"),
+                    None
+                )?;
                 shell_process(
                     &mut app,
                     &mut terminal,
@@ -61,15 +64,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     let result = handle_event(key.code, &mut app, &mut terminal);
                     if let Err(err) = result {
-                        // TODO: Change this logic.
-                        println!("{}", err.to_string());
+                        app.app_error.append_errors(err.iter());
                     }
                 }
             }
         }
 
         if app.need_to_jump {
-            app.next_candidate()?;
+            let result = app.next_candidate();
+            if let Err(err) = result {
+                app.app_error.append_errors(err.iter());
+            }
         }
     }
     

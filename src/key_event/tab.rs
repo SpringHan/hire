@@ -3,8 +3,6 @@
 use super::{SwitchCase, SwitchCaseData};
 use crate::app::{App, AppResult, ErrorType, NotFoundType};
 
-use std::io;
-use std::error::Error;
 use std::path::PathBuf;
 
 pub struct TabList {

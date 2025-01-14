@@ -76,11 +76,16 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
             ]))
         .block(computer_info_block);
 
+    // App Error
+    check_app_error(app);
+
     // Item list statistic information
     let item_info_block = Block::default();
-    let item_num_info = Paragraph::new(Line::from(
-        Span::styled(get_item_num_para(app), app.term_colors.file_style)
-    ))
+    let item_num_info = Paragraph::new(
+        Line::from(
+            Span::styled(get_item_num_para(app), app.term_colors.file_style)
+        )
+    )
         .alignment(Alignment::Right)
         .block(item_info_block);
 
@@ -208,6 +213,30 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
     // Command Block
     frame.render_widget(render_command_line(app), chunks[2]);
+}
+
+fn check_app_error(app: &mut App) {
+    use crate::app::Block as SBlock;
+
+    if !app.app_error.is_empty() {
+        let err_msg = app.app_error.to_string();
+
+        if let SBlock::CommandLine(ref mut _msg, ref mut _cursor) = app.selected_block {
+            if *_cursor != CursorPos::None {
+                app.command_history.push(_msg.to_owned());
+                *_cursor = CursorPos::None;
+
+                *_msg = err_msg;
+            } else {
+                _msg.push_str(&format!("\n{}", err_msg));
+            }
+        } else {
+            app.selected_block = SBlock::CommandLine(err_msg, CursorPos::None);
+        }
+
+        app.command_error = true;
+        app.app_error.clear();
+    }
 }
 
 /// Create a list of ListItem

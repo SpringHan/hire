@@ -4,21 +4,17 @@ use crate::app::{
     App,
     CursorPos,
     FileOperation,
-    // OptionFor,
     AppResult,
     AppError,
-    ErrorType,
-    NotFoundType
+    ErrorType
 };
 
 use super::Goto;
 use super::cursor_movement;
 use super::{SwitchCase, SwitchCaseData};
 
-use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
-use std::error::Error;
 use std::collections::HashMap;
 
 // File name modify
@@ -56,7 +52,6 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
             }
         );
     } else {
-        // ErrorType::NoSelected.check(app);
         return Err(ErrorType::NoSelected.pack())
     }
 
@@ -88,14 +83,11 @@ fn delete_switch(
                     );
                 } else {
                     return Err(ErrorType::NoSelected.pack())
-                    // ErrorType::NoSelected.check(app);
-                    // return Ok(false)
                 }
             }
 
             app.marked_operation = FileOperation::Move;
-            // TODO: Modify here
-            // cursor_movement::move_cursor(app, Goto::Down, in_root)?;
+            cursor_movement::move_cursor(app, Goto::Down, in_root)?;
         },
         'D' => {
             if !app.marked_files.is_empty() {
@@ -120,8 +112,6 @@ fn delete_switch(
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
                     return Err(ErrorType::PermissionDenied(None).pack())
-                    // ErrorType::PermissionDenied(None).check(app);
-                    // return Ok(false)
                 }
 
                 let mut temp_hashmap = HashMap::new();
@@ -136,8 +126,6 @@ fn delete_switch(
                 )?;
             } else {
                 return Err(ErrorType::NoSelected.pack())
-                // ErrorType::NoSelected.check(app);
-                // return Ok(false)
             }
         },
         _ => ()
@@ -171,8 +159,8 @@ pub fn mark_operation(app: &mut App,
                     selected_file.is_dir
                 );
             }
-            // TODO: Modify here
-            // cursor_movement::move_cursor(app, Goto::Down, in_root)?;
+            cursor_movement::move_cursor(app, Goto::Down, in_root)?;
+
             return Ok(())
         }
     } else if !app.current_files.is_empty() {
@@ -186,8 +174,6 @@ pub fn mark_operation(app: &mut App,
     }
 
     Err(ErrorType::NoSelected.pack())
-    // ErrorType::NoSelected.check(app);
-    // Ok(())
 }
 
 pub fn delete_file<I>(app: &mut App,
@@ -201,8 +187,6 @@ where I: Iterator<Item = (String, bool)>
     use std::fs::{remove_file, remove_dir_all};
 
     let mut errors = AppError::new();
-    // let mut no_permission_files: Vec<String> = Vec::new();
-    // let mut not_found_files: Vec<String> = Vec::new();
 
     for file in file_iter {
         let is_dir = file.1;
@@ -216,11 +200,6 @@ where I: Iterator<Item = (String, bool)>
 
         match remove_result {
             Err(err) => {
-                // if err.kind() == ErrorKind::PermissionDenied {
-                //     no_permission_files.push(file.0);
-                // } else if err.kind() != ErrorKind::NotFound {
-                //     not_found_files.push(file.0);
-                // }
                 errors.add_error(err);
 
                 // When the file does not exist, maybe the path is deleted.
@@ -237,15 +216,7 @@ where I: Iterator<Item = (String, bool)>
     if !errors.is_empty() {
         return Err(errors)
     }
-    // if !no_permission_files.is_empty() {
-    //     ErrorType::PermissionDenied(Some(no_permission_files)).check(app);
-    // }
 
-    // if !not_found_files.is_empty() {
-    //     ErrorType::NotFound(
-    //         NotFoundType::Files(not_found_files)
-    //     ).check(app);
-    // }
 
     if !single_file {
         return Ok(())

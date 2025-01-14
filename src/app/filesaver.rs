@@ -15,6 +15,7 @@ use ratatui::{
 #[derive(Debug, Clone)]
 pub struct FileSaver {
     pub name: String,
+    pub is_file: bool,
     pub is_dir: bool,
     pub executable: bool,
     pub cannot_read: bool,
@@ -30,6 +31,7 @@ impl Default for FileSaver {
     fn default() -> Self {
         FileSaver {
             name: String::new(),
+            is_file: true,
             is_dir: false,
             cannot_read: false,
             dangling_symlink: false,
@@ -87,6 +89,7 @@ impl FileSaver {
                 FileSaver {
                     name: file_name.into(),
                     size: metadata.len(),
+                    is_file: metadata.is_file(),
                     is_dir: metadata.is_dir(),
                     dangling_symlink: false,
                     symlink_file,

@@ -3,9 +3,8 @@
 use super::Goto;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::{App, AppResult, AppError, ErrorType, NotFoundType};
+use crate::app::{App, AppResult, ErrorType, NotFoundType};
 
-use std::error::Error;
 use std::path::PathBuf;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
@@ -29,12 +28,11 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
     };
 
     match key {
-        // TODO: Uncomment here
-        // 'g' => super::cursor_movement::move_cursor(
-        //     app,
-        //     Goto::Index(0),
-        //     app.path.to_string_lossy() == "/"
-        // )?,
+        'g' => super::cursor_movement::move_cursor(
+            app,
+            Goto::Index(0),
+            app.path.to_string_lossy() == "/"
+        )?,
         '+' => {
             SwitchCase::new(
                 app,

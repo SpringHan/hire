@@ -4,7 +4,6 @@ use crate::app::{self, App, AppResult};
 use super::Goto;
 
 use std::mem::swap;
-use std::error::Error;
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
@@ -15,7 +14,7 @@ pub fn directory_movement(direction: char,
                           app: &mut App,
                           terminal: &mut Terminal,
                           in_root: bool
-) -> Result<(), Box<dyn Error>>
+) -> AppResult<()>
 {
     match direction {
         'n' => {
@@ -116,7 +115,7 @@ pub fn directory_movement(direction: char,
 pub fn move_cursor(app: &mut App,
                    goto: Goto,
                    in_root: bool
-) -> Result<(), Box<dyn Error>>
+) -> AppResult<()>
 {
     let selected_item = if in_root {
         &mut app.selected_item.parent
