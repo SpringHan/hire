@@ -179,8 +179,23 @@ impl App {
                     .to_string_lossy();
                 let idx = self.parent_files
                     .iter()
-                    .position(|e| e.name == parent_dir).unwrap();
-                self.selected_item.parent_select(Some(idx));
+                    .position(|e| e.name == parent_dir);
+
+                if let None = idx {
+                    // NOTE: Append the parental hidden file
+                    if self.hide_files && path_is_hidden(self.path.to_owned()) {
+
+                        match fs::metadata(self.path.to_owned()) {
+                            Err(_) => {
+                                // TODO: Start from here 1.17
+                                // Set path to first file in parent dir.
+                            },
+                            Ok(_) => todo!(),
+                        }
+                    }
+                }
+
+                self.selected_item.parent_select(Some(idx.unwrap()));
             }
         }
     }
@@ -210,7 +225,7 @@ impl App {
         self.refresh_current_item();
         self.refresh_child_item();
     }
-
+    
     pub fn init_parent_files(&mut self) -> io::Result<()> {
         let temp_path = if let Some(path) = self.path.parent() {
             path.to_path_buf()
@@ -593,6 +608,7 @@ impl App {
                 }
             }
             Err(err) => {
+                // BUG: Unwrap error when press '-' key in /boot/efi/
                 if err.kind() == io::ErrorKind::PermissionDenied {
                     let temp_file = self.get_file_saver_mut().unwrap();
                     temp_file.cannot_read = true;

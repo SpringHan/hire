@@ -16,6 +16,7 @@ pub fn directory_movement(direction: char,
                           in_root: bool
 ) -> AppResult<()>
 {
+    // TODO: Separate the core code of n & i from directory_movement.
     match direction {
         'n' => {
             if in_root {
@@ -55,7 +56,16 @@ pub fn directory_movement(direction: char,
             if in_root {
                 // It seems impossible that the root directory is empty.
                 let selected_file = app.get_file_saver().unwrap();
-                if !selected_file.is_dir || selected_file.cannot_read {
+                if !selected_file.is_dir {
+                    super::shell_command::open_file_in_shell(
+                        app,
+                        terminal,
+                        app.current_path().join(&selected_file.name)
+                    )?;
+                    return Ok(())
+                }
+
+                if selected_file.cannot_read {
                     return Ok(())
                 }
 
@@ -68,18 +78,20 @@ pub fn directory_movement(direction: char,
                 }
 
                 let selected_file = selected_file.unwrap();
+
+                // Open selected file
                 if !selected_file.is_dir {
                     super::shell_command::open_file_in_shell(
                         app,
                         terminal,
                         app.current_path().join(&selected_file.name)
                     )?;
-                    return Ok(());
+                    return Ok(())
                 }
                 
-                // if !selected_file.is_dir || selected_file.cannot_read {
-                //     return Ok(())
-                // }
+                if selected_file.cannot_read {
+                    return Ok(())
+                }
 
                 app.path = app.path.join(selected_file.name.to_owned());
                 app.parent_files = Vec::new();
