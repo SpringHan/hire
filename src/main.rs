@@ -4,7 +4,7 @@ mod key_event;
 
 use std::io::stderr;
 use std::error::Error;
-use key_event::{handle_event, shell_process, ShellCommand, fetch_working_directory};
+use key_event::{fetch_working_directory, handle_event, shell_process, ShellCommand};
 use ratatui::{
     backend::CrosstermBackend,
     Terminal

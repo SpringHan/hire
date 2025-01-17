@@ -119,9 +119,13 @@ impl Default for App {
 
 // Basic
 impl App {
+    pub fn root(&self) -> bool {
+        self.path.to_string_lossy() == "/"
+    }
+
     /// Only get the path path of current file, without its file name.
     pub fn current_path(&self) -> PathBuf {
-        if self.path.to_string_lossy() == "/" {
+        if self.root() {
             let current_file = self.search_file(SearchFile::Parent).unwrap();
             if current_file.is_dir {
                 self.path.join(current_file.name.to_owned())
@@ -139,7 +143,7 @@ impl App {
         self.init_parent_files()?;
 
         if self.parent_files.is_empty() {
-            panic!("Unknown Error!");
+            panic!("Error at init_all_files in app.rs.");
         }
 
         self.refresh_parent_item();
@@ -149,7 +153,7 @@ impl App {
         self.refresh_current_item();
 
         if self.current_files.is_empty() {
-            if self.path.to_string_lossy() == "/" {
+            if self.root() {
                 let selected_file = self.get_file_saver().unwrap();
                 if !selected_file.is_dir {
                     self.set_file_content()?;
@@ -160,7 +164,7 @@ impl App {
         }
 
         // Child Files
-        if self.path.to_string_lossy() != "/" {
+        if self.root() {
             self.init_child_files()?;
             self.refresh_child_item();
         }
@@ -170,7 +174,7 @@ impl App {
 
     pub fn refresh_parent_item(&mut self) {
         if let None = self.selected_item.parent_selected() {
-            if self.path.to_string_lossy() == "/" {
+            if self.root() {
                 self.selected_item.parent_select(Some(0));
             } else {
                 let parent_dir = self.path
@@ -179,23 +183,9 @@ impl App {
                     .to_string_lossy();
                 let idx = self.parent_files
                     .iter()
-                    .position(|e| e.name == parent_dir);
-
-                if let None = idx {
-                    // NOTE: Append the parental hidden file
-                    if self.hide_files && path_is_hidden(self.path.to_owned()) {
-
-                        match fs::metadata(self.path.to_owned()) {
-                            Err(_) => {
-                                // TODO: Start from here 1.17
-                                // Set path to first file in parent dir.
-                            },
-                            Ok(_) => todo!(),
-                        }
-                    }
-                }
-
-                self.selected_item.parent_select(Some(idx.unwrap()));
+                    .position(|e| e.name == parent_dir)
+                    .expect("Error at refresh_parent_item in app.rs.");
+                self.selected_item.parent_select(Some(idx));
             }
         }
     }
@@ -227,16 +217,61 @@ impl App {
     }
     
     pub fn init_parent_files(&mut self) -> io::Result<()> {
-        let temp_path = if let Some(path) = self.path.parent() {
-            path.to_path_buf()
-        } else {
-            // Cannot get parent directory info at root dir.
-            PathBuf::from("/")
-        };
+        loop {
+            let temp_path = if let Some(path) = self.path.parent() {
+                path.to_path_buf()
+            } else {
+                // Cannot get parent directory info at root dir.
+                PathBuf::from("/")
+            };
 
-        let mut parent_files: Vec<FileSaver> = self.read_files(temp_path.as_path())?;
-        sort(&mut parent_files);
-        self.parent_files = parent_files;
+            let mut parent_files = self.read_files(temp_path.as_path())?;
+
+            if temp_path.to_string_lossy() == "/" {
+                sort(&mut parent_files);
+                self.parent_files = parent_files;
+                break;
+            }
+
+            // Handle the case when the current parent dir is not in parent_files.
+            let current_parent_name = self.path.file_name().unwrap().to_string_lossy();
+            if parent_files.iter().position(|f| f.name == current_parent_name).is_none()
+            {
+                match fs::metadata(self.path.to_owned()) {
+                    Ok(metadata) if metadata.is_dir() => {
+                        parent_files.push(
+                            FileSaver::new(
+                                current_parent_name,
+                                self.path.parent()
+                                    .expect("Error at init_parent_files in app.rs."),
+                                Some(Ok(metadata))
+                            )
+                        );
+
+                        sort(&mut parent_files);
+                    },
+                    _ => {
+                        sort(&mut parent_files);
+
+                        match parent_files.get(0) {
+                            Some(file) if file.is_dir => {
+                                self.path.set_file_name(file.name.to_owned());
+                            },
+                            _ => {
+                                self.path.pop();
+                                continue;
+                            },
+                        }
+                    },
+                }
+            } else {
+                sort(&mut parent_files);
+            }
+
+
+            self.parent_files = parent_files;
+            break;
+        }
 
         Ok(())
     }
@@ -259,6 +294,7 @@ impl App {
         sort(&mut current_files);
 
         self.current_files = current_files;
+
         Ok(())
     }
 
@@ -299,7 +335,7 @@ impl App {
     }
 
     pub fn get_directory_mut(&mut self) -> (&mut Vec<FileSaver>, &mut ListState) {
-        if self.path.to_string_lossy() == "/" {
+        if self.root() {
             (&mut self.parent_files, &mut self.selected_item.parent)
         } else {
             (&mut self.current_files, &mut self.selected_item.current)
@@ -307,7 +343,7 @@ impl App {
     }
 
     pub fn get_file_saver(&self) -> Option<&FileSaver> {
-        if self.path.to_string_lossy() == "/" {
+        if self.root() {
             self.search_file(SearchFile::Parent)
         } else {
             self.search_file(SearchFile::Current)
@@ -315,7 +351,7 @@ impl App {
     }
 
     pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
-        if self.path.to_string_lossy() == "/" {
+        if self.root() {
             Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
         } else {
             if self.current_files.is_empty() {
@@ -331,7 +367,7 @@ impl App {
     /// Update parent files & current files if the user is in root directory.
     /// Otherwise update current & child files.
     pub fn partly_update_block(&mut self) -> io::Result<()> {
-        if self.path.to_string_lossy() == "/" {
+        if self.root() {
             self.selected_item.parent_select(Some(0));
             self.selected_item.current_select(Some(0));
             self.init_parent_files()?;
@@ -434,108 +470,109 @@ impl App {
     /// 
     /// When there's a file that should be selected out from this function,
     /// use TARGET argument.
-    pub fn update_with_prev_selected(&mut self,
-                                     target: Option<String>
-    ) -> io::Result<()>
-    {
-        // Initialize variables.
+    pub fn update_with_prev_selected(&mut self, target: Option<String>) -> io::Result<()> {
+        // Prev states
         let parent_file = self
             .search_file(SearchFile::Parent)
             .unwrap()
             .name
             .to_owned();
-        let current_file: Option<String> = if
-            let Some(file) = self.search_file(SearchFile::Current)
-        {
+
+        let current_file: Option<String> = if let Some(file) = self.search_file(SearchFile::Current) {
             Some(file.name.to_owned())
         } else {
             None
         };
 
-        let child_file = if
-            let Some(file) = self.search_file(SearchFile::Child)
-        {
+        let child_file = if let Some(file) = self.search_file(SearchFile::Child) {
             Some(file.name.to_owned())
         } else {
             None
         };
 
-        let has_file_content = if self.file_content.is_some() {
-            true
-        } else {
-            false
-        };
+        let has_file_content = self.file_content.is_some();
 
-        // NOTE: When totally refresh all the files, calling the following codes.
+        let mut select_prev = [true, true];
+
+
         self.selected_item = ItemIndex::default();
         self.file_content = None;
         self.init_all_files()?;
 
-        // The parent file is a hidden file, there's no need to find back its child files.
-        if !self.select_prev_file(
-            SearchFile::Parent,
-            if target.is_some() && self.path.to_string_lossy() == "/"
-            {
-                &target.as_ref().unwrap()
-            } else {
-                &parent_file                
-            })
-        {
-            return Ok(())
-        }
+        let parent_name = self.parent_files.get(
+            self.selected_item.parent
+                .selected()
+                .expect("Error 1 at update_with_prev_selected in app.rs.")
+        )
+            .expect("Error 2 at update_with_prev_selected in app.rs.")
+            .name
+            .to_owned();
 
-        if self.path.to_string_lossy() == "/" {
-            if !has_file_content {
-                self.init_current_files()?;
-                if current_file.is_some() {
-                    self.select_prev_file(SearchFile::Current, &current_file.unwrap());
-                } else {
-                    self.refresh_current_item();
-                }
-
-                if self.file_content.is_some() {
-                    self.file_content = None;
-                }
-            } else {
-                self.set_file_content()?;
-                if !self.current_files.is_empty() {
-                    self.current_files.clear();
-                    self.selected_item.current_select(None);
-                }
-            }
-
-            return Ok(())
-        }
-
-        // When the path is not in the root directory.
-        self.init_current_files()?;
-        if target.is_some() {
-            self.select_prev_file(SearchFile::Current, &target.unwrap());
-        } else {
-            if current_file.is_none()
-                || !self.select_prev_file(SearchFile::Current, &current_file.unwrap())
-            {
+        if parent_name != parent_file {
+            if self.root() {
                 return Ok(())
             }
+
+            let mut _temp = true;
+            list_state_select(
+                &mut self.selected_item.parent,
+                &mut self.parent_files,
+                &mut _temp,
+                Some(parent_file)
+            );
+
+            if !_temp {
+                return Ok(())
+            }
+
+            if has_file_content {
+                self.set_file_content()?;
+            } else {
+                self.init_current_files()?;
+                self.refresh_current_item();
+            }
+
+            return Ok(())
         }
 
-        if !has_file_content {
+        // TODO: replace unneccessary codes with self.root()
+
+        // TODO: Add codes for the case when the user is in root dir.
+        // Select back current item
+        if !list_state_select(
+            &mut self.selected_item.current,
+            &mut self.current_files,
+            &mut select_prev[0],
+            current_file
+        )
+        {
+            if !self.current_files.is_empty() {
+                select_prev[0] = false;
+            }
+        }
+
+        // Select back child item
+        if select_prev[0] {
             self.init_child_files()?;
-            if child_file.is_some() {
-                self.select_prev_file(SearchFile::Child, &child_file.unwrap());
-            } else {
-                self.refresh_child_item();
+            self.refresh_child_item();
+
+            if has_file_content {
+                self.set_file_content()?;
+                return Ok(());
             }
 
-            if self.file_content.is_some() {
-                self.file_content = None;
-            }
-        } else {
-            self.set_file_content()?;
-            if !self.child_files.is_empty() {
-                self.child_files.clear();
-                self.selected_item.child_select(None);
-            }
+            list_state_select(
+                &mut self.selected_item.child,
+                &mut self.child_files,
+                &mut select_prev[0],
+                child_file
+            );
+
+            return Ok(())
+        }
+
+        if self.current_files.is_empty() {
+            self.init_child_files()?;
         }
 
         Ok(())
@@ -647,7 +684,7 @@ impl App {
     /// Quit command line selection.
     pub fn quit_command_mode(&mut self) {
         self.selected_block = self::Block::Browser(
-            if self.path.to_string_lossy() == "/" {
+            if self.root() {
                 true
             } else {
                 false
@@ -1086,6 +1123,37 @@ where T: Iterator<Item = &'a usize>
     }
 
     None
+}
+
+/// Select item in parent/current/child file.
+/// Return whether passed the name of previous name.
+#[inline]
+fn list_state_select(
+    item: &mut ListState,
+    file_list: &mut Vec<FileSaver>,
+    keep_prev: &mut bool,
+    file_name: Option<String>
+) -> bool
+{
+    if let Some(name) = file_name {
+        match file_list.iter().position(|f| f.name == name) {
+            Some(idx) => {
+                item.select(Some(idx));
+            },
+            None => {
+                *keep_prev = false;
+                item.select(if file_list.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            },
+        }
+
+        return true
+    }
+
+    false
 }
 
 fn get_host_info() -> (String, String) {
