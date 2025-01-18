@@ -164,7 +164,7 @@ impl App {
         }
 
         // Child Files
-        if self.root() {
+        if !self.root() {
             self.init_child_files()?;
             self.refresh_child_item();
         }
@@ -214,6 +214,39 @@ impl App {
         self.refresh_parent_item();
         self.refresh_current_item();
         self.refresh_child_item();
+    }
+
+    /// Select the first item or not select.
+    pub fn select_normal(&mut self, file: SearchFile) {
+        match file {
+            SearchFile::Parent => {
+                self.selected_item.parent_select(
+                    if self.parent_files.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    }
+                );
+            },
+            SearchFile::Current => {
+                self.selected_item.current_select(
+                    if self.current_files.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    }
+                );
+            },
+            SearchFile::Child => {
+                self.selected_item.child_select(
+                    if self.child_files.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    }
+                );
+            },
+        }
     }
     
     pub fn init_parent_files(&mut self) -> io::Result<()> {
@@ -409,63 +442,6 @@ impl App {
         }
     }
 
-    /// When the previous selected file doesn't exist now, return false.
-    fn select_prev_file(&mut self, list: SearchFile, file: &String) -> bool
-    {
-        match list {
-            SearchFile::Parent => {
-                let file_idx = self.parent_files
-                    .iter()
-                    .position(|f| f.name == *file);
-                self.selected_item.parent_select(
-                    if file_idx.is_some() {
-                        file_idx
-                    } else {
-                        Some(0)
-                    }
-                );
-
-                if file_idx.is_none() {
-                    return false
-                }
-            },
-            SearchFile::Current => {
-                let file_idx = self.current_files
-                    .iter()
-                    .position(|f| f.name == *file);
-                self.selected_item.current_select(
-                    if file_idx.is_some() {
-                        file_idx
-                    } else {
-                        Some(0)
-                    }
-                );
-
-                if file_idx.is_none() {
-                    return false
-                }
-            },
-            SearchFile::Child => {
-                let file_idx = self.child_files
-                    .iter()
-                    .position(|f| f.name == *file);
-                self.selected_item.child_select(
-                    if file_idx.is_some() {
-                        file_idx
-                    } else {
-                        Some(0)
-                    }
-                );
-
-                if file_idx.is_none() {
-                    return false
-                }
-            }
-        }
-
-        true
-    }
-
     /// Update all files and still tick currently selected files.
     /// 
     /// When there's a file that should be selected out from this function,
@@ -478,101 +454,103 @@ impl App {
             .name
             .to_owned();
 
-        let current_file: Option<String> = if let Some(file) = self.search_file(SearchFile::Current) {
+        let current_file = if
+            let Some(file) = self.search_file(SearchFile::Current)
+        {
             Some(file.name.to_owned())
         } else {
             None
         };
 
-        let child_file = if let Some(file) = self.search_file(SearchFile::Child) {
+        let child_file = if
+            let Some(file) = self.search_file(SearchFile::Child)
+        {
             Some(file.name.to_owned())
         } else {
             None
         };
 
-        let has_file_content = self.file_content.is_some();
-
+        // The first one is for parent, the other one for current.
         let mut select_prev = [true, true];
-
+        let root = self.root();
 
         self.selected_item = ItemIndex::default();
         self.file_content = None;
-        self.init_all_files()?;
 
-        let parent_name = self.parent_files.get(
-            self.selected_item.parent
-                .selected()
-                .expect("Error 1 at update_with_prev_selected in app.rs.")
-        )
-            .expect("Error 2 at update_with_prev_selected in app.rs.")
-            .name
-            .to_owned();
 
-        if parent_name != parent_file {
-            if self.root() {
-                return Ok(())
-            }
-
-            let mut _temp = true;
-            list_state_select(
-                &mut self.selected_item.parent,
-                &mut self.parent_files,
-                &mut _temp,
-                Some(parent_file)
-            );
-
-            if !_temp {
-                return Ok(())
-            }
-
-            if has_file_content {
-                self.set_file_content()?;
+        // Refresh parent
+        self.init_parent_files()?;
+        list_state_select(
+            &mut self.selected_item.parent,
+            &mut self.parent_files,
+            &mut select_prev[0],
+            if root && target.is_some() {
+                target.to_owned()
             } else {
-                self.init_current_files()?;
-                self.refresh_current_item();
+                Some(parent_file)
             }
+        );
+
+
+        // Refresh current
+        if root {
+            let parent_filesaver = self.get_file_saver()
+                .expect("Error 1 at update_with_prev_selected in app.rs.");
+
+            if !parent_filesaver.is_dir {
+                self.set_file_content()?;
+                return Ok(())
+            }
+
+            self.init_current_files()?;
+            if !select_prev[0] {
+                self.select_normal(SearchFile::Current);
+                return Ok(())
+            }
+
+            list_state_select(
+                &mut self.selected_item.current,
+                &mut self.current_files,
+                &mut select_prev[1],
+                current_file
+            );
 
             return Ok(())
         }
 
-        // TODO: replace unneccessary codes with self.root()
-
-        // TODO: Add codes for the case when the user is in root dir.
-        // Select back current item
-        if !list_state_select(
-            &mut self.selected_item.current,
-            &mut self.current_files,
-            &mut select_prev[0],
-            current_file
-        )
-        {
-            if !self.current_files.is_empty() {
-                select_prev[0] = false;
-            }
+        self.init_current_files()?;
+        if select_prev[0] {
+            list_state_select(
+                &mut self.selected_item.current,
+                &mut self.current_files,
+                &mut select_prev[1],
+                if target.is_some() {
+                    target
+                } else {
+                    current_file
+                }
+            );
+        } else {
+            self.select_normal(SearchFile::Current);
         }
 
-        // Select back child item
-        if select_prev[0] {
-            self.init_child_files()?;
-            self.refresh_child_item();
 
-            if has_file_content {
-                self.set_file_content()?;
-                return Ok(());
-            }
+        // Refresh child or show file content
+        self.child_files.clear();
+        if self.current_files.is_empty() {
+            return Ok(())
+        }
 
+        self.init_child_files()?; // Set file content is included by this func.
+        if select_prev[1] {
             list_state_select(
                 &mut self.selected_item.child,
                 &mut self.child_files,
-                &mut select_prev[0],
+                &mut select_prev[1], // It's doesn't matter what thing is here.
                 child_file
             );
-
-            return Ok(())
-        }
-
-        if self.current_files.is_empty() {
-            self.init_child_files()?;
+        } else {
+            self.select_normal(SearchFile::Child);
         }
 
         Ok(())
@@ -683,13 +661,7 @@ impl App {
     
     /// Quit command line selection.
     pub fn quit_command_mode(&mut self) {
-        self.selected_block = self::Block::Browser(
-            if self.root() {
-                true
-            } else {
-                false
-            }
-        );
+        self.selected_block = self::Block::Browser(self.root());
 
         if self.command_idx.is_some() {
             self.command_idx = None;
@@ -1077,7 +1049,6 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     }
 }
 
-// TODO: Delete commented code lines when current code works well for a long time.
 #[inline]
 fn get_search_index<'a, T>(iter: T,
                            current: usize,
@@ -1085,7 +1056,6 @@ fn get_search_index<'a, T>(iter: T,
 ) -> Option<usize>
 where T: Iterator<Item = &'a usize>
 {
-    // let mut prev_idx: Option<usize> = None;
     let mut get_current_idx = false;
 
     for i in iter {
@@ -1099,27 +1069,12 @@ where T: Iterator<Item = &'a usize>
 
         if next && *i > current {
             return Some(*i)
-            // if prev_idx.is_some() {
-            //     return prev_idx
-            // } else {
-            //     return Some(*i)
-            // }
         }
 
         if *i == current {
-            // if next {
-            //     get_current_idx = true;
-            // } else {
-            //     if prev_idx.is_some() {
-            //         return prev_idx
-            //     }
-            //     break;
-            // }
             get_current_idx = true;
             continue;
         }
-
-        // prev_idx = Some(*i);
     }
 
     None
@@ -1133,7 +1088,7 @@ fn list_state_select(
     file_list: &mut Vec<FileSaver>,
     keep_prev: &mut bool,
     file_name: Option<String>
-) -> bool
+)
 {
     if let Some(name) = file_name {
         match file_list.iter().position(|f| f.name == name) {
@@ -1150,10 +1105,12 @@ fn list_state_select(
             },
         }
 
-        return true
+        return ()
     }
 
-    false
+    if !file_list.is_empty() {
+        item.select(Some(0));
+    }
 }
 
 fn get_host_info() -> (String, String) {
