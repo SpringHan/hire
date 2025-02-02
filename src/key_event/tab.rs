@@ -83,7 +83,7 @@ fn create(app: &mut App) {
         app.hide_files
     );
     tab.list.push((app.path.to_owned(), app.hide_files));
-    tab.current += 1;
+    tab.current = tab.list.len() - 1;
 }
 
 // Remove tab with its idx. Return false if failed to remove tab.
@@ -117,6 +117,22 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
     Ok(true)
 }
 
+fn delete_other_tabs(app: &mut App) {
+    let tab_list = &mut app.tab_list;
+
+    if tab_list.list.len() == 1 {
+        return ()
+    }
+
+    let tab = tab_list.list.get(tab_list.current)
+        .expect("Error code 1 at delete_other_tabs in tab.rs!")
+        .to_owned();
+
+    tab_list.list.clear();
+    tab_list.list.push(tab);
+    tab_list.current = 0;
+}
+
 fn switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool> {
     let to_delete = if let SwitchCaseData::Bool(_data) = data {
         _data
@@ -126,6 +142,7 @@ fn switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool> {
 
     match key {
         'n' => create(app),
+        'o' => delete_other_tabs(app),
         'f' => {
             return Ok(next(app)?)
         },
