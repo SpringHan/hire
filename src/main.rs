@@ -3,7 +3,6 @@ mod ui;
 mod key_event;
 
 use std::io::stderr;
-use std::error::Error;
 use key_event::{fetch_working_directory, handle_event, shell_process, ShellCommand};
 use ratatui::{
     backend::CrosstermBackend,
@@ -16,9 +15,9 @@ use crossterm::{
 };
 use std::time::Duration;
 
-use app::App;
+use app::{App, AppResult};
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> AppResult<()> {
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen)?;
 

@@ -1,6 +1,6 @@
 // App Result
 
-use std::io;
+use std::{env, io};
 use std::convert::From;
 
 pub type AppResult<T> = Result<T, AppError>;
@@ -29,7 +29,8 @@ pub enum ErrorType {
     Specific(String),
 
     #[allow(unused)]
-    Io(io::ErrorKind, String)
+    Io(String),
+    Var(String)
 }
 
 impl AppError {
@@ -82,9 +83,19 @@ impl From<io::Error> for AppError {
     }
 }
 
+impl From<env::VarError> for AppError {
+    fn from(value: env::VarError) -> Self {
+        AppError {
+            errors: vec![
+                ErrorType::Var(format!("VarError: {}", value.to_string()))
+            ]
+        }
+    }
+}
+
 impl From<io::Error> for ErrorType {
     fn from(value: io::Error) -> Self {
-        ErrorType::Io(value.kind(), value.to_string())
+        ErrorType::Io(format!("IO Error: {}", value.to_string()))
     }
 }
 
@@ -117,7 +128,8 @@ impl ErrorType {
             ErrorType::Specific(err) => {
                 format!("[Error]: {}", err)
             }
-            ErrorType::Io(_, msg) => msg.to_owned()
+            ErrorType::Io(msg) => msg.to_owned(),
+            ErrorType::Var(msg) => msg.to_owned(),
         }
     }
 

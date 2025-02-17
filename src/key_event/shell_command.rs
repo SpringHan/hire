@@ -20,7 +20,7 @@ pub fn shell_process(app: &mut App,
                      terminal: &mut Terminal,
                      command: ShellCommand,
                      refresh: bool
-) -> io::Result<()>
+) -> AppResult<()>
 {
     use std::process::Command;
     use std::io::stderr;
@@ -40,8 +40,7 @@ pub fn shell_process(app: &mut App,
 
     let command = match command {
         ShellCommand::Shell => {
-            std::env::var("SHELL")
-                .expect("Unable to get current command.")
+            std::env::var("SHELL")?
         },
         ShellCommand::Command(c, arg) => {
             if let Some(arg) = arg {
@@ -74,7 +73,7 @@ pub fn shell_process(app: &mut App,
 pub fn open_file_in_shell<P>(app: &mut App,
                          terminal: &mut Terminal,
                          file: P
-) -> io::Result<()>
+) -> AppResult<()>
 where P: AsRef<Path>
 {
     let file_path = file.as_ref();
@@ -85,7 +84,7 @@ where P: AsRef<Path>
 
     let shell_command = match file_type {
         "jpg" | "jpge" | "png" => "feh",
-        _ => "bat"
+        _ => "tetor"
     };
 
     shell_process(
