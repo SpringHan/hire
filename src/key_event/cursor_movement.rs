@@ -46,7 +46,7 @@ pub fn directory_movement(direction: char,
             app.refresh_select_item();
 
             if app.file_content.is_some() {
-                app.file_content = None;
+                app.file_content.reset();
                 app.clean_search_idx();
             }
         },
@@ -168,7 +168,7 @@ pub fn move_cursor(app: &mut App,
                 app.init_current_files()?;
                 app.selected_item.current_select(Some(0));
                 if app.file_content.is_some() {
-                    app.file_content = None;
+                    app.file_content.reset();
                 }
             } else {
                 app.set_file_content()?;

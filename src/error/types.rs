@@ -49,7 +49,7 @@ pub enum ErrorType {
     #[error("[AppError/VarError]: {0}")]
     Var(#[from] env::VarError),
 
-    #[error("[AppError]: {0:?}")]
+    #[error("[AppError]: {{ 0.to_string() }}")]
     Others(#[from] anyhow::Error)
 }
 

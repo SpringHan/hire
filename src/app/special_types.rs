@@ -39,18 +39,33 @@ pub struct MarkedFiles {
     pub files: HashMap<String, bool>,
 }
 
+pub struct ItemIndex {
+    pub parent: ListState,
+    pub current: ListState,
+    pub child: ListState
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SearchFile {
+    Parent,
+    Current,
+    Child
+}
+
+/// Enumeration for File Content
+#[derive(Clone, PartialEq, Eq)]
+pub enum FileContent {
+    Text(String),
+    Image,
+    None
+}
+
 impl Default for MarkedFiles {
     fn default() -> Self {
         MarkedFiles {
             files: HashMap::new()
         }
     }
-}
-
-pub struct ItemIndex {
-    pub parent: ListState,
-    pub current: ListState,
-    pub child: ListState
 }
 
 impl Default for ItemIndex {
@@ -89,8 +104,16 @@ impl ItemIndex {
     }
 }
 
-pub enum SearchFile {
-    Parent,
-    Current,
-    Child
+impl FileContent {
+    pub fn is_some(&self) -> bool {
+        if *self == Self::None {
+            return false
+        }
+
+        true
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::None;
+    }
 }

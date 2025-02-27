@@ -15,6 +15,7 @@ use std::path::{PathBuf, Path};
 use std::thread;
 use std::sync::{Arc, Mutex};
 
+use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
 use filesaver::sort;
@@ -35,7 +36,7 @@ pub struct App {
     pub child_files: Vec<FileSaver>,
 
     // NOTE: When file_content is not None, child_files must be empty.
-    pub file_content: Option<String>,
+    pub file_content: FileContent,
 
     // Block
     pub selected_block: Block,
@@ -68,6 +69,9 @@ pub struct App {
     // Tab
     pub tab_list: crate::key_event::TabList,
 
+    // Image Preview
+    pub image_preview: ImagePreview,
+
     // AppErrors
     pub app_error: AppError,
 
@@ -91,31 +95,43 @@ impl Default for App {
         let term_colors = TermColors::init();
 
         App {
+            // Base
             path: current_dir,
-            hide_files: true,
-            selected_item: ItemIndex::default(),
+            child_files: Vec::new(),
             parent_files: Vec::new(),
             current_files: Vec::new(),
-            child_files: Vec::new(),
-            file_content: None,
-            selected_block,
-            option_key: OptionFor::None,
-            marked_operation: FileOperation::None,
-            marked_files: HashMap::new(),
-            command_error: false,
-            command_expand: false,
-            command_scroll: None,
-            command_idx: None,
-            command_history: Vec::new(),
-            need_to_jump: false,
-            searched_idx: Arc::new(Mutex::new(Vec::new())),
+
+            // UI
             term_colors,
-            target_dir: HashMap::new(),
-            config_path: String::new(),
+            selected_block,
+            hide_files: true,
+            file_content: FileContent::None,
+            selected_item: ItemIndex::default(),
+
+            // Operations
             tab_list,
+            need_to_jump: false,
+            command_scroll: None,
+            target_dir: HashMap::new(),
+            option_key: OptionFor::None,
+            marked_files: HashMap::new(),
+            marked_operation: FileOperation::None,
+            image_preview: ImagePreview::default(),
+            searched_idx: Arc::new(Mutex::new(Vec::new())),
+
+            // Command
+            command_idx: None,
+            command_expand: false,
+            command_history: Vec::new(),
+
+            // Error handle
+            command_error: false,
             app_error: AppError::new(),
+
+            // Config & others
+            config_path: String::new(),
+            user_name: Cow::from(host_info.1),
             computer_name: Cow::from(host_info.0),
-            user_name: Cow::from(host_info.1)
         }
     }
 }
@@ -141,7 +157,7 @@ impl App {
     }
 
     /// Initialize parent, current and child files.
-    pub fn init_all_files(&mut self) -> io::Result<()> {
+    pub fn init_all_files(&mut self) -> AppResult<()> {
         // Parent files
         self.init_parent_files()?;
 
@@ -204,7 +220,7 @@ impl App {
     pub fn refresh_child_item(&mut self) {
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
-            self.file_content = None;
+            self.file_content.reset();
             return ()
         }
 
@@ -270,8 +286,13 @@ impl App {
             }
 
             // Handle the case when the current parent dir is not in parent_files.
-            let current_parent_name = self.path.file_name().unwrap().to_string_lossy();
-            if parent_files.iter().position(|f| f.name == current_parent_name).is_none()
+            let current_parent_name = self.path
+                .file_name()
+                .unwrap()
+                .to_string_lossy();
+            if parent_files.iter()
+                .position(|f| f.name == current_parent_name)
+                .is_none()
             {
                 match fs::metadata(self.path.to_owned()) {
                     Ok(metadata) if metadata.is_dir() => {
@@ -335,7 +356,7 @@ impl App {
     }
 
     /// It's your deal to ensure CURRENT_FILES is not empty.
-    pub fn init_child_files(&mut self) -> io::Result<()>
+    pub fn init_child_files(&mut self) -> AppResult<()>
     {
         let temp_path = self.path.clone();
         let current_select = {
@@ -356,11 +377,11 @@ impl App {
 
             self.child_files = child_files;
             if self.file_content.is_some() {
-                self.file_content = None;
+                self.file_content.reset();
             }
         } else {
             // See the note at the definition of App structure.
-            if self.file_content.is_none() {
+            if !self.file_content.is_some() {
                 self.child_files.clear();
             }
 
@@ -388,12 +409,16 @@ impl App {
 
     pub fn get_file_saver_mut(&mut self) -> Option<&mut FileSaver> {
         if self.root() {
-            Some(&mut self.parent_files[self.selected_item.parent_selected().unwrap()])
+            Some(&mut self.parent_files[
+                self.selected_item.parent_selected().unwrap()
+            ])
         } else {
             if self.current_files.is_empty() {
                 None
             } else {
-                Some(&mut self.current_files[self.selected_item.current_selected().unwrap()])
+                Some(&mut self.current_files[
+                    self.selected_item.current_selected().unwrap()
+                ])
             }
         }
     }
@@ -402,7 +427,7 @@ impl App {
     /// 
     /// Update parent files & current files if the user is in root directory.
     /// Otherwise update current & child files.
-    pub fn partly_update_block(&mut self) -> io::Result<()> {
+    pub fn partly_update_block(&mut self) -> AppResult<()> {
         if self.root() {
             self.selected_item.parent_select(Some(0));
             self.selected_item.current_select(Some(0));
@@ -449,7 +474,7 @@ impl App {
     /// 
     /// When there's a file that should be selected out from this function,
     /// use TARGET argument.
-    pub fn update_with_prev_selected(&mut self, target: Option<String>) -> io::Result<()> {
+    pub fn update_with_prev_selected(&mut self, target: Option<String>) -> AppResult<()> {
         // Prev states
         let parent_file = self
             .search_file(SearchFile::Parent)
@@ -478,7 +503,7 @@ impl App {
         let root = self.root();
 
         self.selected_item = ItemIndex::default();
-        self.file_content = None;
+        self.file_content.reset();
 
 
         // Refresh parent
@@ -559,7 +584,7 @@ impl App {
         Ok(())
     }
 
-    pub fn hide_or_show(&mut self, target: Option<String>) -> io::Result<()> {
+    pub fn hide_or_show(&mut self, target: Option<String>) -> AppResult<()> {
         self.hide_files = if self.hide_files {
             false
         } else {
@@ -573,7 +598,7 @@ impl App {
 
 // File Content
 impl App {
-    pub fn set_file_content(&mut self) -> io::Result<()> {
+    pub fn set_file_content(&mut self) -> anyhow::Result<()> {
         use io::{Read, ErrorKind};
 
         let selected_file = self.get_file_saver();
@@ -582,30 +607,40 @@ impl App {
                 .join(&selected_file.name);
             let mut content = String::new();
 
-            match fs::File::open(file_path) {
+            match fs::File::open(file_path.to_owned()) {
                 Err(e) => {
                     match e.kind() {
                         ErrorKind::NotFound => (),
                         ErrorKind::PermissionDenied => {
                             content = String::from("Permission Denied");
                         },
-                        _ => return Err(e)
+                        _ => return Err(e.into())
                     }
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
                         if let Err(e) = file.read_to_string(&mut content) {
                             if e.kind() != io::ErrorKind::InvalidData {
-                                return Err(e)
+                                return Err(e.into())
                             }
-                            content = String::from("Non-UTF-8 Data");
+
+                            // Try to display image file
+                            let img_info = image_preview::get_image_info(file_path)?;
+                            if img_info.is_some() {
+                                self.image_preview.make_protocol(img_info.unwrap())?;
+                                self.file_content = FileContent::Image;
+
+                                return Ok(())
+                            }
+
+                            content = String::from("Non Text file");
                         }
                     } else {
                         content = String::from("Non Normal File");
                     }
                 },
             };
-            self.file_content = Some(content);
+            self.file_content = FileContent::Text(content);
         }
 
         Ok(())
@@ -944,11 +979,11 @@ impl App {
     pub fn goto_dir<P: AsRef<Path>>(&mut self,
                                     dir: P,
                                     hide_files: Option<bool>
-    ) -> io::Result<()>
+    ) -> AppResult<()>
     {
         self.path = PathBuf::from(dir.as_ref());
         self.selected_item = ItemIndex::default();
-        self.file_content = None;
+        self.file_content.reset();
         self.child_files.clear();
 
         self.hide_files = if let Some(hide) = hide_files {

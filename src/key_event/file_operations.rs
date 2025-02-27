@@ -225,7 +225,7 @@ where I: Iterator<Item = (String, bool)>
         app.child_files.clear();
 
         if app.file_content.is_some() {
-            app.file_content = None;
+            app.file_content.reset();
         }
     } else if dir.len() == idx.selected().unwrap() { // There have been an element deleted.
         idx.select(Some(idx.selected().unwrap() - 1));

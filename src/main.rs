@@ -32,10 +32,8 @@ use key_event::{
 };
 
 fn main() -> AppResult<()> {
-    enable_raw_mode()?;
-    execute!(stderr(), EnterAlternateScreen)?;
-
     let mut app = App::default();
+    app.init_image_picker();
     app.init_all_files()?;
 
     // Init config information.
@@ -64,8 +62,15 @@ fn main() -> AppResult<()> {
         }
     }
 
+    enable_raw_mode()?;
+    execute!(stderr(), EnterAlternateScreen)?;
+
     loop {
-        terminal.draw(|frame| ui::ui(frame, &mut app))?;
+        terminal.draw(|frame| {
+            if let Err(err) = ui::ui(frame, &mut app) {
+                app.app_error.add_error(err);
+            }
+        })?;
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {

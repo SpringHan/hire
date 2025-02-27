@@ -1,9 +1,12 @@
 // UI
 
+mod child_block;
+
 use std::borrow::Cow;
 use std::ops::AddAssign;
 use std::collections::HashMap;
 
+use child_block::render_file;
 use ratatui::{
     Frame,
     text::{Line, Span, Text},
@@ -13,16 +16,17 @@ use ratatui::{
 };
 
 use crate::App;
-use crate::app::{TermColors, reverse_style};
 use crate::app::{
     self,
     FileSaver,
     CursorPos,
+    TermColors,
     MarkedFiles,
-    FileOperation
+    FileOperation,
+    reverse_style,
 };
 
-pub fn ui(frame: &mut Frame, app: &mut App) {
+pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(if !app.command_expand {
@@ -108,7 +112,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
             frame.render_widget(computer_info, chunks[0]);
             frame.render_widget(command_errors, chunks[1]);
-            return ()
+            return Ok(())
         }
 
         app.quit_command_mode();
@@ -161,14 +165,14 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
     match app.selected_block {
         app::Block::Browser(true) => {
             if app.file_content.is_some() {
-                frame.render_widget(render_file_content(app), browser_layout[1]);
+                render_file(frame, app, browser_layout[1])?;
                 frame.render_widget(render_command_line(app), chunks[2]);
-                return ()
+                return Ok(())
             }
         },
         _ => {
             if app.file_content.is_some() {
-                frame.render_widget(render_file_content(app),browser_layout[2]);
+                render_file(frame, app, browser_layout[2])?;
             } else {
                 let child_block = Block::default()
                     .borders(Borders::ALL);
@@ -219,6 +223,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
     // Command Block
     frame.render_widget(render_command_line(app), chunks[2]);
+
+    Ok(())
 }
 
 fn check_app_error(app: &mut App) {
@@ -312,7 +318,7 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                             get_normal_item_color(file, colors, false)
                         }
                     },
-                    None => panic!("Unknow error!")
+                    None => panic!("Unknow error when rendering list!")
                 }
             } else {
                 get_normal_item_color(file, colors, false)
@@ -321,19 +327,6 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
     }
 
     temp_items
-}
-
-/// Render current file content if the selected file is not a dir.
-fn render_file_content(app: &App) -> Paragraph {
-    let file_block = Block::default()
-        .borders(Borders::ALL);
-    if let Some(ref content) = app.file_content {
-        Paragraph::new(content.as_str())
-            .style(app.term_colors.file_style)
-            .block(file_block)
-    } else {
-        panic!("Unknown error!")
-    }
 }
 
 /// Function used to generate Paragraph at command-line layout.
