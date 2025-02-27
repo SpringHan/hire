@@ -28,16 +28,14 @@ pub fn shell_process(app: &mut App,
     use std::process::Command;
     use std::io::stderr;
 
-    use crossterm::terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen,
-        enable_raw_mode, disable_raw_mode
+    use ratatui::crossterm::{
+        terminal::{
+            EnterAlternateScreen, LeaveAlternateScreen,
+            enable_raw_mode, disable_raw_mode
+        },
+        cursor::{Show, Hide},
+        execute
     };
-    use crossterm::cursor::{Show, Hide};
-    use crossterm::execute;
-
-    disable_raw_mode()?;
-    execute!(stderr(), LeaveAlternateScreen, Show)?;
-
 
     let mut command_arg: Option<&str> = None;
 
@@ -59,8 +57,11 @@ pub fn shell_process(app: &mut App,
     if let Some(arg) = command_arg {
         process.arg(arg);
     }
-    process.spawn()?.wait()?;
 
+    disable_raw_mode()?;
+    execute!(stderr(), LeaveAlternateScreen, Show)?;
+
+    process.spawn()?.wait()?;
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen, Hide)?;

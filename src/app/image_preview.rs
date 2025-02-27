@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Result};
 use image::DynamicImage;
+use anyhow::{bail, Result};
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use super::App;
@@ -33,10 +33,6 @@ impl ImagePreview {
             None => None,
         }
     }
-
-    // pub fn reset(&mut self) {
-    //     self.protocol = None;
-    // }
 }
 
 impl App {

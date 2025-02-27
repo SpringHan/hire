@@ -14,7 +14,7 @@ use std::ops::{SubAssign, AddAssign};
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
-use crossterm::event::KeyCode;
+use ratatui::crossterm::event::KeyCode;
 
 use tab::tab_operation;
 use crate::error::AppResult;

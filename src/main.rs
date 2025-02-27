@@ -11,7 +11,7 @@ use ratatui::{
     Terminal
 };
 
-use crossterm::{
+use ratatui::crossterm::{
     event::{self, KeyCode, KeyEventKind},
     terminal::{
         enable_raw_mode,
