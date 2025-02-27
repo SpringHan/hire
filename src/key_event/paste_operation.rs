@@ -1,23 +1,25 @@
 // Paste operation.
 
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+
+use super::SwitchCase;
+use super::file_operations::delete_file;
+
 use crate::App;
 use crate::app::{
     CursorPos,
     FileOperation,
     MarkedFiles,
+};
+use crate::error::{
     AppResult,
     AppError,
     ErrorType,
     NotFoundType
 };
-
-use super::SwitchCase;
-use super::file_operations::delete_file;
-
-use std::fs;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 pub fn paste_operation(app: &mut App) -> AppResult<()> {
     if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
@@ -218,7 +220,7 @@ fn paste_switch(
                 }
             }
 
-            crate::app::command::create_symlink(app, final_files.into_iter())?;
+            crate::app::create_symlink(app, final_files.into_iter())?;
         },
         'c' => {
             paste_files(

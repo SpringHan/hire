@@ -1,12 +1,12 @@
 // Cursor Movement.
 
-use crate::app::{self, App, AppResult};
-use super::Goto;
-
 use std::mem::swap;
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
+
+use super::Goto;
+use crate::{app::{self, App}, error::AppResult};
 
 type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
 

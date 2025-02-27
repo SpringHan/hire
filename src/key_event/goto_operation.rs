@@ -1,15 +1,16 @@
 // Goto Operation.
 
-use super::Goto;
-use super::{SwitchCase, SwitchCaseData};
-
-use crate::app::{App, AppResult, ErrorType, NotFoundType};
-
 use std::path::PathBuf;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 
 use toml_edit::{value, Document};
+
+use super::Goto;
+use super::{SwitchCase, SwitchCaseData};
+
+use crate::app::App;
+use crate::error::{AppResult, ErrorType, NotFoundType};
 
 pub fn goto_operation(app: &mut App) {
     SwitchCase::new(

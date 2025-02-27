@@ -1,21 +1,14 @@
 // File operations.
 
-use crate::app::{
-    App,
-    CursorPos,
-    FileOperation,
-    AppResult,
-    AppError,
-    ErrorType
-};
+use std::path::PathBuf;
+use std::collections::HashMap;
 
 use super::Goto;
 use super::cursor_movement;
 use super::{SwitchCase, SwitchCaseData};
 
-use std::path::PathBuf;
-
-use std::collections::HashMap;
+use crate::app::{App, CursorPos, FileOperation,};
+use crate::error::{AppResult, AppError, ErrorType};
 
 // File name modify
 pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {

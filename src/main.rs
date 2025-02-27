@@ -1,21 +1,35 @@
-mod app;
 mod ui;
+mod app;
+mod error;
 mod key_event;
 
 use std::io::stderr;
-use key_event::{fetch_working_directory, handle_event, shell_process, ShellCommand};
+use std::time::Duration;
+
 use ratatui::{
     backend::CrosstermBackend,
     Terminal
 };
+
 use crossterm::{
     event::{self, KeyCode, KeyEventKind},
-    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        enable_raw_mode,
+        disable_raw_mode,
+        EnterAlternateScreen,
+        LeaveAlternateScreen
+    },
     execute
 };
-use std::time::Duration;
 
-use app::{App, AppResult};
+use app::App;
+use error::AppResult;
+use key_event::{
+    fetch_working_directory,
+    handle_event,
+    shell_process,
+    ShellCommand
+};
 
 fn main() -> AppResult<()> {
     enable_raw_mode()?;

@@ -1,10 +1,10 @@
 // Special types used in App structure.
 
-use crate::key_event::SwitchCase;
-
 use std::collections::HashMap;
 
 use ratatui::widgets::ListState;
+
+use crate::key_event::SwitchCase;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CursorPos {

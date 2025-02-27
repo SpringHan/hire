@@ -1,9 +1,5 @@
 // UI
 
-use crate::App;
-use crate::app::{self, filesaver::FileSaver, CursorPos, MarkedFiles, FileOperation};
-use crate::app::{TermColors, reverse_style};
-
 use std::borrow::Cow;
 use std::ops::AddAssign;
 use std::collections::HashMap;
@@ -14,6 +10,16 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Alignment},
     style::{Color, Style, Modifier, Stylize},
     widgets::{Block, List, ListItem, Borders, Paragraph, Wrap}
+};
+
+use crate::App;
+use crate::app::{TermColors, reverse_style};
+use crate::app::{
+    self,
+    FileSaver,
+    CursorPos,
+    MarkedFiles,
+    FileOperation
 };
 
 pub fn ui(frame: &mut Frame, app: &mut App) {
@@ -31,7 +37,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
                 Constraint::Percentage(96)
             ]
         })
-        .split(frame.size());
+        .split(frame.area());
 
     // Title
     let title_layout = Layout::default()

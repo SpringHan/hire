@@ -1,10 +1,11 @@
 // Command functions
 
-use super::filesaver::{sort, FileSaver};
-use super::{App, AppResult, AppError, ErrorType};
-
 use std::fs;
 use std::path::{PathBuf, Path};
+
+use super::App;
+use super::filesaver::{sort, FileSaver};
+use crate::error::{AppResult, AppError, ErrorType};
 
 pub fn rename_file(path: PathBuf,
                    app: &mut App,

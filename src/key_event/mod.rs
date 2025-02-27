@@ -1,24 +1,13 @@
 // Key Event
 
+mod tab;
+mod shell_command;
+mod goto_operation;
 mod cursor_movement;
 mod file_operations;
-mod goto_operation;
-mod shell_command;
-mod switch_operation;
-mod tab;
-mod simple_operations;
 mod paste_operation;
-
-// Export
-pub use cursor_movement::move_cursor;
-pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
-pub use goto_operation::init_config;
-pub use switch_operation::{SwitchCase, SwitchCaseData};
-pub use tab::TabList;
-
-use crate::key_event::tab::tab_operation;
-use crate::App;
-use crate::app::{self, AppResult, CursorPos, OptionFor, FileOperation};
+mod switch_operation;
+mod simple_operations;
 
 use std::io::Stderr;
 use std::ops::{SubAssign, AddAssign};
@@ -27,7 +16,18 @@ use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 use crossterm::event::KeyCode;
 
+use tab::tab_operation;
+use crate::error::AppResult;
+use crate::app::{self, App, CursorPos, OptionFor, FileOperation};
+
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
+
+// Export
+pub use cursor_movement::move_cursor;
+pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
+pub use goto_operation::init_config;
+pub use switch_operation::{SwitchCase, SwitchCaseData};
+pub use tab::TabList;
 
 /// The enum that used to declare method to move.
 #[derive(PartialEq, Eq)]

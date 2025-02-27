@@ -1,6 +1,6 @@
 // Switch Operation.
 
-use crate::app::{self, App, AppResult};
+use crate::{app::{self, App}, error::AppResult};
 
 #[allow(unused)]
 #[derive(PartialEq, Eq, Clone)]

@@ -1,9 +1,12 @@
 // Tab.
 
-use super::{SwitchCase, SwitchCaseData};
-use crate::app::{App, AppResult, ErrorType, NotFoundType};
-
 use std::path::PathBuf;
+
+use super::{SwitchCase, SwitchCaseData};
+use crate::{
+    app::App,
+    error::{AppResult, ErrorType, NotFoundType}
+};
 
 pub struct TabList {
     list: Vec<(PathBuf, bool)>, // Store current path & whether hiding files.

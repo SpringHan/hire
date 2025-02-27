@@ -1,16 +1,10 @@
 // App
 
-pub mod filesaver;
-pub mod special_types;
-pub mod command;
-pub mod color;
-pub mod app_result;
-pub use special_types::*;
-pub use app_result::*;
-
-use crate::key_event::Goto;
-use filesaver::{FileSaver, sort};
-pub use color::{TermColors, reverse_style};
+mod color;
+mod command;
+mod filesaver;
+mod special_types;
+mod image_preview;
 
 use std::borrow::Cow;
 use std::{env, fs, io};
@@ -22,6 +16,15 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 
 use ratatui::widgets::ListState;
+
+use filesaver::sort;
+use crate::key_event::Goto;
+use crate::error::{AppError, AppResult, ErrorType};
+
+pub use command::*;
+pub use special_types::*;
+pub use filesaver::FileSaver;
+pub use color::{TermColors, reverse_style};
 
 pub struct App {
     pub path: PathBuf,

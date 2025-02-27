@@ -1,12 +1,15 @@
 // Shell Command.
 
-use crate::app::{App, AppResult, ErrorType};
-
 use std::path::{Path, PathBuf};
 use std::io::{self, Stderr};
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
+
+use crate::{
+    app::App,
+    error::{AppResult, ErrorType}
+};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
