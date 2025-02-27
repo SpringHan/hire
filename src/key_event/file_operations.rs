@@ -104,7 +104,7 @@ fn delete_switch(
             let current_file = app.get_file_saver();
             if let Some(current_file) = current_file.cloned() {
                 if current_file.cannot_read || current_file.read_only() {
-                    return Err(ErrorType::PermissionDenied(None).pack())
+                    return Err(ErrorType::PermissionDenied(Vec::new()).pack())
                 }
 
                 let mut temp_hashmap = HashMap::new();

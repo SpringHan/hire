@@ -3,6 +3,8 @@
 use std::{env, io};
 use std::convert::From;
 
+use thiserror::Error;
+
 pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Debug)]
@@ -11,28 +13,47 @@ pub struct AppError {
 }
 
 /// The three cases matching not found error.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum NotFoundType {
-    // Files(Vec<String>),
+    #[error("[Error]: Not found: {0}")]
     Item(String),
+
+    #[error("[Error]: The file/item cannot be found!")]
     None
 }
 
 /// This enum is used for the errors that will not destroy program.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ErrorType {
-    PermissionDenied(Option<Vec<String>>),
+    #[error("[AppError]: Permission Denied: {0:?}")]
+    PermissionDenied(Vec<String>),
+
+    #[error("[AppError]: Invalid Command!")]
     UnvalidCommand,
+
+    #[error("[AppError]: File exists: {0:?}")]
     FileExists(Vec<String>),
+
+    #[error("[AppError]: No item to be selected and operated!")]
     NoSelected,
-    NotFound(NotFoundType),
+
+    #[error(transparent)]
+    NotFound(#[from] NotFoundType),
+
+    #[error("[AppError]: {0}!")]
     Specific(String),
 
-    #[allow(unused)]
-    Io(String),
-    Var(String)
+    #[error("[AppError/IoError]: {{ 0.to_string() }}")]
+    Io(#[from] io::Error),
+
+    #[error("[AppError/VarError]: {0}")]
+    Var(#[from] env::VarError),
+
+    #[error("[AppError]: {0:?}")]
+    Others(#[from] anyhow::Error)
 }
 
+// AppError Implements
 impl AppError {
     pub fn new() -> Self {
         AppError { errors: Vec::new() }
@@ -66,7 +87,7 @@ impl std::fmt::Display for AppError {
         let mut final_msg: Vec<String> = Vec::new();
 
         for err in self.errors.iter() {
-            final_msg.push(err.error_value());
+            final_msg.push(err.to_string());
         }
 
         write!(f, "{}", final_msg.join("\n"))
@@ -75,7 +96,7 @@ impl std::fmt::Display for AppError {
 
 impl From<io::Error> for AppError {
     fn from(value: io::Error) -> Self {
-        AppError {
+        Self {
             errors: vec![
                 value.into()
             ]
@@ -85,54 +106,26 @@ impl From<io::Error> for AppError {
 
 impl From<env::VarError> for AppError {
     fn from(value: env::VarError) -> Self {
-        AppError {
+        Self {
             errors: vec![
-                ErrorType::Var(format!("VarError: {}", value.to_string()))
+                value.into()
             ]
         }
     }
 }
 
-impl From<io::Error> for ErrorType {
-    fn from(value: io::Error) -> Self {
-        ErrorType::Io(format!("IO Error: {}", value.to_string()))
+impl From<anyhow::Error> for AppError {
+    fn from(value: anyhow::Error) -> Self {
+        Self {
+            errors: vec![
+                value.into()
+            ]
+        }
     }
 }
 
+// ErrorType Implements
 impl ErrorType {
-    pub fn error_value(&self) -> String {
-        match self {
-            ErrorType::NoSelected => {
-                String::from("[Error]: No item to be selected and operated!")
-            },
-            ErrorType::FileExists(files) => {
-                format!("[Error]: File {:?} already exists!", files)
-            },
-            ErrorType::UnvalidCommand => {
-                String::from("[Error]: Unvalid Command!")
-            },
-            ErrorType::PermissionDenied(files) => {
-                if let Some(files) = files {
-                    format!("[Error]: Permission Denied: {:?}", files)
-                } else {
-                    String::from("[Error]: Permission Denied!")
-                }                
-            },
-            ErrorType::NotFound(data) => {
-                match data {
-                    // NotFoundType::Files(files) => format!("[Error]: Not found: {:?}", files),
-                    NotFoundType::Item(item) => format!("[Error]: Not found: {}", item),
-                    NotFoundType::None => String::from("[Error]: The file/item cannot be found!")
-                }
-            },
-            ErrorType::Specific(err) => {
-                format!("[Error]: {}", err)
-            }
-            ErrorType::Io(msg) => msg.to_owned(),
-            ErrorType::Var(msg) => msg.to_owned(),
-        }
-    }
-
     pub fn pack(self) -> AppError {
         AppError { errors: vec![self] }
     }
