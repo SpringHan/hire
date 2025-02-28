@@ -4,6 +4,7 @@ mod error;
 mod key_event;
 
 use std::io::stderr;
+use std::thread;
 use std::time::Duration;
 
 use ratatui::{
@@ -33,7 +34,7 @@ use key_event::{
 
 fn main() -> AppResult<()> {
     let mut app = App::default();
-    app.init_image_picker();
+    let resize_rx = app.init_image_picker();
     app.init_all_files()?;
 
     // Init config information.
@@ -65,12 +66,34 @@ fn main() -> AppResult<()> {
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen)?;
 
+    // Spawn thread for image resize
+    // let thread_protocol = app.image_preview.image_protocol();
+    // if resize_rx.is_some() {
+    //     thread::spawn(move || {
+    //         let rx = resize_rx.unwrap();
+
+    //         loop {
+    //             if let Ok(protocol) = rx.recv() {
+    //                 if let Ok(mut _mutex) = thread_protocol.lock() {
+    //                     if let Some(ref mut thread_protocol) = *_mutex {
+    //                         thread_protocol.set_protocol(protocol);
+    //                     }
+    //                 }
+    //                 // if let Some(thread_protocol) = thread_protocol {
+    //                 //     thread_protocol.set_protocol(protocol);
+    //                 // }
+    //             }
+    //         }
+    //     });
+    // }
+
     loop {
         terminal.draw(|frame| {
             if let Err(err) = ui::ui(frame, &mut app) {
                 app.app_error.add_error(err);
             }
         })?;
+
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
@@ -92,6 +115,14 @@ fn main() -> AppResult<()> {
             let result = app.next_candidate();
             if let Err(err) = result {
                 app.app_error.append_errors(err.iter());
+            }
+        }
+
+        if let Some(ref rx) = resize_rx {
+            if let Ok(protocol) = rx.try_recv() {
+                if let Some(_ref) = app.image_preview.image_protocol() {
+                    _ref.set_protocol(protocol);
+                }
             }
         }
     }
