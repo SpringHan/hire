@@ -4,12 +4,11 @@ mod error;
 mod key_event;
 
 use std::io::stderr;
-use std::thread;
 use std::time::Duration;
 
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
-    Terminal
 };
 
 use ratatui::crossterm::{
@@ -23,18 +22,18 @@ use ratatui::crossterm::{
     execute
 };
 
-use app::App;
 use error::AppResult;
+use app::{App, FileContent};
 use key_event::{
-    fetch_working_directory,
     handle_event,
     shell_process,
-    ShellCommand
+    fetch_working_directory,
+    ShellCommand,
 };
 
 fn main() -> AppResult<()> {
     let mut app = App::default();
-    let resize_rx = app.init_image_picker();
+    let recvs = app.init_image_picker();
     app.init_all_files()?;
 
     // Init config information.
@@ -65,27 +64,6 @@ fn main() -> AppResult<()> {
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen)?;
-
-    // Spawn thread for image resize
-    // let thread_protocol = app.image_preview.image_protocol();
-    // if resize_rx.is_some() {
-    //     thread::spawn(move || {
-    //         let rx = resize_rx.unwrap();
-
-    //         loop {
-    //             if let Ok(protocol) = rx.recv() {
-    //                 if let Ok(mut _mutex) = thread_protocol.lock() {
-    //                     if let Some(ref mut thread_protocol) = *_mutex {
-    //                         thread_protocol.set_protocol(protocol);
-    //                     }
-    //                 }
-    //                 // if let Some(thread_protocol) = thread_protocol {
-    //                 //     thread_protocol.set_protocol(protocol);
-    //                 // }
-    //             }
-    //         }
-    //     });
-    // }
 
     loop {
         terminal.draw(|frame| {
@@ -118,8 +96,20 @@ fn main() -> AppResult<()> {
             }
         }
 
-        if let Some(ref rx) = resize_rx {
-            if let Ok(protocol) = rx.try_recv() {
+        // Image perview handler
+        if let Some((ref prx, ref irx)) = recvs {
+            if let Ok(data) = irx.try_recv() {
+                if let Some(image) = data {
+                    match app.image_preview.make_protocol(image) {
+                        Err(err) => app.app_error.add_error(err),
+                        Ok(_) => app.file_content = FileContent::Image,
+                    }
+                } else {
+                    app.file_content = FileContent::Text(String::from("Non Text File"));
+                }
+            }
+
+            if let Ok(protocol) = prx.try_recv() {
                 if let Some(_ref) = app.image_preview.image_protocol() {
                     _ref.set_protocol(protocol);
                 }

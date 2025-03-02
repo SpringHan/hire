@@ -1,8 +1,12 @@
 // Child Block
 
 use anyhow::bail;
-use ratatui::{layout::Rect, widgets::{Block, Borders, Paragraph}, Frame};
-use ratatui_image::{thread::ThreadImage, StatefulImage};
+use ratatui_image::thread::ThreadImage;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    widgets::{Block, Borders, Paragraph},
+};
 
 use crate::app::{App, FileContent};
 
@@ -10,7 +14,6 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
     if app.file_content == FileContent::Image {
         let _ref = app.image_preview.image_protocol();
 
-        // if let Ok(mut _mutex) = _ref.lock() {
         if let Some(protocol) = _ref {
             frame.render_stateful_widget(
                 ThreadImage::default(),
@@ -20,16 +23,8 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
 
             return Ok(())
         }
-        // }
-        // if protocol.is_err() {
-        //     bail!("Failed to load image protocol")
-        // }
 
-        // if protocol.is_none() {
-        // }
         bail!("Failed to get image protocol of current image")
-            
-        // return Ok(())
     }
 
     frame.render_widget(content_para(app), layout);

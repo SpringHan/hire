@@ -8,9 +8,9 @@ mod image_preview;
 
 use std::borrow::Cow;
 use std::{env, fs, io};
-use std::ops::{AddAssign, SubAssign};
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
+use std::ops::{AddAssign, SubAssign};
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -625,15 +625,13 @@ impl App {
                             }
 
                             // Try to display image file
-                            let img_info = image_preview::get_image_info(file_path)?;
-                            if img_info.is_some() {
-                                self.image_preview.make_protocol(img_info.unwrap())?;
-                                self.file_content = FileContent::Image;
+                            if self.image_preview.with_image_feat() {
+                                self.image_preview.send_path(file_path)?;
 
                                 return Ok(())
                             }
 
-                            content = String::from("Non Text file");
+                            content = String::from("Non Text File");
                         }
                     } else {
                         content = String::from("Non Normal File");
