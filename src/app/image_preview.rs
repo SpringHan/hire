@@ -28,7 +28,7 @@ pub type ResizeRequest = (StatefulProtocol, Resize, Rect);
 pub struct ImagePreview {
     picker: Option<Picker>,
     protocol: Option<ThreadProtocol>,
-    image_path: Arc<Mutex<PathBuf>>,
+    image_path: Arc<Mutex<(PathBuf, bool)>>,
     resize_sender: Option<Sender<ResizeRequest>>,
 }
 
@@ -67,7 +67,7 @@ impl ImagePreview {
 
     pub fn send_path(&self, path: PathBuf) -> Result<()> {
         if let Ok(mut _mutex) = self.image_path.lock() {
-            *_mutex = path;
+            *_mutex = (path, true);
 
             return Ok(())
         }
@@ -112,11 +112,12 @@ impl App {
             let mut decode_result: Option<DynamicImage>;
 
             loop {
-                if let Ok(_ref) = path_ref.try_lock() {
-                    if current_path == *_ref {
+                if let Ok(mut _ref) = path_ref.try_lock() {
+                    if current_path == _ref.0 && !_ref.1 {
                         continue;
                     }
-                    current_path = _ref.to_owned();
+                    _ref.1 = false;
+                    current_path = _ref.0.to_owned();
                 } else {
                     continue;
                 }
@@ -131,7 +132,7 @@ impl App {
 
                     // Try to send DynamicImage to channel
                     if let Ok(_ref) = path_ref.try_lock() {
-                        if *_ref == current_path {
+                        if _ref.0 == current_path {
                             image_tx.send(decode_result)
                                 .expect("Failed to send DynamicImage within channel!");
                         }
