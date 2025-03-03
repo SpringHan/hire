@@ -1,6 +1,7 @@
 mod ui;
 mod app;
 mod error;
+mod config;
 mod key_event;
 
 use std::io::stderr;
@@ -37,7 +38,7 @@ fn main() -> AppResult<()> {
     app.init_all_files()?;
 
     // Init config information.
-    key_event::init_config(&mut app)?;
+    config::init_config(&mut app)?;
 
     let backend = CrosstermBackend::new(stderr());
     let mut terminal = Terminal::new(backend)?;

@@ -20,6 +20,7 @@ use ratatui::widgets::ListState;
 
 use filesaver::sort;
 use crate::key_event::Goto;
+use crate::config::AppConfig;
 use crate::error::{AppError, AppResult, ErrorType};
 
 pub use command::*;
@@ -63,7 +64,7 @@ pub struct App {
     // Target directories
     pub target_dir: HashMap<char, String>,
 
-    // Config Path
+    // Auto config path
     pub config_path: String,
 
     // Tab
@@ -71,6 +72,9 @@ pub struct App {
 
     // Image Preview
     pub image_preview: ImagePreview,
+
+    // App Config
+    pub config: AppConfig,
 
     // AppErrors
     pub app_error: AppError,
@@ -129,6 +133,7 @@ impl Default for App {
             app_error: AppError::new(),
 
             // Config & others
+            config: Vec::new(),
             config_path: String::new(),
             user_name: Cow::from(host_info.1),
             computer_name: Cow::from(host_info.0),

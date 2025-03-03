@@ -43,13 +43,13 @@ pub enum ErrorType {
     #[error("[AppError]: {0}!")]
     Specific(String),
 
-    #[error("[AppError/IoError]: {{ 0.to_string() }}")]
+    #[error("[AppError/IoError]: {0}")]
     Io(#[from] io::Error),
 
     #[error("[AppError/VarError]: {0}")]
     Var(#[from] env::VarError),
 
-    #[error("[AppError]: {{ 0.to_string() }}")]
+    #[error("[AppError]: {0}")]
     Others(#[from] anyhow::Error)
 }
 

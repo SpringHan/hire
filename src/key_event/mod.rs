@@ -23,11 +23,12 @@ use crate::app::{self, App, CursorPos, OptionFor, FileOperation};
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
 // Export
-pub use cursor_movement::move_cursor;
-pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
-pub use goto_operation::init_config;
-pub use switch_operation::{SwitchCase, SwitchCaseData};
 pub use tab::TabList;
+pub use cursor_movement::move_cursor;
+pub use switch_operation::{SwitchCase, SwitchCaseData};
+pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
+
+pub use goto_operation::read_config as goto_read_config;
 
 /// The enum that used to declare method to move.
 #[derive(PartialEq, Eq)]
