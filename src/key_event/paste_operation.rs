@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::SwitchCase;
 use super::file_operations::delete_file;
 
-use crate::App;
+use crate::{rt_error, App};
 use crate::app::{
     CursorPos,
     FileOperation,
@@ -136,11 +136,7 @@ pub fn make_single_symlink(app: &mut App) -> AppResult<()> {
     }
 
     if app.marked_files.len() > 1 {
-        return Err(
-            ErrorType::Specific(
-                String::from("The number of marked files is more than one!")
-            ).pack()
-        )
+        rt_error!("The number of marked files is more than one")
     }
 
     for (path, files) in app.marked_files.iter() {
@@ -220,7 +216,7 @@ fn paste_switch(
                 }
             }
 
-            crate::app::create_symlink(app, final_files.into_iter())?;
+            crate::command::create_symlink(app, final_files.into_iter())?;
         },
         'c' => {
             paste_files(

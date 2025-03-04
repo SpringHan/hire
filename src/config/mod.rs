@@ -10,7 +10,7 @@ use std::{
 use anyhow::Result;
 use toml_edit::DocumentMut;
 
-use crate::{app::App, error::{AppError, AppResult, ErrorType}};
+use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
 
@@ -69,8 +69,8 @@ fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
     }
 
     if document.len() > configs.len() {
-        errors.add_error(ErrorType::Specific(
-            String::from("There're useless config in user_config.toml")
+        errors.add_error(anyhow::anyhow!(
+            "There're useless config in user_config.toml"
         ));
     }
 

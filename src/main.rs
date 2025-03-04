@@ -2,6 +2,7 @@ mod ui;
 mod app;
 mod error;
 mod config;
+mod command;
 mod key_event;
 
 use std::io::stderr;

@@ -40,16 +40,13 @@ pub enum ErrorType {
     #[error(transparent)]
     NotFound(#[from] NotFoundType),
 
-    #[error("[AppError]: {0}!")]
-    Specific(String),
-
     #[error("[AppError/IoError]: {0}")]
     Io(#[from] io::Error),
 
     #[error("[AppError/VarError]: {0}")]
     Var(#[from] env::VarError),
 
-    #[error("[AppError]: {0}")]
+    #[error("[AppError]: {0}!")]
     Others(#[from] anyhow::Error)
 }
 

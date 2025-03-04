@@ -1,7 +1,7 @@
 // Key Event
 
 mod tab;
-mod shell_command;
+mod shell;
 mod goto_operation;
 mod cursor_movement;
 mod file_operations;
@@ -26,7 +26,7 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 pub use tab::TabList;
 pub use cursor_movement::move_cursor;
 pub use switch_operation::{SwitchCase, SwitchCaseData};
-pub use shell_command::{ShellCommand, shell_process, fetch_working_directory};
+pub use shell::{ShellCommand, shell_process, fetch_working_directory};
 
 pub use goto_operation::read_config as goto_read_config;
 
@@ -114,7 +114,7 @@ pub fn handle_event(key: KeyCode,
                         true
                     )?,
                     'w' => app.goto_dir(fetch_working_directory()?, None)?,
-                    'W' => shell_command::set_working_directory(
+                    'W' => shell::set_working_directory(
                         app.path.to_owned()
                     )?,
                     't' => tab_operation(app),

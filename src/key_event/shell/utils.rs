@@ -1,15 +1,13 @@
 // Shell Command.
 
-use std::path::{Path, PathBuf};
 use std::io::{self, Stderr};
+use std::path::{Path, PathBuf};
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::{
-    app::App,
-    error::{AppResult, ErrorType}
-};
+use crate::rt_error;
+use crate::{app::App, error::AppResult};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
@@ -138,7 +136,6 @@ where P: AsRef<Path>
     Ok(())
 }
 
-
 fn working_dir_cache_path() -> AppResult<String> {
     match std::env::var("USER") {
         Ok(user_name) => {
@@ -149,11 +146,7 @@ fn working_dir_cache_path() -> AppResult<String> {
             }
         },
         Err(err) => {
-            Err(
-                ErrorType::Specific(
-                    format!("Cannot get current user as: {}", err)
-                ).pack()
-            )
+            rt_error!("Cannot get current user as: {err}")
         }
     }
 }

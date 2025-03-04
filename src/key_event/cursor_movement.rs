@@ -10,10 +10,11 @@ use crate::{app::{self, App}, error::AppResult};
 
 type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
 
-pub fn directory_movement(direction: char,
-                          app: &mut App,
-                          terminal: &mut Terminal,
-                          in_root: bool
+pub fn directory_movement(
+    direction: char,
+    app: &mut App,
+    terminal: &mut Terminal,
+    in_root: bool
 ) -> AppResult<()>
 {
     // TODO: Separate the core code of n & i from directory_movement.
@@ -57,7 +58,7 @@ pub fn directory_movement(direction: char,
                 // It seems impossible that the root directory is empty.
                 let selected_file = app.get_file_saver().unwrap();
                 if !selected_file.is_dir {
-                    super::shell_command::open_file_in_shell(
+                    super::shell::open_file_in_shell(
                         app,
                         terminal,
                         app.current_path().join(&selected_file.name)
@@ -81,7 +82,7 @@ pub fn directory_movement(direction: char,
 
                 // Open selected file
                 if !selected_file.is_dir {
-                    super::shell_command::open_file_in_shell(
+                    super::shell::open_file_in_shell(
                         app,
                         terminal,
                         app.current_path().join(&selected_file.name)
@@ -124,9 +125,10 @@ pub fn directory_movement(direction: char,
     Ok(())
 }
 
-pub fn move_cursor(app: &mut App,
-                   goto: Goto,
-                   in_root: bool
+pub fn move_cursor(
+    app: &mut App,
+    goto: Goto,
+    in_root: bool
 ) -> AppResult<()>
 {
     let selected_item = if in_root {

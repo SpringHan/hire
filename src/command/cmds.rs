@@ -3,13 +3,15 @@
 use std::fs;
 use std::path::{PathBuf, Path};
 
-use super::App;
-use super::filesaver::{sort, FileSaver};
+use crate::App;
+use crate::rt_error;
+use crate::app::{sort, FileSaver};
 use crate::error::{AppResult, AppError, ErrorType};
 
-pub fn rename_file(path: PathBuf,
-                   app: &mut App,
-                   new_name: String
+pub fn rename_file(
+    path: PathBuf,
+    app: &mut App,
+    new_name: String
 ) -> AppResult<()>
 {
     let hide_files = app.hide_files;
@@ -21,17 +23,11 @@ pub fn rename_file(path: PathBuf,
     let file = file.unwrap();
 
     if file.cannot_read || file.read_only() {
-        return Err(
-            ErrorType::Specific("Permission denied".to_owned()).pack()
-        )
+        rt_error!("Permission denied")
     }
 
     if file_exists(path.join(new_name.to_owned()))? {
-        return Err(
-            ErrorType::Specific(
-                format!("{} already exists", new_name)
-            ).pack()
-        )
+        rt_error!("{new_name} already exists")
     }
 
     let origin_file = path.join(&file.name);
@@ -62,9 +58,10 @@ pub fn rename_file(path: PathBuf,
     Ok(())
 }
 
-pub fn create_file<'a, I>(app: &mut App,
-                          files: I,
-                          is_dir: bool
+pub fn create_file<'a, I>(
+    app: &mut App,
+    files: I,
+    is_dir: bool
 ) -> AppResult<()>
 where I: Iterator<Item = &'a str>
 {

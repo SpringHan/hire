@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use super::{SwitchCase, SwitchCaseData};
 use crate::{
+    rt_error,
     app::App,
-    error::{AppResult, ErrorType, NotFoundType}
+    error::{AppResult, ErrorType, NotFoundType},
 };
 
 pub struct TabList {
@@ -35,7 +36,7 @@ pub fn tab_operation(app: &mut App) {
 fn next(app: &mut App) -> AppResult<bool> {
     let tab = &mut app.tab_list;
     if tab.list.len() == tab.current + 1 {
-        return Err(ErrorType::Specific("There's no other tabs!".to_owned()).pack())
+        rt_error!("There's no other tabs")
     }
 
     tab.list[tab.current] = (
@@ -56,11 +57,7 @@ fn next(app: &mut App) -> AppResult<bool> {
 fn prev(app: &mut App) -> AppResult<bool> {
     let tab = &mut app.tab_list;
     if tab.current == 0 {
-        return Err(
-            ErrorType::Specific(
-                "There's no other tabs!".to_owned()
-            ).pack()
-        )
+        rt_error!("There's no other tabs")
     }
 
     tab.list[tab.current] = (
@@ -95,7 +92,7 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
 
     if idx == tab.current {
         if tab.list.len() == 1 {
-            return Err(ErrorType::Specific("There's only one tab!".to_owned()).pack())
+            rt_error!("There's only one tab")
         }
         tab.list.remove(idx);
 
