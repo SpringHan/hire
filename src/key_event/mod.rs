@@ -84,6 +84,7 @@ pub fn handle_event(key: KeyCode,
                     },
                     'd' => delete_operation(app),
                     '/' => app.set_command_line("/", CursorPos::End),
+                    '!' => shell::cmdline_shell(app)?,
                     'k' => app.next_candidate()?,
                     'K' => app.prev_candidate()?,
                     'a' => append_file_name(app, false)?,
@@ -110,7 +111,7 @@ pub fn handle_event(key: KeyCode,
                     'l' => shell_process(
                         app,
                         terminal,
-                        ShellCommand::Command("lazygit", None),
+                        ShellCommand::Command(None, vec!["lazygit"]),
                         true
                     )?,
                     'w' => app.goto_dir(fetch_working_directory()?, None)?,
@@ -187,7 +188,7 @@ pub fn handle_event(key: KeyCode,
             if app.command_error {
                 app.quit_command_mode();
             } else {
-                app.command_parse()?;
+                app.command_parse(terminal)?;
             }
         },
 

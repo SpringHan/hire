@@ -1,12 +1,15 @@
 // Command Line
 
-use std::ops::{AddAssign, SubAssign};
+use std::{io::Stderr, ops::{AddAssign, SubAssign}};
+
+use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     app::{Block, CursorPos, FileOperation, OptionFor},
     error::{AppResult, ErrorType},
     key_event::Goto,
-    App,
+    rt_error,
+    App
 };
 
 impl App {
@@ -133,18 +136,28 @@ impl App {
         }
     }
     
-    pub fn command_parse(&mut self) -> AppResult<()> {
-        if let Block::CommandLine(ref command, _) = self.selected_block {
-            if command.starts_with("/") {
-                self.file_search(command[1..].to_owned());
+    pub fn command_parse(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stderr>>
+    ) -> AppResult<()> {
+        let argu_err = "Wrong number argument for current command";
+
+        if let Block::CommandLine(ref _command, _) = self.selected_block {
+            if _command.starts_with("/") {
+                self.file_search(_command[1..].to_owned());
                 return Ok(self.quit_command_mode())
             }
 
+            let command = _command.to_owned();
             self.command_history.push(command.to_owned());
             let mut command_slices: Vec<&str> = command.split(" ").collect();
 
             match command_slices[0] {
                 ":rename" => {
+                    if command_slices.len() < 2 {
+                        rt_error!("{argu_err}")
+                    }
+
                     command_slices.remove(0);
                     let file_name = command_slices.join(" ");
                     super::cmds::rename_file(
@@ -153,7 +166,12 @@ impl App {
                         file_name
                     )?
                 },
+
                 ":create_file" => {
+                    if command_slices.len() < 2 {
+                        rt_error!("{argu_err}")
+                    }
+
                     command_slices.remove(0);
                     let files = command_slices.join(" ");
                     let files: Vec<&str> = files.split(",").collect();
@@ -163,7 +181,12 @@ impl App {
                         false
                     )?
                 },
+
                 ":create_dir" => {
+                    if command_slices.len() < 2 {
+                        rt_error!("{argu_err}")
+                    }
+
                     command_slices.remove(0);
                     let files = command_slices.join(" ");
                     let files: Vec<&str> = files.split(",").collect();
@@ -173,7 +196,12 @@ impl App {
                         true
                     )?
                 },
+
                 ":create_symlink" => {
+                    if command_slices.len() != 4 {
+                        rt_error!("{argu_err}")
+                    }
+
                     self.marked_files.clear();
                     self.marked_operation = FileOperation::None;
 
@@ -186,6 +214,26 @@ impl App {
                         self,
                         [(files[0].trim(), files[1].trim())].into_iter()
                     )?
+                },
+
+                // Shell command
+                shell if shell.starts_with(":!") => {
+                    if command_slices.len() < 2 {
+                        rt_error!("Wrong argument number for current command")
+                    }
+
+                    command_slices.remove(0);
+                    let shell_program = &shell[2..];
+
+                    crate::key_event::shell_process(
+                        self,
+                        terminal,
+                        crate::key_event::ShellCommand::Command(
+                            Some(shell_program),
+                            command_slices
+                        ),
+                        true
+                    )?;
                 },
                 _ => return Err(ErrorType::UnvalidCommand.pack())
             }

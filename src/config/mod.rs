@@ -51,8 +51,9 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 }
 
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
-    let configs = ["default_shell"];
+    let configs = ["default_shell", "gui_commands"];
     let mut errors = AppError::new();
+
     let document: DocumentMut = get_document(path)?;
 
     for conf in configs.into_iter() {

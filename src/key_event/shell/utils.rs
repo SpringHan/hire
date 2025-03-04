@@ -1,19 +1,37 @@
 // Shell Command.
 
+use std::io::stderr;
+use std::process::Command;
 use std::io::{self, Stderr};
 use std::path::{Path, PathBuf};
 
+
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::crossterm::event::{self, poll, Event, KeyEventKind};
+use ratatui::crossterm::{
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen,
+        enable_raw_mode, disable_raw_mode
+    },
+    cursor::{Show, Hide},
+    execute
+};
 
 use crate::rt_error;
 use crate::{app::App, error::AppResult};
+use crate::config::{Config, ConfigValue};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
 pub enum ShellCommand<'a> {
     Shell,
-    Command(&'a str, Option<&'a str>)
+    /// The first element is the shell that command runs on;
+    /// The second one is the program & its arguments.
+    Command(
+        Option<&'a str>,
+        Vec<&'a str>
+    )
 }
 
 /// Start a shell process.
@@ -23,43 +41,65 @@ pub fn shell_process(app: &mut App,
                      refresh: bool
 ) -> AppResult<()>
 {
-    use std::process::Command;
-    use std::io::stderr;
-
-    use ratatui::crossterm::{
-        terminal::{
-            EnterAlternateScreen, LeaveAlternateScreen,
-            enable_raw_mode, disable_raw_mode
-        },
-        cursor::{Show, Hide},
-        execute
+    let shell_program = if let ConfigValue::String(
+        _shell
+    ) = Config::get_value(&app.config, "default_shell")
+    {
+        _shell.as_ref().to_owned()
+    } else {
+        std::env::var("SHELL")?
     };
 
-    let mut command_arg: Option<&str> = None;
+    let mut wait_for_press = false;
+    let mut process = Command::new(&shell_program);
 
-    let command = match command {
-        ShellCommand::Shell => {
-            std::env::var("SHELL")?
-        },
-        ShellCommand::Command(c, arg) => {
-            if let Some(arg) = arg {
-                command_arg = Some(arg);
+    if let ShellCommand::Command(shell_type, ref args) = command {
+        let program = args[0];
+
+        if let Some(_type) = shell_type {
+            // Change shell program
+            if _type != &shell_program {
+                process = Command::new(_type)
             }
-            c.to_owned()
         }
-    };
 
-    let mut process = Command::new(command);
+        // Add process arguments
+        process.arg("-c").arg(args.join(" "));
+
+        // Check whether current command needs to wait for user's key press
+        wait_for_press = true;
+
+        if let ConfigValue::Vec(cmds) = Config::get_value(&app.config, "gui_commands") {
+            for cmd in cmds.iter() {
+                if *cmd == program {
+                    wait_for_press = false;
+                    break;
+                }
+            }
+        }
+    }
+
     process.current_dir(&app.path);
 
-    if let Some(arg) = command_arg {
-        process.arg(arg);
-    }
 
     disable_raw_mode()?;
     execute!(stderr(), LeaveAlternateScreen, Show)?;
 
     process.spawn()?.wait()?;
+
+    // Wait for user press
+    if wait_for_press {
+        println!("Press any key to continue");
+        loop {
+            if poll(std::time::Duration::from_millis(200))? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen, Hide)?;
@@ -93,8 +133,8 @@ where P: AsRef<Path>
         app,
         terminal,
         ShellCommand::Command(
-            shell_command,
-            Some(file_path.to_str().unwrap()),
+            None,
+            vec![shell_command, file_path.to_str().unwrap()]
         ),
         false
     )?;

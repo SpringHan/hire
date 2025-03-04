@@ -1,16 +1,18 @@
 // Types for config
 
-use std::collections::HashMap;
+use std::borrow::Cow;
 
-use anyhow::{bail, Result};
 use toml_edit::Item;
+use anyhow::{bail, Result};
 
 pub type AppConfig = Vec<Config>;
 
+#[derive(Clone)]
 pub enum ConfigValue {
-    Bool(bool),
-    String(String),
-    HashMap(HashMap<char, String>),
+    // Bool(bool),
+    String(Cow<'static, str>),
+    Vec(Vec<Cow<'static, str>>),
+    // HashMap(HashMap<char, String>),
 }
 
 pub struct Config {
@@ -18,38 +20,26 @@ pub struct Config {
     value: ConfigValue
 }
 
-// TryInto traits for ConfigValue
-impl TryInto<String> for &ConfigValue {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> std::result::Result<String, Self::Error> {
-        if let ConfigValue::String(_str) = self {
-            return Ok(_str.to_owned())
-        }
-
-        bail!("Failed to extract a non-string value from ConfigValue")
-    }
-}
-
-impl TryInto<bool> for &ConfigValue {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> std::result::Result<bool, Self::Error> {
-        if let ConfigValue::Bool(_bool) = self {
-            return Ok(*_bool)
-        }
-
-        bail!("Failed to extract a non-boolean value from ConfigValue")
-    }
-}
-
 // Config Implements
 impl Config {
     fn default_value(prop: &str) -> ConfigValue {
         match prop {
-            "default_shell" => ConfigValue::String(String::from("bash")),
+            "gui_commands" => ConfigValue::Vec(Vec::new()),
+            "default_shell" => ConfigValue::String(Cow::Owned(String::from("bash"))),
             _ => panic!("Unknow error occurred at default_value fn in types.rs.")
         }
+    }
+
+    pub fn get_value<'a>(configs: &'a Vec<Self>, prop: &str) -> &'a ConfigValue {
+        for conf in configs.iter() {
+            if &conf.name == prop {
+                return &conf.value
+            }
+        }
+
+        // NOTE: There's no possibility that this function cannot find value.
+        // The only cause is typo error.
+        panic!("Error in code at get_value fn in config/types.rs!")
     }
 
     pub fn generate_default(prop: &str) -> Self {
@@ -69,8 +59,32 @@ impl Config {
                     bail!("{err_msg}")
                 }
 
-                self.value = ConfigValue::String(_value.unwrap().to_owned());
+                self.value = ConfigValue::String(Cow::Owned(
+                    _value.unwrap().to_owned()
+                ));
             },
+
+            "gui_commands" => {
+                let _value = value.as_array();
+                if _value.is_none() {
+                    bail!("{err_msg}")
+                }
+
+                let mut command: Option<&str>;
+
+                if let ConfigValue::Vec(ref mut commands) = self.value {
+                    for _command in _value.unwrap().iter() {
+                        command = _command.as_str();
+
+                        if command.is_none() {
+                            bail!("Meet type error when setting gui_commands")
+                        }
+
+                        commands.push(Cow::Owned(command.unwrap().to_owned()));
+                    }
+                }
+            },
+
             _ => panic!("Unknow error occurred at value_from fn in types.rs.")
         }
 

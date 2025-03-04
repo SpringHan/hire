@@ -5,7 +5,7 @@ mod config;
 mod command;
 mod key_event;
 
-use std::io::stderr;
+use std::io::{stderr, Stderr};
 use std::time::Duration;
 
 use ratatui::{
@@ -45,24 +45,7 @@ fn main() -> AppResult<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Check, whether to enable working directory mode.
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() == 2 {
-        match args[1].as_ref() {
-            "--working-directory" => {
-                app.goto_dir(
-                    fetch_working_directory().expect("Cannot fetch working directory!"),
-                    None
-                )?;
-                shell_process(
-                    &mut app,
-                    &mut terminal,
-                    ShellCommand::Shell,
-                    true
-                )?;
-            },
-            _ => ()
-        }
-    }
+    shell_in_workdir(&mut app, &mut terminal)?;
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen)?;
@@ -121,5 +104,33 @@ fn main() -> AppResult<()> {
     
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
+    Ok(())
+}
+
+/// Check whether to enter shell directly.
+fn shell_in_workdir(
+    app: &mut App,
+    terminal: &mut Terminal<CrosstermBackend<Stderr>>
+) -> AppResult<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 {
+        match args[1].as_ref() {
+            "--working-directory" => {
+                app.goto_dir(
+                    fetch_working_directory().expect("Cannot fetch working directory!"),
+                    None
+                )?;
+
+                shell_process(
+                    app,
+                    terminal,
+                    ShellCommand::Shell,
+                    true
+                )?;
+            },
+            _ => ()
+        }
+    }
+
     Ok(())
 }
