@@ -140,13 +140,13 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stderr>>
     ) -> AppResult<()> {
-        let argu_err = "Wrong number argument for current command";
-
         if let Block::CommandLine(ref _command, _) = self.selected_block {
             if _command.starts_with("/") {
                 self.file_search(_command[1..].to_owned());
                 return Ok(self.quit_command_mode())
             }
+
+            let argu_err = "Wrong number argument for current command";
 
             let command = _command.to_owned();
             self.command_history.push(command.to_owned());
@@ -219,7 +219,7 @@ impl App {
                 // Shell command
                 shell if shell.starts_with(":!") => {
                     if command_slices.len() < 2 {
-                        rt_error!("Wrong argument number for current command")
+                        rt_error!("{argu_err}")
                     }
 
                     command_slices.remove(0);

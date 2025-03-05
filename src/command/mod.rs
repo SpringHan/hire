@@ -1,6 +1,6 @@
 // Command
 
 mod cmds;
-mod cmd_line;
+mod cmd_utils;
 
 pub use cmds::*;
