@@ -1,20 +1,24 @@
 // Switch Operation.
 
+mod traits;
+
 use crate::{app::{self, App}, error::AppResult};
 
-#[allow(unused)]
-#[derive(PartialEq, Eq, Clone)]
-pub enum SwitchCaseData {
-    None,
-    Bool(bool),
-    Number(i32),
-    Char(char)
-    // DString(String)
-}
+pub use traits::SwitchStruct;
 
 type FuncPointer = fn(&mut App, char, SwitchCaseData) -> AppResult<bool>;
 
-#[derive(PartialEq, Eq, Clone)]
+// Struct & enum
+pub enum SwitchCaseData {
+    None,
+    Char(char),
+    Struct(Box<dyn SwitchStruct>)
+    // Bool(bool),
+    // Number(i32),
+    // DString(String)
+}
+
+#[derive(Clone)]
 pub struct SwitchCase(FuncPointer, SwitchCaseData);
 
 impl SwitchCase {

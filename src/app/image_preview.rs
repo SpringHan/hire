@@ -76,7 +76,7 @@ impl ImagePreview {
     }
 }
 
-impl App {
+impl<'a> App<'a> {
     pub fn init_image_picker(
         &mut self
     ) -> Option<(Receiver<StatefulProtocol>, Receiver<Option<DynamicImage>>)>

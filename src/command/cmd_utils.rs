@@ -12,7 +12,7 @@ use crate::{
     App
 };
 
-impl App {
+impl<'a> App<'a> {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
         self.selected_block = Block::CommandLine(content.into(), pos);
     }

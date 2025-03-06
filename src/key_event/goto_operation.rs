@@ -162,5 +162,4 @@ mod goto_test {
         let a = "\n".to_owned();
         assert_eq!("", a.trim());
     }
-
 }

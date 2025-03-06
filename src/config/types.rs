@@ -5,23 +5,23 @@ use std::borrow::Cow;
 use toml_edit::Item;
 use anyhow::{bail, Result};
 
-pub type AppConfig = Vec<Config>;
+pub type AppConfig<'a> = Vec<Config<'a>>;
 
 #[derive(Clone)]
-pub enum ConfigValue {
+pub enum ConfigValue<'a> {
     // Bool(bool),
-    String(Cow<'static, str>),
-    Vec(Vec<Cow<'static, str>>),
+    String(Cow<'a, str>),
+    Vec(Vec<Cow<'a, str>>),
     // HashMap(HashMap<char, String>),
 }
 
-pub struct Config {
+pub struct Config<'a> {
     name: String,
-    value: ConfigValue
+    value: ConfigValue<'a>
 }
 
 // Config Implements
-impl Config {
+impl<'a> Config<'a> {
     fn default_value(prop: &str) -> ConfigValue {
         match prop {
             "gui_commands" => ConfigValue::Vec(Vec::new()),
@@ -30,7 +30,7 @@ impl Config {
         }
     }
 
-    pub fn get_value<'a>(configs: &'a Vec<Self>, prop: &str) -> &'a ConfigValue {
+    pub fn get_value(configs: &'a Vec<Self>, prop: &str) -> &'a ConfigValue<'a> {
         for conf in configs.iter() {
             if &conf.name == prop {
                 return &conf.value
@@ -42,7 +42,7 @@ impl Config {
         panic!("Error in code at get_value fn in config/types.rs!")
     }
 
-    pub fn generate_default(prop: &str) -> Self {
+    pub fn generate_default(prop: &'a str) -> Self {
         Self {
             name: prop.to_owned(),
             value: Self::default_value(prop)

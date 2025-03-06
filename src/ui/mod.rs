@@ -330,14 +330,15 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
 }
 
 /// Function used to generate Paragraph at command-line layout.
-fn render_command_line(app: &App) -> Paragraph {
-    use app::Block as ABlock;
+fn render_command_line<'a>(app: &App) -> Paragraph<'a> {
+    use app::Block as AppBlock;
 
     let block = Block::default();
+
     let message = match app.selected_block {
-        ABlock::Browser(_) => {
-            let selected_file = app.get_file_saver();
-            if let Some(selected_file) = selected_file {
+        AppBlock::Browser(_) => {
+            let _selected_file = app.get_file_saver();
+            if let Some(selected_file) = _selected_file {
                 if selected_file.cannot_read {
                     Line::styled("DENIED", Style::default().red())
                 } else if selected_file.dangling_symlink {
@@ -360,9 +361,9 @@ fn render_command_line(app: &App) -> Paragraph {
                 Line::raw("")
             }
         },
-        ABlock::CommandLine(ref input, cursor) => {
+        AppBlock::CommandLine(ref input, cursor) => {
             Line::from(get_command_line_span_list(
-                input,
+                input.to_owned(),
                 cursor,
                 app.command_error
             ))
@@ -483,7 +484,6 @@ where S: Into<Cow<'a, str>>
         let temp = Paragraph::new(
             Text::raw(content)
         )
-            .wrap(Wrap { trim: true })
             .scroll((app.command_scroll.unwrap(), 0));
 
         if app.command_error {

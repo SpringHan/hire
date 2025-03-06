@@ -1,7 +1,7 @@
 // Simple operations.
 
 use super::App;
-use super::switch_operation::{SwitchCase, SwitchCaseData};
+use super::switch::{SwitchCase, SwitchCaseData};
 
 pub fn print_full_path(app: &mut App) {
     let file_name = if let Some(file_saver) = app.get_file_saver() {

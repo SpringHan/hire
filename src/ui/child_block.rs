@@ -33,11 +33,11 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
 }
 
 /// Wrap current file content with Pragraph Widget.
-fn content_para(app: &App) -> Paragraph {
+fn content_para<'a>(app: &App) -> Paragraph<'a> {
     let file_block = Block::default()
         .borders(Borders::ALL);
     if let FileContent::Text(ref content) = app.file_content {
-        Paragraph::new(content.as_str())
+        Paragraph::new(content.to_owned())
             .style(app.term_colors.file_style)
             .block(file_block)
     } else {

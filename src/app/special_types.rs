@@ -13,7 +13,6 @@ pub enum CursorPos {
     None
 }
 
-#[derive(PartialEq, Eq)]
 pub enum OptionFor {
     Switch(SwitchCase),
     None

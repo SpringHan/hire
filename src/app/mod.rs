@@ -24,7 +24,7 @@ pub use special_types::*;
 pub use filesaver::{sort, FileSaver};
 pub use color::{TermColors, reverse_style};
 
-pub struct App {
+pub struct App<'a> {
     pub path: PathBuf,
     pub hide_files: bool,
     pub selected_item: ItemIndex,
@@ -64,13 +64,13 @@ pub struct App {
     pub config_path: String,
 
     // Tab
-    pub tab_list: crate::key_event::TabList,
+    pub tab_list: crate::key_event::TabList<'a>,
 
     // Image Preview
     pub image_preview: ImagePreview,
 
     // App Config
-    pub config: AppConfig,
+    pub config: AppConfig<'a>,
 
     // AppErrors
     pub app_error: AppError,
@@ -79,7 +79,7 @@ pub struct App {
     pub user_name: Cow<'static, str>
 }
 
-impl Default for App {
+impl<'a> Default for App<'a> {
     fn default() -> Self {
         let current_dir = env::current_dir()
             .expect("Cannot get current directory!");
@@ -138,7 +138,7 @@ impl Default for App {
 }
 
 // Basic
-impl App {
+impl<'a> App<'a> {
     pub fn root(&self) -> bool {
         self.path.to_string_lossy() == "/"
     }
@@ -598,7 +598,7 @@ impl App {
 }
 
 // File Content
-impl App {
+impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
         use io::{Read, ErrorKind};
 
@@ -674,7 +674,7 @@ impl App {
 }
 
 // File Search
-impl App {
+impl<'a> App<'a> {
     pub fn file_search(&mut self, name: String) {
         let idx = Arc::clone(&self.searched_idx);
         if !idx.lock().unwrap().is_empty() {
@@ -766,7 +766,7 @@ impl App {
 }
 
 // Other Action
-impl App {
+impl<'a> App<'a> {
     pub fn goto_dir<P: AsRef<Path>>(&mut self,
                                     dir: P,
                                     hide_files: Option<bool>

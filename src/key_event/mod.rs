@@ -2,11 +2,11 @@
 
 mod tab;
 mod shell;
+mod switch;
 mod goto_operation;
 mod cursor_movement;
 mod file_operations;
 mod paste_operation;
-mod switch_operation;
 mod simple_operations;
 
 use std::io::Stderr;
@@ -25,9 +25,11 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 // Export
 pub use tab::TabList;
 pub use cursor_movement::move_cursor;
-pub use switch_operation::{SwitchCase, SwitchCaseData};
+pub use switch::{SwitchCase, SwitchCaseData};
 pub use shell::{ShellCommand, shell_process, fetch_working_directory};
 
+// Export for auto config
+pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
 
 /// The enum that used to declare method to move.
@@ -63,7 +65,7 @@ pub fn handle_event(key: KeyCode,
             match app.option_key {
                 OptionFor::Switch(ref case) => {
                     let case = case.to_owned();
-                    switch_operation::switch_match(app, case, c)?;
+                    switch::switch_match(app, case, c)?;
                     return Ok(())
                 },
                 OptionFor::None => ()
@@ -118,7 +120,7 @@ pub fn handle_event(key: KeyCode,
                     'W' => shell::set_working_directory(
                         app.path.to_owned()
                     )?,
-                    't' => tab_operation(app),
+                    't' => tab_operation(app)?,
 
                     // Print current full path.
                     'r' => simple_operations::print_full_path(app),
@@ -171,7 +173,7 @@ pub fn handle_event(key: KeyCode,
                     app.quit_command_mode();
                 },
                 _ => {
-                    if app.option_key != OptionFor::None {
+                    if let OptionFor::None = app.option_key {
                         app.option_key = OptionFor::None;
                         return Ok(())
                     }

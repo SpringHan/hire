@@ -14,6 +14,18 @@ use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
 
+/// Get T from Option<T>.
+/// When it succeeded, return the value, otherwise throw anyhow error.
+#[macro_export]
+macro_rules! option_get {
+    ($e: expr, $msg: expr) => {
+        match $e {
+            Some(value) => value,
+            None => bail!("{}", $msg),
+        }
+    };
+}
+
 /// Pass the config file path & concrete config into App.
 pub fn init_config(app: &mut App) -> AppResult<()> {
     let mut errors = AppError::new();
@@ -40,6 +52,10 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
     let document: DocumentMut = get_document(path)?;
 
     if let Err(err) = crate::key_event::goto_read_config(app, &document) {
+        errors.add_error(err);
+    }
+
+    if let Err(err) = crate::key_event::tab_read_config(app, &document) {
         errors.add_error(err);
     }
 
@@ -137,7 +153,10 @@ pub fn get_conf_file() -> io::Result<(String, String)> {
     }
 
     Ok((
-        format!("{}auto_config.toml", config_dir),
-        format!("{}user_config.toml", config_dir)
+        // format!("{}auto_config.toml", config_dir),
+        // format!("{}user_config.toml", config_dir)
+        // Dev
+        format!("{}auto_config_dev.toml", config_dir),
+        format!("{}user_config_dev.toml", config_dir)
     ))
 }

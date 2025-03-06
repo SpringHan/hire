@@ -120,7 +120,7 @@ impl FileSaver {
     }
 
     /// Get permission span of file.
-    pub fn permission_span(&self) -> Span {
+    pub fn permission_span<'a>(&self) -> Span<'a> {
         if self.read_only() {
             Span::raw("READONLY").red().bold()
         } else {
@@ -144,7 +144,7 @@ impl FileSaver {
         self.modified_time = Some(time);
     }
 
-    pub fn modified_span(&self) -> Span {
+    pub fn modified_span<'a>(&self) -> Span<'a> {
         use chrono::{DateTime, Local};
 
         if let Some(time) = self.modified_time {
@@ -156,11 +156,11 @@ impl FileSaver {
     }
 
     // TODO: Check the result
-    pub fn size_span(&self) -> Span {
+    pub fn size_span<'a>(&self) -> Span<'a> {
         Span::raw(file_size::fit_4(self.size))
     }
 
-    pub fn symlink_span(&self, style: Style) -> Span {
+    pub fn symlink_span<'a>(&self, style: Style) -> Span<'a> {
         let link_file = if let Some(ref file) = self.symlink_file {
             format!("-> {}", file.to_string_lossy())
         } else {
