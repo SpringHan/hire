@@ -1,6 +1,6 @@
 // Command Line
 
-use std::{io::Stderr, ops::{AddAssign, SubAssign}};
+use std::{io::Stderr, ops::AddAssign};
 
 use ratatui::{prelude::CrosstermBackend, Terminal};
 
@@ -11,6 +11,15 @@ use crate::{
     rt_error,
     App
 };
+
+// TODO: Remove this macro
+#[allow(unused)]
+pub enum ScrollDirection {
+    Left,
+    Right,
+    Up,
+    Down
+}
 
 impl<'a> App<'a> {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
@@ -43,12 +52,15 @@ impl<'a> App<'a> {
         }
 
         if self.command_expand {
-            self.command_expand = false;
-            self.command_scroll = None;
+            self.expand_quit();
         }
 
         if self.command_error {
             self.command_error = false;
+        }
+
+        if self.command_warning {
+            self.command_warning = false;
         }
 
         self.option_key = OptionFor::None;
@@ -246,19 +258,29 @@ impl<'a> App<'a> {
 
     pub fn expand_init(&mut self) {
         self.command_expand = true;
-        self.command_scroll = Some(0);
+        self.command_scroll = Some((0, 0));
     }
 
-    pub fn expand_scroll(&mut self, direct: Goto) {
+    pub fn expand_quit(&mut self) {
+        self.command_expand = false;
+        self.command_scroll = None;
+    }
+
+    pub fn expand_scroll(&mut self, direct: ScrollDirection) {
         if let Some(ref mut scroll) = self.command_scroll {
             match direct {
-                Goto::Up => {
-                    if *scroll > 0 {
-                        scroll.sub_assign(1);
+                ScrollDirection::Left => {
+                    if scroll.1 > 0 {
+                        scroll.1 -= 1;
                     }
                 },
-                Goto::Down => scroll.add_assign(1),
-                _ => panic!("Unknown error!")
+                ScrollDirection::Right => scroll.1 += 1,
+                ScrollDirection::Up => {
+                    if scroll.0 > 0 {
+                        scroll.0 -= 1;
+                    }
+                },
+                ScrollDirection::Down => scroll.0 += 1,
             }
         }
     }

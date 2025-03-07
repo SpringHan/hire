@@ -17,6 +17,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::KeyCode;
 
 use tab::tab_operation;
+
+use crate::command;
 use crate::error::AppResult;
 use crate::app::{self, App, CursorPos, OptionFor, FileOperation};
 
@@ -132,6 +134,7 @@ pub fn handle_event(key: KeyCode,
                             SwitchCase::new(
                                 app,
                                 |_, _, _| Ok(true),
+                                true,
                                 path.to_owned(),
                                 SwitchCaseData::None
                             );
@@ -194,10 +197,11 @@ pub fn handle_event(key: KeyCode,
             }
         },
 
+        // TODO: Modify these keymaps
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
-                    app.expand_scroll(Goto::Up);
+                    app.expand_scroll(command::ScrollDirection::Up);
                 } else {
                     app.command_select(Goto::Up);
                 }
@@ -207,7 +211,7 @@ pub fn handle_event(key: KeyCode,
         KeyCode::Down => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
-                    app.expand_scroll(Goto::Down);
+                    app.expand_scroll(command::ScrollDirection::Down);
                 } else {
                     app.command_select(Goto::Down);
                 }

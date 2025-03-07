@@ -16,6 +16,7 @@ pub fn goto_operation(app: &mut App) {
     SwitchCase::new(
         app,
         goto_switch,
+        true,
         generate_msg(app, '\0'),
         SwitchCaseData::Char('\0')
     );
@@ -38,6 +39,7 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
             SwitchCase::new(
                 app,
                 goto_switch,
+                true,
                 generate_msg(app, '+'),
                 SwitchCaseData::Char('+')
             );
@@ -48,6 +50,7 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
             SwitchCase::new(
                 app,
                 goto_switch,
+                true,
                 generate_msg(app, '-'),
                 SwitchCaseData::Char('-')
             );

@@ -10,9 +10,9 @@ use child_block::render_file;
 use ratatui::{
     Frame,
     text::{Line, Span, Text},
-    layout::{Constraint, Direction, Layout, Alignment},
     style::{Color, Style, Modifier, Stylize},
-    widgets::{Block, List, ListItem, Borders, Paragraph, Wrap}
+    layout::{Constraint, Direction, Layout, Alignment},
+    widgets::{Block, List, ListItem, Borders, Paragraph},
 };
 
 use crate::App;
@@ -365,7 +365,7 @@ fn render_command_line<'a>(app: &App) -> Paragraph<'a> {
             Line::from(get_command_line_span_list(
                 input.to_owned(),
                 cursor,
-                app.command_error
+                app.command_error || app.command_warning
             ))
         }
     };
@@ -412,7 +412,7 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
 
 fn get_command_line_span_list<'a, S>(command: S,
                                      cursor: CursorPos,
-                                     error_msg: bool
+                                     eye_catching: bool
 ) -> Vec<Span<'a>>
 where S: Into<Cow<'a, str>>
 {
@@ -436,7 +436,7 @@ where S: Into<Cow<'a, str>>
         return span_list
     }
 
-    span_list.push(Span::from(command).fg(if error_msg {
+    span_list.push(Span::from(command).fg(if eye_catching {
         Color::Red
     } else {
         Color::White
@@ -484,7 +484,7 @@ where S: Into<Cow<'a, str>>
         let temp = Paragraph::new(
             Text::raw(content)
         )
-            .scroll((app.command_scroll.unwrap(), 0));
+            .scroll(app.command_scroll.unwrap());
 
         if app.command_error {
             return temp.red()
@@ -497,8 +497,7 @@ where S: Into<Cow<'a, str>>
             cursor,
             app.command_error
         )))
-            .wrap(Wrap { trim: true })
-            .scroll((app.command_scroll.unwrap(), 0))
+            .scroll(app.command_scroll.unwrap())
     }
 }
 

@@ -2,10 +2,15 @@
 
 use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
+use anyhow::bail;
+use toml_edit::{value, Array};
+
 use crate::{
-    app::App,
-    key_event::{SwitchCase, SwitchCaseData},
+    config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
+    key_event::{SwitchCase, SwitchCaseData},
+    app::{path_is_hidden, App},
+    option_get,
     rt_error
 };
 
@@ -21,13 +26,15 @@ pub fn tab_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         switch,
-        generate_msg(Some(app), TabState::default())?,
+        true,
+        generate_msg(Some(app), &TabState::default())?,
         SwitchCaseData::Struct(TabState::wrap())
     );
 
     Ok(())
 }
 
+// Core util functions
 fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
     let mut data = if let SwitchCaseData::Struct(data) = _data {
         match data.as_any().downcast_ref::<TabState>() {
@@ -38,28 +45,54 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         panic!("Unexpected situation at switch funciton in tab.rs.")
     };
 
+    // Trying to save opening tabs
+    if data.save_tabs {
+        if key == 'y' {
+            save_tabs(app)?;
+        }
+
+        return Ok(true)
+    }
+
     match key {
-        'n' => create(app),
-        'o' => delete_other_tabs(app),
-        'f' => return Ok(next(app)?),
-        'b' => return Ok(prev(app)?),
-        'c' => return Ok(remove_base(app, app.tab_list.current)?),
+        'n'       => create(app),
+        'f'       => return Ok(next(app)?),
+        'b'       => return Ok(prev(app)?),
+        'o'       => delete_other_tabs(app),
+        '0'..='9' => return Ok(handle_tabs(app, key, &mut data)?),
+        'c'       => return Ok(remove_base(app, app.tab_list.current)?),
+
+        'S' => {
+            data.set_saving();
+            SwitchCase::new(
+                app,
+                switch,
+                false,
+                String::from("Are you sure to store current tabs?"),
+                SwitchCaseData::Struct(Box::new(data))
+            );
+            return Ok(false)
+        },
+
         's' => {
             let msg = generate_msg(Some(app), data.set_storage())?;
 
             SwitchCase::new(
                 app,
                 switch,
+                true,
                 msg,
                 SwitchCaseData::Struct(Box::new(data))
             );
             return Ok(false)
         },
+
         'd' => {
-            app.tab_list.list[app.tab_list.current] = (
-                app.path.to_owned(),
-                app.hide_files
-            );
+            // TODO: Useless code
+            // app.tab_list.list[app.tab_list.current] = (
+            //     app.path.to_owned(),
+            //     app.hide_files
+            // );
 
             let msg = generate_msg(
                 Some(app),
@@ -69,32 +102,11 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
             SwitchCase::new(
                 app,
                 switch,
+                true,
                 msg,
                 SwitchCaseData::Struct(Box::new(data))
             );
             return Ok(false)
-        },
-        // TODO: Extract this into a function
-        '1'..='9' => {
-            let idx = key
-                .to_digit(10)
-                .expect("Failed to parse char to usize!") as usize;
-
-            if app.tab_list.list.len() < idx {
-                return Err(ErrorType::NotFound(NotFoundType::None).pack())
-            }
-
-            // TODO: delete also for storage tabs
-            if data.delete {
-                return Ok(remove_base(app, idx - 1)?);
-            }
-
-            let tab = &mut app.tab_list;
-            if let Some(path) = tab.list.get(idx - 1).cloned() {
-                tab.current = idx - 1;
-                app.goto_dir(path.0, Some(path.1))?;
-                return Ok(true)
-            }
         },
         _ => ()
     }
@@ -204,7 +216,161 @@ fn delete_other_tabs(app: &mut App) {
     tab_list.current = 0;
 }
 
-fn generate_msg(app: Option<&App>, data: TabState) -> AppResult<String> {
+#[inline]
+fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool> {
+    // Handle tabs index
+    let tabs_len = if data.storage {
+        app.tab_list.storage.len()
+    } else {
+        app.tab_list.list.len()
+    };
+    let length_width = tabs_len.to_string().chars().count();
+
+    let idx = if tabs_len > 9 {
+        let idx = key.to_digit(10)
+            .expect("Failed to parse char to usize!") as u8;
+        data.selecting.push(idx);
+
+        if data.selecting.len() < length_width {
+            SwitchCase::new(
+                app,
+                switch,
+                true,
+                generate_msg(Some(app), data)?,
+                SwitchCaseData::Struct(Box::new(data.to_owned()))
+            );
+
+            return Ok(false)
+        }
+
+        data.calc_idx()
+    } else {
+        key.to_digit(10)
+            .expect("Failed to parse char to usize!") as usize
+    };
+
+
+    // Delete specific tab or storage tabs
+    if data.delete {
+        if data.storage {
+            return Ok(remove_storage_tabs(app, idx - 1)?)
+        }
+
+        return Ok(remove_base(app, idx - 1)?)
+    }
+
+    // Apply storage tabs
+    if data.storage {
+        return Ok(apply_storage_tabs(app, idx - 1)?)
+    }
+
+    // Switch specific tab
+    if app.tab_list.list.len() < idx {
+        return Err(ErrorType::NotFound(NotFoundType::None).pack())
+    }
+
+    let tab = &mut app.tab_list;
+    if let Some(path) = tab.list.get(idx - 1).cloned() {
+        tab.current = idx - 1;
+        app.goto_dir(path.0, Some(path.1))?;
+        return Ok(true)
+    }
+
+    Ok(true)
+}
+
+
+// Non-core functions
+fn apply_storage_tabs(app: &mut App, idx: usize) -> AppResult<bool> {
+    if idx >= app.tab_list.storage.len() {
+        return Err(ErrorType::NotFound(NotFoundType::None).pack())
+    }
+
+    let mut tabs: Vec<(PathBuf, bool)> = Vec::new();
+    for path_str in app.tab_list.storage[idx].iter() {
+        let path = PathBuf::from(path_str.as_ref());
+        let is_hidden = path_is_hidden(&path);
+        tabs.push((path, is_hidden));
+    }
+
+    if tabs.is_empty() {
+        rt_error!("The selected storaage tabs array is empty")
+    }
+
+    app.tab_list.current = 0;
+    app.tab_list.list = tabs;
+
+    let first = app.tab_list.list[0].to_owned();
+    app.goto_dir(first.0, Some(!first.1))?;
+    
+    Ok(true)
+}
+
+fn save_tabs(app: &mut App) -> anyhow::Result<()> {
+    let type_err = "The value type of `storage_tabs` is error";
+
+    let tabs = app.tab_list.list.to_owned();
+    let mut document = get_document(get_conf_file()?.0)?;
+    let _array = if let Some(value) = document.get_mut("storage_tabs") {
+        let temp = option_get!(value.as_array_mut(), type_err);
+        temp.push(Array::default());
+        temp.get_mut(temp.len() - 1)
+            .unwrap()
+            .as_array_mut()
+            .unwrap()
+    } else {
+        document["storage_tabs"] = value(Array::default());
+        document["storage_tabs"][0] = value(Array::default());
+        document["storage_tabs"][0]
+            .as_array_mut()
+            .unwrap()
+    };
+
+    let mut fmt_tabs: Vec<Cow<str>> = Vec::new();
+    for (path, _) in tabs.into_iter() {
+        let tab_path = if let Ok(_path) = path.into_os_string().into_string() {
+            _path
+        } else {
+            bail!("Failed to convert PathBuf to String when saving tabs")
+        };
+
+        _array.push(&tab_path);
+        fmt_tabs.push(Cow::Owned(tab_path));
+    }
+
+    write_document(document)?;
+    app.tab_list.storage.push(fmt_tabs.into());
+
+    Ok(())
+}
+
+fn remove_storage_tabs(app: &mut App, idx: usize) -> anyhow::Result<bool> {
+    let type_err = "The value type of `storage_tabs` is error";
+    let non_err = "The item you want to remove doesn't exist";
+
+    let mut document = get_document(get_conf_file()?.0)?;
+    if let Some(value) = document.get_mut("storage_tabs") {
+        let _array = option_get!(value.as_array_mut(), type_err);
+        if _array.len() <= idx {
+            bail!("{}", non_err)
+        }
+
+        _array.remove(idx);
+    } else {
+        bail!("{}", non_err)
+    }
+
+    write_document(document)?;
+    if app.tab_list.storage.len() <= idx {
+        bail!("{}", non_err)
+    }
+
+    app.tab_list.storage.remove(idx);
+
+    Ok(true)
+}
+
+fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<String> {
     let mut msg = if let Some(_app) = app {
         if data.storage {
             storage_tab_string(_app.tab_list.storage.iter())?
@@ -224,7 +390,8 @@ fn generate_msg(app: Option<&App>, data: TabState) -> AppResult<String> {
     }
 
     msg.insert_str(0, "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
-[d] delete tab with number  [s] open tabs from storage  [o] delete other tabs\n\n");
+[d] delete tab with number  [s] open tabs from storage  [S] store opening tabs
+[o] delete other tabs\n\n");
 
     Ok(msg)
 }

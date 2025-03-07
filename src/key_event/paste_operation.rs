@@ -26,7 +26,13 @@ pub fn paste_operation(app: &mut App) -> AppResult<()> {
         return Err(ErrorType::NoSelected.pack())
     }
 
-    SwitchCase::new(app, paste_switch, generate_msg(app), super::SwitchCaseData::None);
+    SwitchCase::new(
+        app,
+        paste_switch,
+        true,
+        generate_msg(app),
+        super::SwitchCaseData::None
+    );
 
     Ok(())
 }

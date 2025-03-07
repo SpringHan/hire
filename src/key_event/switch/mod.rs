@@ -25,6 +25,7 @@ impl SwitchCase {
     pub fn new(
         app: &mut App,
         func: FuncPointer,
+        expand: bool,
         msg: String,
         data: SwitchCaseData
     )
@@ -33,7 +34,14 @@ impl SwitchCase {
             app.command_error = false;
         }
 
-        app.expand_init();
+        if expand {
+            app.expand_init();
+        } else {
+            // When do not expand command line, turn on command_warning to get confirm.
+            app.expand_quit();
+            app.command_warning = true;
+        }
+
         app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);
         app.option_key = app::OptionFor::Switch(SwitchCase(func, data));
     }

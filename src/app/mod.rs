@@ -42,10 +42,12 @@ pub struct App<'a> {
     pub marked_operation: FileOperation,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
-    // When command_error is true, the content in command line will be displayed in red.
+    /// When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
     pub command_expand: bool,
-    pub command_scroll: Option<u16>, // Used for expanded mode.
+    /// Like `command_error`, the content will be in red, but will not reset current key_event.
+    pub command_warning: bool,
+    pub command_scroll: Option<(u16, u16)>, // Used for expanded mode.
 
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
@@ -122,6 +124,7 @@ impl<'a> Default for App<'a> {
             // Command
             command_idx: None,
             command_expand: false,
+            command_warning: false,
             command_history: Vec::new(),
 
             // Error handle

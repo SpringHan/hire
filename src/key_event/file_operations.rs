@@ -53,7 +53,13 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
 
 // Delete operation
 pub fn delete_operation(app: &mut App) {
-    SwitchCase::new(app, delete_switch, generate_msg(), SwitchCaseData::None);
+    SwitchCase::new(
+        app,
+        delete_switch,
+        true,
+        generate_msg(),
+        SwitchCaseData::None
+    );
 }
 
 fn delete_switch(
