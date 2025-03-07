@@ -320,7 +320,9 @@ fn save_tabs(app: &mut App) -> anyhow::Result<()> {
             .unwrap()
     } else {
         document["storage_tabs"] = value(Array::default());
-        document["storage_tabs"][0] = value(Array::default());
+        document["storage_tabs"].as_array_mut()
+            .unwrap()
+            .push(Array::default());
         document["storage_tabs"][0]
             .as_array_mut()
             .unwrap()
