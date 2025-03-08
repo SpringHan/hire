@@ -7,7 +7,7 @@ I made the project with the aim for practicing Rust and this tool was almost cre
 ## TODO
 
 - [x] Image preview support
-- [ ] Storage of specific tabs
+- [x] Storage of specific tabs
 - [ ] Refactor dir tree
 - [ ] Highlight for file preview
 - [ ] Edit multiple files with terminal editor
