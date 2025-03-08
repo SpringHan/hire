@@ -3,6 +3,7 @@
 mod tab;
 mod shell;
 mod switch;
+mod file_search;
 mod goto_operation;
 mod cursor_movement;
 mod file_operations;
@@ -26,6 +27,7 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
 // Export
 pub use tab::TabList;
+pub use file_search::FileSearcher;
 pub use cursor_movement::move_cursor;
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use shell::{ShellCommand, shell_process, fetch_working_directory};

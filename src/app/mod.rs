@@ -10,15 +10,12 @@ use std::{env, fs, io};
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
-use std::thread;
-use std::sync::{Arc, Mutex};
-
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
-use crate::key_event::Goto;
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
+use crate::key_event::FileSearcher;
 
 pub use special_types::*;
 pub use filesaver::{sort, FileSaver};
@@ -28,9 +25,9 @@ pub struct App<'a> {
     pub path: PathBuf,
     pub hide_files: bool,
     pub selected_item: ItemIndex,
+    pub child_files: Vec<FileSaver>,
     pub parent_files: Vec<FileSaver>,
     pub current_files: Vec<FileSaver>,
-    pub child_files: Vec<FileSaver>,
 
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: FileContent,
@@ -53,8 +50,7 @@ pub struct App<'a> {
     pub command_history: Vec<String>,
 
     // Search file
-    pub need_to_jump: bool,
-    pub searched_idx: Arc<Mutex<Vec<usize>>>,
+    pub file_searcher: FileSearcher,
 
     // ColorScheme
     pub term_colors: TermColors,
@@ -77,8 +73,9 @@ pub struct App<'a> {
     // AppErrors
     pub app_error: AppError,
 
+    // Computer & User name
+    pub user_name: Cow<'static, str>,
     pub computer_name: Cow<'static, str>,
-    pub user_name: Cow<'static, str>
 }
 
 impl<'a> Default for App<'a> {
@@ -112,14 +109,13 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
-            need_to_jump: false,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,
             marked_files: HashMap::new(),
             marked_operation: FileOperation::None,
             image_preview: ImagePreview::default(),
-            searched_idx: Arc::new(Mutex::new(Vec::new())),
+            file_searcher: FileSearcher::default(),
 
             // Command
             command_idx: None,
@@ -676,98 +672,6 @@ impl<'a> App<'a> {
     }
 }
 
-// File Search
-impl<'a> App<'a> {
-    pub fn file_search(&mut self, name: String) {
-        let idx = Arc::clone(&self.searched_idx);
-        if !idx.lock().unwrap().is_empty() {
-            idx.lock().unwrap().clear();
-        }
-
-        self.command_history.push(format!("/{}", name.clone()));
-        // Use this way as we cannot change the selected_block at the same time.
-        let current_files = self.get_directory_mut().0.clone();
-
-        thread::spawn(move || {
-            let mut i = 0;
-            let name = name.to_lowercase();
-            for file in current_files.iter() {
-                if file.name.to_lowercase().contains(&name) {
-                    idx.lock().unwrap().push(i);
-                }
-                i += 1;
-            }
-        });
-        self.need_to_jump = true;
-    }
-
-    pub fn prev_candidate(&mut self) -> AppResult<()> {
-        self.move_candidate(false)?;
-
-        Ok(())
-    }
-
-    pub fn next_candidate(&mut self) -> AppResult<()> {
-        self.move_candidate(true)?;
-
-        Ok(())
-    }
-
-    /// Move current cursor to next/previous searched file name.
-    /// When NEXT is true, searching the next. Otherwise the previous.
-    fn move_candidate(&mut self,
-                      next: bool
-    ) -> AppResult<()>
-    {
-        use crate::key_event::move_cursor;
-
-        let candidates = Arc::clone(&self.searched_idx);
-        if candidates.lock().unwrap().is_empty() {
-            return Ok(())
-        }
-
-        let in_root = if let Block::Browser(true) = self.selected_block {
-            true
-        } else {
-            false
-        };
-
-        let current_idx = if in_root {
-            self.selected_item.parent.selected().unwrap()
-        } else {
-            self.selected_item.current.selected().unwrap()
-        };
-
-        let target = if next {
-            get_search_index(
-                candidates.lock().unwrap().iter(),
-                current_idx,
-                true
-            )
-        } else {
-            get_search_index(
-                candidates.lock().unwrap().iter().rev(),
-                current_idx,
-                false
-            )
-        };
-
-        if let Some(idx) = target {
-            move_cursor(self, Goto::Index(idx), in_root)?;
-        }
-
-        if self.need_to_jump {
-            self.need_to_jump = false;
-        }
-
-        Ok(())
-    }
-    
-    pub fn clean_search_idx(&mut self) {
-        self.searched_idx.lock().unwrap().clear();
-    }
-}
-
 // Other Action
 impl<'a> App<'a> {
     pub fn goto_dir<P: AsRef<Path>>(&mut self,
@@ -879,37 +783,6 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
         ),
         Err(_) => panic!("Cannot get a file with error!")
     }
-}
-
-#[inline]
-fn get_search_index<'a, T>(iter: T,
-                           current: usize,
-                           next: bool
-) -> Option<usize>
-where T: Iterator<Item = &'a usize>
-{
-    let mut get_current_idx = false;
-
-    for i in iter {
-        if get_current_idx {
-            return Some(*i)
-        }
-
-        if !next && *i < current {
-            return Some(*i)
-        }
-
-        if next && *i > current {
-            return Some(*i)
-        }
-
-        if *i == current {
-            get_current_idx = true;
-            continue;
-        }
-    }
-
-    None
 }
 
 /// Select item in parent/current/child file.

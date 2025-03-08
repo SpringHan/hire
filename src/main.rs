@@ -35,7 +35,8 @@ use key_event::{
 
 fn main() -> AppResult<()> {
     let mut app = App::default();
-    let recvs = app.init_image_picker();
+    let image_recvs = app.init_image_picker();
+    let search_recv = app.init_search_channel();
     app.init_all_files()?;
 
     // Init config information.
@@ -74,15 +75,17 @@ fn main() -> AppResult<()> {
             }
         }
 
-        if app.need_to_jump {
-            let result = app.next_candidate();
-            if let Err(err) = result {
+        // Search handler
+        if let Ok(idx_set) = search_recv.try_recv() {
+            app.file_searcher.update_idx(idx_set);
+
+            if let Err(err) = app.next_candidate() {
                 app.app_error.append_errors(err.iter());
             }
         }
 
         // Image perview handler
-        if let Some((ref prx, ref irx)) = recvs {
+        if let Some((ref prx, ref irx)) = image_recvs {
             if let Ok(data) = irx.try_recv() {
                 if let Some(image) = data {
                     match app.image_preview.make_protocol(image) {
