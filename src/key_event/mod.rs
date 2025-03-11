@@ -3,6 +3,7 @@
 mod tab;
 mod shell;
 mod switch;
+mod interaction;
 mod file_search;
 mod goto_operation;
 mod cursor_movement;
@@ -13,6 +14,7 @@ mod simple_operations;
 use std::io::Stderr;
 use std::ops::{SubAssign, AddAssign};
 
+use interaction::fzf_jump;
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::KeyCode;
@@ -125,6 +127,7 @@ pub fn handle_event(key: KeyCode,
                         app.path.to_owned()
                     )?,
                     't' => tab_operation(app)?,
+                    'f' => fzf_jump(app, terminal)?,
 
                     // Print current full path.
                     'r' => simple_operations::print_full_path(app),

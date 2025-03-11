@@ -154,7 +154,7 @@ impl<'a> App<'a> {
     ) -> AppResult<()> {
         if let Block::CommandLine(ref _command, _) = self.selected_block {
             if _command.starts_with("/") {
-                self.file_search(_command[1..].to_owned())?;
+                self.file_search(_command[1..].to_owned(), false)?;
                 return Ok(self.quit_command_mode())
             }
 

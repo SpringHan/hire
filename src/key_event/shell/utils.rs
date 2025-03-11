@@ -1,21 +1,23 @@
 // Shell Command.
 
 use std::io::stderr;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::io::{self, Stderr};
 use std::path::{Path, PathBuf};
 
-
-use ratatui::Terminal as RTerminal;
-use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, poll, Event, KeyEventKind};
-use ratatui::crossterm::{
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen,
-        enable_raw_mode, disable_raw_mode
-    },
-    cursor::{Show, Hide},
-    execute
+use anyhow::bail;
+use ratatui::{
+    Terminal as RTerminal,
+    backend::CrosstermBackend,
+    crossterm::{
+        execute,
+        cursor::{Show, Hide},
+        event::{self, poll, Event, KeyEventKind},
+        terminal::{
+            EnterAlternateScreen, LeaveAlternateScreen,
+            enable_raw_mode, disable_raw_mode
+        }
+    }
 };
 
 use crate::rt_error;
@@ -48,6 +50,13 @@ pub fn shell_process(app: &mut App,
         _shell.as_ref().to_owned()
     } else {
         std::env::var("SHELL")?
+    };
+
+    // For restore the original state
+    let current_file = if let Some(file) = app.get_file_saver() {
+        Some(file.name.to_owned())
+    } else {
+        None
     };
 
     let mut wait_for_press = false;
@@ -107,9 +116,41 @@ pub fn shell_process(app: &mut App,
 
     if refresh {
         app.goto_dir(app.current_path(), None)?;
+
+        if let Some(name) = current_file {
+            app.file_search(name, true)?;
+        }
     }
 
     Ok(())
+}
+
+/// Run `command` & get its output.
+pub fn fetch_output<P: AsRef<Path>>(
+    terminal: &mut Terminal,
+    current_path: P,
+    command: ShellCommand
+) -> anyhow::Result<String>
+{
+    if let ShellCommand::Command(_, mut args) = command {
+        let program = args.remove(0);
+        let mut _command = Command::new(program);
+        _command.current_dir(current_path).stdout(Stdio::piped());
+        _command.args(args);
+
+        disable_raw_mode()?;
+        execute!(stderr(), LeaveAlternateScreen, Show)?;
+
+        let output = _command.spawn()?.wait_with_output()?;
+
+        enable_raw_mode()?;
+        execute!(stderr(), EnterAlternateScreen, Hide)?;
+        terminal.clear()?;
+
+        return Ok(String::from_utf8(output.stdout)?)
+    }
+
+    bail!("Cannot get the program that needs a output")
 }
 
 pub fn open_file_in_shell<P>(app: &mut App,
@@ -124,9 +165,12 @@ where P: AsRef<Path>
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or_default();
 
+    let mut refresh = false;
     let shell_command = match file_type {
         "jpg" | "jpge" | "png" => String::from("feh"),
         _ => {
+            refresh = true;
+
             if let ConfigValue::String(
                 ref _str
             ) = Config::get_value(&app.config, "file_read_program") {
@@ -144,7 +188,7 @@ where P: AsRef<Path>
             None,
             vec![shell_command.as_ref(), file_path.to_str().unwrap()]
         ),
-        false
+        refresh
     )?;
 
     Ok(())

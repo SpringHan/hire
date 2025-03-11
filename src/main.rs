@@ -107,6 +107,7 @@ fn main() -> AppResult<()> {
     
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
+
     Ok(())
 }
 
