@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use toml_edit::Item;
 use anyhow::{bail, Result};
 
+use crate::option_get;
+
 pub type AppConfig<'a> = Vec<Config<'a>>;
 
 #[derive(Clone)]
@@ -25,7 +27,9 @@ impl<'a> Config<'a> {
     fn default_value(prop: &str) -> ConfigValue {
         match prop {
             "gui_commands" => ConfigValue::Vec(Vec::new()),
-            "default_shell" => ConfigValue::String(Cow::Owned(String::from("bash"))),
+            "default_shell" => ConfigValue::String(Cow::Borrowed("bash")),
+            "file_read_program" => ConfigValue::String(Cow::Borrowed("vim")),
+            "file_operation_editor" => ConfigValue::String(Cow::Borrowed("vim")),
             _ => panic!("Unknow error occurred at default_value fn in types.rs.")
         }
     }
@@ -53,16 +57,8 @@ impl<'a> Config<'a> {
         let err_msg = format!("The type of config property {} is error", self.name);
 
         match self.name.as_str() {
-            "default_shell" => {
-                let _value = value.as_str();
-                if _value.is_none() {
-                    bail!("{err_msg}")
-                }
-
-                self.value = ConfigValue::String(Cow::Owned(
-                    _value.unwrap().to_owned()
-                ));
-            },
+            "default_shell" | "file_read_program" | "file_operation_editor" =>
+                self.value = Self::get_str(value, err_msg)?,
 
             "gui_commands" => {
                 let _value = value.as_array();
@@ -89,5 +85,11 @@ impl<'a> Config<'a> {
         }
 
         Ok(())
+    }
+
+    fn get_str(value: &Item, err_msg: String) -> Result<ConfigValue<'a>> {
+        let _str = option_get!(value.as_str(), err_msg);
+
+        Ok(ConfigValue::String(Cow::Owned(_str.to_owned())))
     }
 }

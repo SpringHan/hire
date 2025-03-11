@@ -67,7 +67,10 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 }
 
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
-    let configs = ["default_shell", "gui_commands"];
+    let configs = [
+        "default_shell", "gui_commands",
+        "file_read_program", "file_operation_editor"
+    ];
     let mut errors = AppError::new();
 
     let document: DocumentMut = get_document(path)?;

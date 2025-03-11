@@ -125,8 +125,16 @@ where P: AsRef<Path>
         .unwrap_or_default();
 
     let shell_command = match file_type {
-        "jpg" | "jpge" | "png" => "feh",
-        _ => "tetor"
+        "jpg" | "jpge" | "png" => String::from("feh"),
+        _ => {
+            if let ConfigValue::String(
+                ref _str
+            ) = Config::get_value(&app.config, "file_read_program") {
+                _str.as_ref().to_owned()
+            } else {
+                panic!("Unknown error occurred at open_file_in_shell fn in utils.rs!")
+            }
+        }
     };
 
     shell_process(
@@ -134,7 +142,7 @@ where P: AsRef<Path>
         terminal,
         ShellCommand::Command(
             None,
-            vec![shell_command, file_path.to_str().unwrap()]
+            vec![shell_command.as_ref(), file_path.to_str().unwrap()]
         ),
         false
     )?;
