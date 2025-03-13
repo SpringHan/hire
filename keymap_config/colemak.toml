@@ -1,0 +1,21 @@
+keymap = [
+    # Item Move
+    { key = "n", run = "move left" },
+    { key = "i", run = "move right" },
+    { key = "u", run = "move up" },
+    { key = "e", run = "move down" },
+
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+    { key = "<+++>", run = "<+++>" },
+]

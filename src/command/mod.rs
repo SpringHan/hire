@@ -1,7 +1,8 @@
 // Command
 
 mod cmds;
+mod types;
 mod cmd_utils;
 
 pub use cmds::*;
-pub use cmd_utils::ScrollDirection;
+pub use types::AppCommand;

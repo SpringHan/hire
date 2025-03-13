@@ -6,12 +6,12 @@ use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 
 use super::Goto;
-use crate::{app::{self, App}, error::AppResult};
+use crate::{app::{self, App}, error::AppResult, utils::Direction};
 
 type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
 
 pub fn directory_movement(
-    direction: char,
+    direction: Direction,
     app: &mut App,
     terminal: &mut Terminal,
     in_root: bool
@@ -19,7 +19,7 @@ pub fn directory_movement(
 {
     // TODO: Separate the core code of n & i from directory_movement.
     match direction {
-        'n' => {
+        Direction::Left => {
             if in_root {
                 return Ok(())
             }
@@ -51,7 +51,7 @@ pub fn directory_movement(
                 app.clean_search_idx();
             }
         },
-        'i' => {
+        Direction::Right => {
             let mut current_empty = false;
 
             if in_root {
@@ -112,14 +112,12 @@ pub fn directory_movement(
             app.refresh_select_item();
             app.clean_search_idx();
         },
-        'u' => {
+        Direction::Up => {
             move_cursor(app, Goto::Up, in_root)?;
         },
-        'e' => {
+        Direction::Down => {
             move_cursor(app, Goto::Down, in_root)?;
         },
-
-        _ => panic!("Unknown error!")
     }
 
     Ok(())
@@ -181,6 +179,26 @@ pub fn move_cursor(
         app.init_child_files()?;
         app.refresh_select_item();
     }
+
+    Ok(())
+}
+
+pub fn temp_movement(
+    direction: char,
+    app: &mut App,
+    terminal: &mut Terminal,
+    in_root: bool
+) -> AppResult<()>
+{
+    let direction = match direction {
+        'n' => Direction::Left,
+        'i' => Direction::Right,
+        'u' => Direction::Up,
+        'e' => Direction::Down,
+        _ => panic!("...")
+    };
+
+    directory_movement(direction, app, terminal, in_root)?;
 
     Ok(())
 }

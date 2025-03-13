@@ -7,19 +7,11 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 use crate::{
     app::{Block, CursorPos, FileOperation, OptionFor},
     error::{AppResult, ErrorType},
+    utils::Direction,
     key_event::Goto,
     rt_error,
     App
 };
-
-// TODO: Remove this macro
-#[allow(unused)]
-pub enum ScrollDirection {
-    Left,
-    Right,
-    Up,
-    Down
-}
 
 impl<'a> App<'a> {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
@@ -266,21 +258,21 @@ impl<'a> App<'a> {
         self.command_scroll = None;
     }
 
-    pub fn expand_scroll(&mut self, direct: ScrollDirection) {
+    pub fn expand_scroll(&mut self, direct: Direction) {
         if let Some(ref mut scroll) = self.command_scroll {
             match direct {
-                ScrollDirection::Left => {
+                Direction::Left => {
                     if scroll.1 > 0 {
                         scroll.1 -= 1;
                     }
                 },
-                ScrollDirection::Right => scroll.1 += 1,
-                ScrollDirection::Up => {
+                Direction::Right => scroll.1 += 1,
+                Direction::Up => {
                     if scroll.0 > 0 {
                         scroll.0 -= 1;
                     }
                 },
-                ScrollDirection::Down => scroll.0 += 1,
+                Direction::Down => scroll.0 += 1,
             }
         }
     }
