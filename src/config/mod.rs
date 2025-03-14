@@ -14,6 +14,7 @@ use toml_edit::DocumentMut;
 use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
+pub use keymap::Keymap;
 
 /// Get T from Option<T>.
 /// When it succeeded, return the value, otherwise throw anyhow error.

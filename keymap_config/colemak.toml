@@ -1,21 +1,46 @@
 keymap = [
-    # Item Move
-    { key = "n", run = "move left" },
-    { key = "i", run = "move right" },
-    { key = "u", run = "move up" },
-    { key = "e", run = "move down" },
+    # Motion
+    { key = "u", run = "move up"     },
+    { key = "e", run = "move down"   },
+    { key = "n", run = "move left"   },
+    { key = "i", run = "move right"  },
+    { key = "G", run = "goto_bottom" },
 
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
-    { key = "<+++>", run = "<+++>" },
+    # Operations with menu
+    { key = "t", run = "tab_operation"    },
+    { key = "g", run = "goto_operation"   },
+    { key = "p", run = "paste_operation"  },
+    { key = "d", run = "delete_operation" },
+
+    # Search
+    { key = "/", run = "search"              },
+    { key = "k", run = "move_candidate next" },
+    { key = "K", run = "move_candidate prev" },
+
+    # Mark
+    { key = "m", run = "mark all"    },
+    { key = " ", run = "mark single" },
+
+    # File Create
+    { key = "+", run = "create_dir"  },
+    { key = "=", run = "create_file" },
+
+    # Shell
+    { key = "S", run = "spawn_shell"                },
+    { key = "!", run = "cmdline_shell"              },
+    { key = "l", run = "shell_command true lazygit" },
+
+    # File name modify
+    { key = "a", run = "append_filename name"      },
+    { key = "A", run = "append_filename extension" },
+
+    # Working directory
+    { key = "W", run = "work_directory set"  },
+    { key = "w", run = "work_directory goto" },
+
+    # Others
+    { key = "P", run = "full_path"      },
+    { key = "f", run = "fzf_jump"       },
+    { key = "-", run = "hide_or_show"   },
+    { key = "s", run = "single_symlink" },
 ]
