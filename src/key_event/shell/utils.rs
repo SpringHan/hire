@@ -112,7 +112,7 @@ pub fn shell_process(app: &mut App,
     terminal.clear()?;
 
     if refresh {
-        app.goto_dir(app.current_path(), None)?;
+        app.goto_dir(app.current_path(), Some(app.hide_files))?;
 
         if let Some(name) = current_file {
             app.file_search(name, true)?;
