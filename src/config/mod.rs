@@ -11,6 +11,8 @@ use std::{
 use anyhow::Result;
 use toml_edit::DocumentMut;
 
+use keymap::init_keymap;
+
 use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
@@ -23,7 +25,7 @@ macro_rules! option_get {
     ($e: expr, $msg: expr) => {
         match $e {
             Some(value) => value,
-            None => bail!("{}", $msg),
+            None => anyhow::bail!("{}", $msg),
         }
     };
 }
@@ -39,6 +41,10 @@ pub fn init_config(app: &mut App) -> AppResult<()> {
     }
 
     if let Err(err) = init_user_config(app, user_path) {
+        errors.append_errors(err.iter());
+    }
+
+    if let Err(err) = init_keymap(app, keymap_path) {
         errors.append_errors(err.iter());
     }
 

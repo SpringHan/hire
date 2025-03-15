@@ -1,18 +1,18 @@
 // Command type.
 
-use std::borrow::Cow;
-
 use anyhow::bail;
 
 use crate::{option_get, utils::Direction};
 
-pub enum AppCommand<'a> {
+#[derive(Clone)]
+pub enum AppCommand {
     Tab,
     Goto,
     Shell,
     Paste,
     Delete,
     Search,
+    Refresh,
     FzfJump,
     CmdShell,
     CreateDir,
@@ -41,10 +41,10 @@ pub enum AppCommand<'a> {
 
     /// The first element is the shell command with its arguments,
     /// the second element refers to whether refreshing showing file items.
-    ShellCommand(Vec<Cow<'a, str>>, bool),
+    ShellCommand(Vec<String>, bool),
 }
 
-impl<'a> AppCommand<'a> {
+impl AppCommand {
     pub fn from_str(value: &str) -> anyhow::Result<Self> {
         let command_err = "Unknow command for binding";
         let command_slice = value.split(" ")
@@ -59,6 +59,7 @@ impl<'a> AppCommand<'a> {
             "delete_operation" => Self::Delete,
             "search"           => Self::Search,
             "fzf_jump"         => Self::FzfJump,
+            "refresh"          => Self::Refresh,
             "cmdline_shell"    => Self::CmdShell,
             "create_dir"       => Self::CreateDir,
             "create_file"      => Self::CreateFile,
@@ -90,7 +91,7 @@ impl<'a> AppCommand<'a> {
             "shell_command" => {
                 let refresh = *option_get!(cmd_arg, command_err) == "true";
                 let command_vec = command_slice[2..].into_iter()
-                    .map(|_str| Cow::Owned((*_str).to_owned()))
+                    .map(|_str| (*_str).to_owned())
                     .collect::<Vec<_>>();
 
                 Self::ShellCommand(command_vec, refresh)

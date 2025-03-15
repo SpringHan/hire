@@ -5,7 +5,6 @@ use std::process::{Command, Stdio};
 use std::io::{self, Stderr};
 use std::path::{Path, PathBuf};
 
-use anyhow::bail;
 use ratatui::{
     Terminal as RTerminal,
     backend::CrosstermBackend,
@@ -24,17 +23,10 @@ use crate::rt_error;
 use crate::{app::App, error::AppResult};
 use crate::config::{Config, ConfigValue};
 
+use super::{CommandStr, ShellCommand};
+
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
-pub enum ShellCommand<'a> {
-    Shell,
-    /// The first element is the shell that command runs on;
-    /// The second one is the program & its arguments.
-    Command(
-        Option<&'a str>,
-        Vec<&'a str>
-    )
-}
 
 /// Start a shell process.
 pub fn shell_process(app: &mut App,
@@ -62,8 +54,8 @@ pub fn shell_process(app: &mut App,
     let mut wait_for_press = false;
     let mut process = Command::new(&shell_program);
 
-    if let ShellCommand::Command(shell_type, ref args) = command {
-        let program = args[0];
+    if let ShellCommand::Command(shell_type, args) = command {
+        let program: &str = args[0].into();
 
         if let Some(_type) = shell_type {
             // Change shell program
@@ -73,12 +65,17 @@ pub fn shell_process(app: &mut App,
         }
 
         // Add process arguments
-        process.arg("-c").arg(args.join(" "));
+        process.arg("-c").arg(
+            CommandStr::join_from_keymap(args, app)?
+        );
 
         // Check whether current command needs to wait for user's key press
         wait_for_press = true;
 
-        if let ConfigValue::Vec(cmds) = Config::get_value(&app.config, "gui_commands") {
+        if let ConfigValue::Vec(
+            cmds
+        ) = Config::get_value(&app.config, "gui_commands")
+        {
             for cmd in cmds.iter() {
                 if *cmd == program {
                     wait_for_press = false;
@@ -133,10 +130,12 @@ pub fn fetch_output<P: AsRef<Path>>(
 ) -> anyhow::Result<String>
 {
     if let ShellCommand::Command(_, mut args) = command {
-        let program = args.remove(0);
+        let program: &str = args.remove(0).into();
         let mut _command = Command::new(program);
+
         _command.current_dir(current_path).stdout(Stdio::piped());
-        _command.args(args);
+        _command.args(CommandStr::str_vec(args));
+
 
         disable_raw_mode()?;
         execute!(stderr(), LeaveAlternateScreen, Show)?;
@@ -150,7 +149,7 @@ pub fn fetch_output<P: AsRef<Path>>(
         return Ok(String::from_utf8(output.stdout)?)
     }
 
-    bail!("Cannot get the program that needs a output")
+    rt_error!("Cannot get the program that needs a output")
 }
 
 pub fn open_file_in_shell<P>(app: &mut App,
@@ -186,7 +185,10 @@ where P: AsRef<Path>
         terminal,
         ShellCommand::Command(
             None,
-            vec![shell_command.as_ref(), file_path.to_str().unwrap()]
+            vec![
+                CommandStr::Str(&shell_command),
+                CommandStr::Str(file_path.to_str().unwrap())
+            ]
         ),
         refresh
     )?;

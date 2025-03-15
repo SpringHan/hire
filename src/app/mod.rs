@@ -65,7 +65,7 @@ pub struct App<'a> {
     pub image_preview: ImagePreview,
 
     // App Config
-    pub keymap: Keymap<'a>,
+    pub keymap: Keymap,
     pub config_path: String,
     pub config: AppConfig<'a>,
 

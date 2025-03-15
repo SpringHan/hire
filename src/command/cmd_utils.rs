@@ -6,9 +6,9 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     app::{Block, CursorPos, FileOperation, OptionFor},
+    key_event::{CommandStr, Goto, ShellCommand},
     error::{AppResult, ErrorType},
     utils::Direction,
-    key_event::Goto,
     rt_error,
     App
 };
@@ -232,9 +232,9 @@ impl<'a> App<'a> {
                     crate::key_event::shell_process(
                         self,
                         terminal,
-                        crate::key_event::ShellCommand::Command(
+                        ShellCommand::Command(
                             Some(shell_program),
-                            command_slices
+                            CommandStr::from_strs(command_slices)
                         ),
                         true
                     )?;

@@ -5,7 +5,6 @@ mod utils;
 
 use std::borrow::Cow;
 
-use anyhow::bail;
 use toml_edit::DocumentMut;
 
 use crate::{app::App, option_get};

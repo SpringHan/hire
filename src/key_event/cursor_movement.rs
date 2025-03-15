@@ -182,23 +182,3 @@ pub fn move_cursor(
 
     Ok(())
 }
-
-pub fn temp_movement(
-    direction: char,
-    app: &mut App,
-    terminal: &mut Terminal,
-    in_root: bool
-) -> AppResult<()>
-{
-    let direction = match direction {
-        'n' => Direction::Left,
-        'i' => Direction::Right,
-        'u' => Direction::Up,
-        'e' => Direction::Down,
-        _ => panic!("...")
-    };
-
-    directory_movement(direction, app, terminal, in_root)?;
-
-    Ok(())
-}

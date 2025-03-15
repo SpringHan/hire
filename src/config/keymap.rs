@@ -2,17 +2,27 @@
 
 use std::collections::HashMap;
 
-use crate::{app::App, command::AppCommand};
+use crate::{app::App, command::AppCommand, error::{AppError, AppResult}, option_get};
 
 use super::get_document;
 
 #[derive(Default)]
-pub struct Keymap<'a> {
-    maps: HashMap<char, AppCommand<'a>>
+pub struct Keymap {
+    maps: HashMap<char, AppCommand>
 }
 
-pub fn init_keymap(app: &mut App, path: String) -> anyhow::Result<()> {
+impl Keymap {
+    pub fn get(&self, key: char) -> anyhow::Result<AppCommand> {
+        Ok(
+            option_get!(self.maps.get(&key), "Invalid keybinding")
+                .to_owned()
+        )
+    }
+}
+
+pub fn init_keymap(app: &mut App, path: String) -> AppResult<()> {
     let err_msg = "The format of content in keymap.toml is error";
+    let mut errors = AppError::new();
 
     let document = get_document(path)?;
     let keymap = document.get("keymap")
@@ -31,10 +41,19 @@ pub fn init_keymap(app: &mut App, path: String) -> anyhow::Result<()> {
             .as_str()
             .expect(err_msg);
 
-        app.keymap.maps.insert(
-            key.chars().next().expect(err_msg),
-            AppCommand::from_str(bind)?
-        );
+        match AppCommand::from_str(bind) {
+            Ok(command) => {
+                app.keymap.maps.insert(
+                    key.chars().next().expect(err_msg),
+                    command
+                );
+            },
+            Err(err) => errors.add_error(err),
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors)
     }
 
     Ok(())
