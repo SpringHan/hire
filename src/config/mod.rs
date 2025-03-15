@@ -164,11 +164,11 @@ pub fn get_conf_file() -> io::Result<(String, String, String)> {
     }
 
     Ok((
-        // format!("{}auto_config.toml", config_dir),
-        // format!("{}user_config.toml", config_dir),
+        format!("{}auto_config.toml", config_dir),
+        format!("{}user_config.toml", config_dir),
         // Dev
-        format!("{}auto_config_dev.toml", config_dir),
-        format!("{}user_config_dev.toml", config_dir),
+        // format!("{}auto_config_dev.toml", config_dir),
+        // format!("{}user_config_dev.toml", config_dir),
         format!("{}keymap.toml", config_dir)
     ))
 }
