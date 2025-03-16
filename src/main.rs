@@ -6,9 +6,10 @@ mod config;
 mod command;
 mod key_event;
 
-use std::io::{stderr, Stderr};
 use std::time::Duration;
+use std::io::{stderr, Stderr};
 
+use clap::Parser;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -28,13 +29,15 @@ use ratatui::crossterm::{
 use error::AppResult;
 use app::{App, FileContent};
 use key_event::{
+    ShellCommand,
     handle_event,
     shell_process,
     fetch_working_directory,
-    ShellCommand,
 };
 
 fn main() -> AppResult<()> {
+    let args = utils::Args::parse();
+    
     let mut app = App::default();
     let image_recvs = app.init_image_picker();
     let search_recv = app.init_search_channel();
@@ -47,12 +50,17 @@ fn main() -> AppResult<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Check, whether to enable working directory mode.
-    shell_in_workdir(&mut app, &mut terminal)?;
+    check_passive_mode(&args, &mut app);
+    shell_in_workdir(&args, &mut app, &mut terminal)?;
 
     enable_raw_mode()?;
     execute!(stderr(), EnterAlternateScreen)?;
 
     loop {
+        if app.quit_now {
+            break;
+        }
+
         terminal.draw(|frame| {
             if let Err(err) = ui::ui(frame, &mut app) {
                 app.app_error.add_error(err);
@@ -114,28 +122,32 @@ fn main() -> AppResult<()> {
 
 /// Check whether to enter shell directly.
 fn shell_in_workdir(
+    args: &utils::Args,
     app: &mut App,
     terminal: &mut Terminal<CrosstermBackend<Stderr>>
 ) -> AppResult<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() == 2 {
-        match args[1].as_ref() {
-            "--working-directory" => {
-                app.goto_dir(
-                    fetch_working_directory().expect("Cannot fetch working directory!"),
-                    None
-                )?;
+    if args.working_directory {
+        app.goto_dir(
+            fetch_working_directory().expect("Cannot fetch working directory!"),
+            None
+        )?;
 
-                shell_process(
-                    app,
-                    terminal,
-                    ShellCommand::Shell,
-                    true
-                )?;
-            },
-            _ => ()
-        }
+        shell_process(
+            app,
+            terminal,
+            ShellCommand::Shell,
+            true
+        )?;
     }
 
     Ok(())
+}
+
+/// Check whether to enter passive output mode.
+fn check_passive_mode(args: &utils::Args, app: &mut App) {
+    if &args.output_file != "NULL" {
+        app.output_file = Some(std::path::PathBuf::from(
+            &args.output_file
+        ));
+    }
 }
