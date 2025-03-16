@@ -13,7 +13,7 @@ use std::path::{PathBuf, Path};
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::FileSearcher;
 
@@ -58,9 +58,6 @@ pub struct App<'a> {
     // Target directories
     pub target_dir: HashMap<char, String>,
 
-    // Auto config path
-    pub config_path: String,
-
     // Tab
     pub tab_list: crate::key_event::TabList<'a>,
 
@@ -68,6 +65,8 @@ pub struct App<'a> {
     pub image_preview: ImagePreview,
 
     // App Config
+    pub keymap: Keymap,
+    pub config_path: String,
     pub config: AppConfig<'a>,
 
     // AppErrors
@@ -129,6 +128,7 @@ impl<'a> Default for App<'a> {
 
             // Config & others
             config: Vec::new(),
+            keymap: Keymap::default(),
             config_path: String::new(),
             user_name: Cow::from(host_info.1),
             computer_name: Cow::from(host_info.0),

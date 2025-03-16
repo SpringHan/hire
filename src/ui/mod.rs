@@ -8,11 +8,11 @@ use std::collections::HashMap;
 
 use child_block::render_file;
 use ratatui::{
-    Frame,
+    widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
+    layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
-    style::{Color, Style, Modifier, Stylize},
-    layout::{Constraint, Direction, Layout, Alignment},
-    widgets::{Block, List, ListItem, Borders, Paragraph},
+    Frame
 };
 
 use crate::App;
@@ -143,7 +143,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
     // Parent Block
     let parent_block = Block::default()
-        .borders(Borders::ALL);
+        .borders(Borders::NONE)
+        .padding(Padding::left(1));
     let parent_items = render_list(
         app.parent_files.iter(),
         app.selected_item.parent_selected(),
@@ -175,7 +176,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
                 render_file(frame, app, browser_layout[2])?;
             } else {
                 let child_block = Block::default()
-                    .borders(Borders::ALL);
+                    .borders(Borders::NONE)
+                    .padding(Padding::right(1));
                 let child_items = render_list(
                     app.child_files.iter(),
                     app.selected_item.child_selected(),
@@ -197,7 +199,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     // Current Block
     // Move current block to here to make preparation for file content of parent file.
     let current_block = Block::default()
-        .borders(Borders::ALL);
+        .borders(Borders::NONE)
+        .padding(Padding::horizontal(1));
     let marked_items = if app.path.to_string_lossy() == "/" {
         let path = app.path
             .join(&app.get_file_saver().unwrap().name);
@@ -261,6 +264,8 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
 {
     let mut temp_items: Vec<ListItem> = Vec::new();
     if files.len() == 0 {
+        temp_items.push(ListItem::new("Empty").fg(Color::Red));
+
         return temp_items
     }
 

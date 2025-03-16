@@ -3,6 +3,7 @@
 mod tab;
 mod shell;
 mod switch;
+mod interaction;
 mod file_search;
 mod goto_operation;
 mod cursor_movement;
@@ -18,9 +19,15 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::KeyCode;
 
 use tab::tab_operation;
+use interaction::fzf_jump;
+use goto_operation::goto_operation;
+use paste_operation::paste_operation;
+use cursor_movement::directory_movement;
+use file_operations::{append_file_name, delete_operation, mark_operation};
 
-use crate::command;
+use crate::utils::Direction;
 use crate::error::AppResult;
+use crate::command::AppCommand;
 use crate::app::{self, App, CursorPos, OptionFor, FileOperation};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
@@ -30,7 +37,7 @@ pub use tab::TabList;
 pub use file_search::FileSearcher;
 pub use cursor_movement::move_cursor;
 pub use switch::{SwitchCase, SwitchCaseData};
-pub use shell::{ShellCommand, shell_process, fetch_working_directory};
+pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
 
 // Export for auto config
 pub use tab::read_config as tab_read_config;
@@ -53,10 +60,6 @@ pub fn handle_event(key: KeyCode,
                     terminal: &mut Terminal
 ) -> AppResult<()>
 {
-    use cursor_movement::*;
-    use file_operations::*;
-    use goto_operation::*;
-
     match key {
         KeyCode::Char(c) => {
             if app.command_error {
@@ -74,76 +77,11 @@ pub fn handle_event(key: KeyCode,
                 },
                 OptionFor::None => ()
             }
+
+            // Execute keybinding or insert character.
             if let app::Block::Browser(in_root) = app.selected_block {
-                match c {
-                    'n' | 'i' | 'u' | 'e' => directory_movement(
-                        c, app, terminal, in_root
-                    )?,
-                    'g' => goto_operation(app),
-                    'G' => {
-                        let last_idx = if in_root {
-                            app.parent_files.len() - 1
-                        } else {
-                            app.current_files.len() - 1
-                        };
-                        move_cursor(app, Goto::Index(last_idx), in_root)?;
-                    },
-                    'd' => delete_operation(app),
-                    '/' => app.set_command_line("/", CursorPos::End),
-                    '!' => shell::cmdline_shell(app)?,
-                    'k' => app.next_candidate()?,
-                    'K' => app.prev_candidate()?,
-                    'a' => append_file_name(app, false)?,
-                    'A' => append_file_name(app, true)?,
-                    ' ' => mark_operation(app, true, in_root)?,
-                    'm' => mark_operation(app, false, in_root)?,
-                    '+' => app.set_command_line(
-                        ":create_dir ",
-                        CursorPos::End
-                    ),
-                    '=' => app.set_command_line(
-                        ":create_file ",
-                        CursorPos::End
-                    ),
-                    '-' => app.hide_or_show(None)?,
-                    'p' => paste_operation::paste_operation(app)?,
-                    's' => paste_operation::make_single_symlink(app)?,
-                    'S' => shell_process(
-                        app,
-                        terminal,
-                        ShellCommand::Shell,
-                        true
-                    )?,
-                    'l' => shell_process(
-                        app,
-                        terminal,
-                        ShellCommand::Command(None, vec!["lazygit"]),
-                        true
-                    )?,
-                    'w' => app.goto_dir(fetch_working_directory()?, None)?,
-                    'W' => shell::set_working_directory(
-                        app.path.to_owned()
-                    )?,
-                    't' => tab_operation(app)?,
-
-                    // Print current full path.
-                    'r' => simple_operations::print_full_path(app),
-
-                    'R' => app.goto_dir(app.path.to_owned(), None)?,
-
-                    'P' => {
-                        if let Some(path) = app.path.to_str() {
-                            SwitchCase::new(
-                                app,
-                                |_, _, _| Ok(true),
-                                true,
-                                path.to_owned(),
-                                SwitchCaseData::None
-                            );
-                        }
-                    },
-                    _ => ()
-                }
+                let command = app.keymap.get(c)?;
+                command.execute(app, terminal, in_root)?;
             } else {
                 app.command_line_append(c);
             }
@@ -203,7 +141,7 @@ pub fn handle_event(key: KeyCode,
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
-                    app.expand_scroll(command::ScrollDirection::Up);
+                    app.expand_scroll(Direction::Up);
                 } else {
                     app.command_select(Goto::Up);
                 }
@@ -213,7 +151,7 @@ pub fn handle_event(key: KeyCode,
         KeyCode::Down => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
-                    app.expand_scroll(command::ScrollDirection::Down);
+                    app.expand_scroll(Direction::Down);
                 } else {
                     app.command_select(Goto::Down);
                 }
@@ -276,4 +214,103 @@ pub fn handle_event(key: KeyCode,
     }
 
     Ok(())
+}
+
+impl AppCommand {
+    pub fn execute(
+        self,
+        app: &mut App,
+        terminal: &mut Terminal,
+        in_root: bool
+    ) -> AppResult<()>
+    {
+        match self {
+            AppCommand::Tab           => tab_operation(app)?,
+            AppCommand::Goto          => goto_operation(app),
+            AppCommand::Paste         => paste_operation(app)?,
+            AppCommand::Delete        => delete_operation(app),
+            AppCommand::HideOrShow    => app.hide_or_show(None)?,
+            AppCommand::FzfJump       => fzf_jump(app, terminal)?,
+            AppCommand::CmdShell      => shell::cmdline_shell(app)?,
+            AppCommand::PrintFullPath => simple_operations::print_full_path(app),
+            AppCommand::Search        => app.set_command_line("/", CursorPos::End),
+            AppCommand::SingleSymlink => paste_operation::make_single_symlink(app)?,
+
+            AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
+            AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
+
+            AppCommand::CreateDir => app.set_command_line(
+                ":create_dir ",
+                CursorPos::End
+            ),
+
+            AppCommand::CreateFile => app.set_command_line(
+                ":create_file ",
+                CursorPos::End
+            ),
+
+            AppCommand::Refresh => app.goto_dir(
+                app.current_path(),
+                Some(app.hide_files)
+            )?,
+
+            AppCommand::Shell => shell_process(
+                app,
+                terminal,
+                ShellCommand::Shell,
+                true
+            )?,
+
+            AppCommand::ItemMove(direction) => directory_movement(
+                direction,
+                app,
+                terminal,
+                in_root
+            )?,
+
+            AppCommand::MoveCandidate(next) => if next {
+                app.next_candidate()?
+            } else {
+                app.prev_candidate()?
+            },
+
+            AppCommand::WorkDirectory(set) => if set {
+                shell::set_working_directory(
+                    app.path.to_owned()
+                )?
+            } else {
+                app.goto_dir(fetch_working_directory()?, None)?
+            },
+
+            AppCommand::GotoBottom => {
+                let last_idx = if in_root {
+                    app.parent_files.len() - 1
+                } else {
+                    app.current_files.len() - 1
+                };
+                move_cursor(app, Goto::Index(last_idx), in_root)?;
+            },
+
+            AppCommand::ShellCommand(cmd_vec, refresh) => {
+                let cmd = cmd_vec.iter()
+                    .map(|_line| {
+                        if _line == "$." {
+                            CommandStr::SelectedItem
+                        } else {
+                            CommandStr::Str(_line)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                shell_process(
+                    app,
+                    terminal,
+                    ShellCommand::Command(None, cmd),
+                    refresh
+                )?
+            },
+        }
+
+        Ok(())
+    }
 }

@@ -1,6 +1,7 @@
 // Config
 
 mod types;
+mod keymap;
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -10,9 +11,12 @@ use std::{
 use anyhow::Result;
 use toml_edit::DocumentMut;
 
+use keymap::init_keymap;
+
 use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
+pub use keymap::Keymap;
 
 /// Get T from Option<T>.
 /// When it succeeded, return the value, otherwise throw anyhow error.
@@ -21,7 +25,7 @@ macro_rules! option_get {
     ($e: expr, $msg: expr) => {
         match $e {
             Some(value) => value,
-            None => bail!("{}", $msg),
+            None => anyhow::bail!("{}", $msg),
         }
     };
 }
@@ -29,7 +33,7 @@ macro_rules! option_get {
 /// Pass the config file path & concrete config into App.
 pub fn init_config(app: &mut App) -> AppResult<()> {
     let mut errors = AppError::new();
-    let (auto_path, user_path) = get_conf_file()?;
+    let (auto_path, user_path, keymap_path) = get_conf_file()?;
     app.config_path = auto_path.to_owned();
 
     if let Err(err) = init_auto_config(app, auto_path) {
@@ -37,6 +41,10 @@ pub fn init_config(app: &mut App) -> AppResult<()> {
     }
 
     if let Err(err) = init_user_config(app, user_path) {
+        errors.append_errors(err.iter());
+    }
+
+    if let Err(err) = init_keymap(app, keymap_path) {
         errors.append_errors(err.iter());
     }
 
@@ -67,7 +75,10 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 }
 
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
-    let configs = ["default_shell", "gui_commands"];
+    let configs = [
+        "default_shell", "gui_commands",
+        "file_read_program", "file_operation_editor"
+    ];
     let mut errors = AppError::new();
 
     let document: DocumentMut = get_document(path)?;
@@ -100,7 +111,7 @@ fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
 
 /// Write modified document into auto_config file.
 pub fn write_document(document: DocumentMut) -> io::Result<()> {
-    let (path, _) = get_conf_file()?;
+    let (path, _, _) = get_conf_file()?;
 
     let mut file = OpenOptions::new()
         .write(true)
@@ -133,7 +144,7 @@ pub fn get_document(path: String) -> Result<DocumentMut> {
 
 /// Get the two config file and create them if they don't exist.
 /// Format: (auto_config_path, user_config_path)
-pub fn get_conf_file() -> io::Result<(String, String)> {
+pub fn get_conf_file() -> io::Result<(String, String, String)> {
     let user = std::env::var("USER").expect("Failed to get user name!");
     let config_dir = format!(
         "{}/.config/springhan/hire/",
@@ -153,10 +164,11 @@ pub fn get_conf_file() -> io::Result<(String, String)> {
     }
 
     Ok((
-        // format!("{}auto_config.toml", config_dir),
-        // format!("{}user_config.toml", config_dir)
+        format!("{}auto_config.toml", config_dir),
+        format!("{}user_config.toml", config_dir),
         // Dev
-        format!("{}auto_config_dev.toml", config_dir),
-        format!("{}user_config_dev.toml", config_dir)
+        // format!("{}auto_config_dev.toml", config_dir),
+        // format!("{}user_config_dev.toml", config_dir),
+        format!("{}keymap.toml", config_dir)
     ))
 }

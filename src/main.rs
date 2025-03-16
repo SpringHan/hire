@@ -1,5 +1,6 @@
 mod ui;
 mod app;
+mod utils;
 mod error;
 mod config;
 mod command;
@@ -107,6 +108,7 @@ fn main() -> AppResult<()> {
     
     execute!(stderr(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
+
     Ok(())
 }
 

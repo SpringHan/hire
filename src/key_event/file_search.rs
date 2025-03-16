@@ -11,7 +11,7 @@ use super::App;
 #[derive(Default)]
 pub struct FileSearcher {
     searched_idx: Vec<usize>,
-    calc_sender: Option<Sender<(String, Vec<FileSaver>)>>
+    calc_sender: Option<Sender<(String, bool, Vec<FileSaver>)>>
 }
 
 impl FileSearcher {
@@ -23,16 +23,29 @@ impl FileSearcher {
 impl<'a> App<'a> {
     pub fn init_search_channel(&mut self) -> Receiver<Vec<usize>> {
         let (update_tx, update_rx) = mpsc::channel::<Vec<usize>>();
-        let (calc_tx, calc_rx)     = mpsc::channel::<(String, Vec<FileSaver>)>();
+        let (calc_tx, calc_rx)     = mpsc::channel::<(String, bool, Vec<FileSaver>)>();
 
-        // let thread_update_tx = update_tx.to_owned();
         thread::spawn(move || loop {
-            if let Ok((name, files)) = calc_rx.recv() {
-                let name = name.to_lowercase();
+            if let Ok((name, exactly, files)) = calc_rx.recv() {
+                let name = if !exactly {
+                    name.to_lowercase()
+                } else {
+                    name
+                };
 
                 let mut i = 0;
                 let mut indexes: Vec<usize> = Vec::new();
                 for file in files.iter() {
+                    if exactly {
+                        if file.name == name {
+                            indexes.push(i);
+                            break;
+                        }
+
+                        i += 1;
+                        continue;
+                    }
+
                     if file.name.to_lowercase().contains(&name) {
                         indexes.push(i);
                     }
@@ -49,12 +62,15 @@ impl<'a> App<'a> {
         update_rx
     }
 
-    pub fn file_search(&mut self, name: String) -> anyhow::Result<()> {
-        self.command_history.push(format!("/{}", name.clone()));
+    pub fn file_search(&mut self, name: String, exactly: bool) -> anyhow::Result<()> {
+        // NOTE: The user cannot reach to `exactly` by inputing command.
+        if !exactly {
+            self.command_history.push(format!("/{}", name.clone()));
+        }
 
         let current_files = self.get_directory_mut().0.clone();
         if let Some(ref sender) = self.file_searcher.calc_sender {
-            if let Err(err) = sender.send((name, current_files)) {
+            if let Err(err) = sender.send((name, exactly, current_files)) {
                 return Err(err.into())
             }
 

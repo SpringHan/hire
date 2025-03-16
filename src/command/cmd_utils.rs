@@ -6,20 +6,12 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     app::{Block, CursorPos, FileOperation, OptionFor},
+    key_event::{CommandStr, Goto, ShellCommand},
     error::{AppResult, ErrorType},
-    key_event::Goto,
+    utils::Direction,
     rt_error,
     App
 };
-
-// TODO: Remove this macro
-#[allow(unused)]
-pub enum ScrollDirection {
-    Left,
-    Right,
-    Up,
-    Down
-}
 
 impl<'a> App<'a> {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
@@ -154,7 +146,7 @@ impl<'a> App<'a> {
     ) -> AppResult<()> {
         if let Block::CommandLine(ref _command, _) = self.selected_block {
             if _command.starts_with("/") {
-                self.file_search(_command[1..].to_owned())?;
+                self.file_search(_command[1..].to_owned(), false)?;
                 return Ok(self.quit_command_mode())
             }
 
@@ -240,9 +232,9 @@ impl<'a> App<'a> {
                     crate::key_event::shell_process(
                         self,
                         terminal,
-                        crate::key_event::ShellCommand::Command(
+                        ShellCommand::Command(
                             Some(shell_program),
-                            command_slices
+                            CommandStr::from_strs(command_slices)
                         ),
                         true
                     )?;
@@ -266,21 +258,21 @@ impl<'a> App<'a> {
         self.command_scroll = None;
     }
 
-    pub fn expand_scroll(&mut self, direct: ScrollDirection) {
+    pub fn expand_scroll(&mut self, direct: Direction) {
         if let Some(ref mut scroll) = self.command_scroll {
             match direct {
-                ScrollDirection::Left => {
+                Direction::Left => {
                     if scroll.1 > 0 {
                         scroll.1 -= 1;
                     }
                 },
-                ScrollDirection::Right => scroll.1 += 1,
-                ScrollDirection::Up => {
+                Direction::Right => scroll.1 += 1,
+                Direction::Up => {
                     if scroll.0 > 0 {
                         scroll.0 -= 1;
                     }
                 },
-                ScrollDirection::Down => scroll.0 += 1,
+                Direction::Down => scroll.0 += 1,
             }
         }
     }

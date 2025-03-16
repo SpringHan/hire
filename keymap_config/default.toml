@@ -1,0 +1,47 @@
+keymap = [
+    # Motion
+    { key = "k", run = "move up"     },
+    { key = "j", run = "move down"   },
+    { key = "h", run = "move left"   },
+    { key = "l", run = "move right"  },
+    { key = "G", run = "goto_bottom" },
+
+    # Operations with menu
+    { key = "t", run = "tab_operation"    },
+    { key = "g", run = "goto_operation"   },
+    { key = "p", run = "paste_operation"  },
+    { key = "d", run = "delete_operation" },
+
+    # Search
+    { key = "/", run = "search"              },
+    { key = "n", run = "move_candidate next" },
+    { key = "N", run = "move_candidate prev" },
+
+    # Mark
+    { key = "m", run = "mark all"    },
+    { key = " ", run = "mark single" },
+
+    # File Create
+    { key = "+", run = "create_dir"  },
+    { key = "=", run = "create_file" },
+
+    # Shell
+    { key = "S", run = "spawn_shell"                },
+    { key = "!", run = "cmdline_shell"              },
+    { key = "L", run = "shell_command true lazygit" },
+
+    # File name modify
+    { key = "a", run = "append_filename name"      },
+    { key = "A", run = "append_filename extension" },
+
+    # Working directory
+    { key = "w", run = "work_directory goto" },
+    { key = "W", run = "work_directory set"  },
+
+    # Others
+    { key = "R", run = "refresh"        },
+    { key = "f", run = "fzf_jump"       },
+    { key = "P", run = "full_path"      },
+    { key = "-", run = "hide_or_show"   },
+    { key = "s", run = "single_symlink" },
+]

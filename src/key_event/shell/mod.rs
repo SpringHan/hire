@@ -1,7 +1,9 @@
 // Shell operations
 
 mod utils;
+mod types;
 
+pub use types::*;
 pub use utils::*;
 
 use crate::{
