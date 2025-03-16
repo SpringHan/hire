@@ -22,7 +22,9 @@ pub use filesaver::{sort, FileSaver};
 pub use color::{TermColors, reverse_style};
 
 pub struct App<'a> {
+    // Core
     pub path: PathBuf,
+    pub quit_now: bool,
     pub hide_files: bool,
     pub selected_item: ItemIndex,
     pub child_files: Vec<FileSaver>,
@@ -71,6 +73,9 @@ pub struct App<'a> {
 
     // AppErrors
     pub app_error: AppError,
+
+    /// The file to store output of path from app.
+    pub output_file: Option<PathBuf>,
 
     // Computer & User name
     pub user_name: Cow<'static, str>,
@@ -126,7 +131,11 @@ impl<'a> Default for App<'a> {
             command_error: false,
             app_error: AppError::new(),
 
+            // Output
+            output_file: None,
+
             // Config & others
+            quit_now: false,
             config: Vec::new(),
             keymap: Keymap::default(),
             config_path: String::new(),

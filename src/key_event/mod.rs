@@ -18,6 +18,7 @@ use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::KeyCode;
 
+use simple_operations::output_path;
 use tab::tab_operation;
 use interaction::fzf_jump;
 use goto_operation::goto_operation;
@@ -132,8 +133,16 @@ pub fn handle_event(key: KeyCode,
         KeyCode::Enter => {
             if app.command_error {
                 app.quit_command_mode();
+                return Ok(())
             } else {
-                app.command_parse(terminal)?;
+                if let app::Block::CommandLine(_, _) = app.selected_block {
+                    app.command_parse(terminal)?;
+                    return Ok(())
+                }
+            }
+
+            if app.output_file.is_some() {
+                output_path(app, false)?;
             }
         },
 

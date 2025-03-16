@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 keymap="default.toml"
 target="./"
