@@ -51,6 +51,7 @@ fn main() -> AppResult<()> {
 
     // Check, whether to enable working directory mode.
     check_passive_mode(&args, &mut app);
+    check_start_path(&args, &mut app)?;
     shell_in_workdir(&args, &mut app, &mut terminal)?;
 
     enable_raw_mode()?;
@@ -150,4 +151,19 @@ fn check_passive_mode(args: &utils::Args, app: &mut App) {
             &args.output_file
         ));
     }
+}
+
+fn check_start_path(args: &utils::Args, app: &mut App) -> AppResult<()> {
+    if &args.start_from != "NULL" {
+        let mut _path = args.start_from.to_owned();
+        if _path.len() > 1 && _path.ends_with("/") {
+            _path.pop();
+        }
+
+        std::fs::File::open(&_path)?;
+
+        app.goto_dir(_path, None)?;
+    }
+
+    Ok(())
 }

@@ -6,8 +6,21 @@ use anyhow::bail;
 #[derive(Parser)]
 pub struct Args {
     /// Directly spawn a shell in the working directory
-    #[arg(short, long, default_value_t = false)]
+    #[arg(
+        short,
+        long,
+        default_value_t = false,
+        conflicts_with = "start_from"
+    )]
     pub working_directory: bool,
+
+    #[arg(
+        short,
+        long,
+        default_value_t = String::from("NULL"),
+        conflicts_with = "working_directory"
+    )]
+    pub start_from: String,
 
     /// The target file for output, require a absolute path
     #[arg(short, long, default_value_t = String::from("NULL"))]

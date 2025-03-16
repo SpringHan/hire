@@ -133,8 +133,12 @@ pub fn handle_event(key: KeyCode,
         KeyCode::Enter => {
             if app.command_error {
                 app.quit_command_mode();
+                return Ok(())
             } else {
-                app.command_parse(terminal)?;
+                if let app::Block::CommandLine(_, _) = app.selected_block {
+                    app.command_parse(terminal)?;
+                    return Ok(())
+                }
             }
 
             if app.output_file.is_some() {

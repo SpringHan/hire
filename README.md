@@ -1,4 +1,4 @@
-## Hire - ligHtweight fIle bRowsEr
+# Hire - ligHtweight fIle bRowsEr
 
 This is a repository which contains a terminal file browser written in Rust.
 
@@ -18,6 +18,14 @@ I made the project with the aim for practicing Rust and this tool was almost cre
 There're three config files for hire: `auto_config.toml`, `user_config.toml` and `keymap.toml`.
 
 Notice: The `auto_config.toml` is generated & edited by app.
+
+## Usage
+
+You can get usage by:
+
+```shell
+hire --help
+```
 
 ## TODO
 
