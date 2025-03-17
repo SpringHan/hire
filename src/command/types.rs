@@ -21,6 +21,7 @@ pub enum AppCommand {
     HideOrShow,
     SingleSymlink,
     PrintFullPath,
+    ChangeOutputStatus,
 
     /// When the boolean is true, only mark single file.
     Mark(bool),
@@ -52,21 +53,22 @@ impl AppCommand {
 
         let cmd_arg = command_slice.get(1);
         let command = match *option_get!(command_slice.get(0), command_err) {
-            "tab_operation"    => Self::Tab,
-            "goto_operation"   => Self::Goto,
-            "spawn_shell"      => Self::Shell,
-            "paste_operation"  => Self::Paste,
-            "delete_operation" => Self::Delete,
-            "search"           => Self::Search,
-            "fzf_jump"         => Self::FzfJump,
-            "refresh"          => Self::Refresh,
-            "cmdline_shell"    => Self::CmdShell,
-            "create_dir"       => Self::CreateDir,
-            "create_file"      => Self::CreateFile,
-            "goto_bottom"      => Self::GotoBottom,
-            "hide_or_show"     => Self::HideOrShow,
-            "full_path"        => Self::PrintFullPath,
-            "single_symlink"   => Self::SingleSymlink,
+            "tab_operation"        => Self::Tab,
+            "goto_operation"       => Self::Goto,
+            "spawn_shell"          => Self::Shell,
+            "paste_operation"      => Self::Paste,
+            "delete_operation"     => Self::Delete,
+            "search"               => Self::Search,
+            "fzf_jump"             => Self::FzfJump,
+            "refresh"              => Self::Refresh,
+            "cmdline_shell"        => Self::CmdShell,
+            "create_dir"           => Self::CreateDir,
+            "create_file"          => Self::CreateFile,
+            "goto_bottom"          => Self::GotoBottom,
+            "hide_or_show"         => Self::HideOrShow,
+            "full_path"            => Self::PrintFullPath,
+            "single_symlink"       => Self::SingleSymlink,
+            "change_output_status" => Self::ChangeOutputStatus,
 
             "move" => Self::ItemMove(Direction::from_str(
                 option_get!(cmd_arg, command_err)
@@ -96,6 +98,7 @@ impl AppCommand {
 
                 Self::ShellCommand(command_vec, refresh)
             },
+
             _ => bail!("Unknow command for keybinding")
         };
 

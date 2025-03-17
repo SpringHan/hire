@@ -141,7 +141,7 @@ pub fn handle_event(key: KeyCode,
                 }
             }
 
-            if app.output_file.is_some() {
+            if app.output_file.is_some() && app.confirm_output {
                 output_path(app, false)?;
             }
         },
@@ -234,16 +234,17 @@ impl AppCommand {
     ) -> AppResult<()>
     {
         match self {
-            AppCommand::Tab           => tab_operation(app)?,
-            AppCommand::Goto          => goto_operation(app),
-            AppCommand::Paste         => paste_operation(app)?,
-            AppCommand::Delete        => delete_operation(app),
-            AppCommand::HideOrShow    => app.hide_or_show(None)?,
-            AppCommand::FzfJump       => fzf_jump(app, terminal)?,
-            AppCommand::CmdShell      => shell::cmdline_shell(app)?,
-            AppCommand::PrintFullPath => simple_operations::print_full_path(app),
-            AppCommand::Search        => app.set_command_line("/", CursorPos::End),
-            AppCommand::SingleSymlink => paste_operation::make_single_symlink(app)?,
+            AppCommand::Tab                => tab_operation(app)?,
+            AppCommand::Goto               => goto_operation(app),
+            AppCommand::Paste              => paste_operation(app)?,
+            AppCommand::Delete             => delete_operation(app),
+            AppCommand::HideOrShow         => app.hide_or_show(None)?,
+            AppCommand::FzfJump            => fzf_jump(app, terminal)?,
+            AppCommand::CmdShell           => shell::cmdline_shell(app)?,
+            AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
+            AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
+            AppCommand::Search             => app.set_command_line("/", CursorPos::End),
+            AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
 
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,

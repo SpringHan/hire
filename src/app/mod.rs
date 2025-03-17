@@ -74,6 +74,8 @@ pub struct App<'a> {
     // AppErrors
     pub app_error: AppError,
 
+    // Output
+    pub confirm_output: bool,
     /// The file to store output of path from app.
     pub output_file: Option<PathBuf>,
 
@@ -133,6 +135,7 @@ impl<'a> Default for App<'a> {
 
             // Output
             output_file: None,
+            confirm_output: false,
 
             // Config & others
             quit_now: false,

@@ -39,9 +39,10 @@ keymap = [
     { key = "w", run = "work_directory goto" },
 
     # Others
-    { key = "R", run = "refresh"        },
-    { key = "f", run = "fzf_jump"       },
-    { key = "P", run = "full_path"      },
-    { key = "-", run = "hide_or_show"   },
-    { key = "s", run = "single_symlink" },
+    { key = "R", run = "refresh"               },
+    { key = "f", run = "fzf_jump"              },
+    { key = "P", run = "full_path"             },
+    { key = "-", run = "hide_or_show"          },
+    { key = "s", run = "single_symlink"        },
+    { key = "\\", run = "change_output_status" },
 ]

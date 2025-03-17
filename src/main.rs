@@ -147,6 +147,7 @@ fn shell_in_workdir(
 /// Check whether to enter passive output mode.
 fn check_passive_mode(args: &utils::Args, app: &mut App) {
     if &args.output_file != "NULL" {
+        app.confirm_output = true;
         app.output_file = Some(std::path::PathBuf::from(
             &args.output_file
         ));

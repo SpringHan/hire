@@ -1,17 +1,17 @@
 // UI
 
 mod child_block;
+mod command_line;
 
-use std::borrow::Cow;
 use std::ops::AddAssign;
 use std::collections::HashMap;
 
-use child_block::render_file;
+// use command_line::
 use ratatui::{
-    widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
+    widgets::{Block, List, ListItem, Padding, Paragraph},
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Line, Span, Text},
+    style::{Color, Modifier, Stylize},
+    text::{Line, Span},
     Frame
 };
 
@@ -25,6 +25,9 @@ use crate::app::{
     FileOperation,
     reverse_style,
 };
+
+use command_line::*;
+use child_block::render_file;
 
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     let chunks = Layout::default()
@@ -143,7 +146,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
     // Parent Block
     let parent_block = Block::default()
-        .borders(Borders::NONE)
         .padding(Padding::left(1));
     let parent_items = render_list(
         app.parent_files.iter(),
@@ -167,7 +169,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         app::Block::Browser(true) => {
             if app.file_content.is_some() {
                 render_file(frame, app, browser_layout[1])?;
-                frame.render_widget(render_command_line(app), chunks[2]);
+                render_command_line(app, frame, chunks[2]);
+                // frame.render_widget(render_command_line(app), chunks[2]);
                 return Ok(())
             }
         },
@@ -176,7 +179,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
                 render_file(frame, app, browser_layout[2])?;
             } else {
                 let child_block = Block::default()
-                    .borders(Borders::NONE)
                     .padding(Padding::right(1));
                 let child_items = render_list(
                     app.child_files.iter(),
@@ -199,7 +201,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     // Current Block
     // Move current block to here to make preparation for file content of parent file.
     let current_block = Block::default()
-        .borders(Borders::NONE)
         .padding(Padding::horizontal(1));
     let marked_items = if app.path.to_string_lossy() == "/" {
         let path = app.path
@@ -225,7 +226,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     );
 
     // Command Block
-    frame.render_widget(render_command_line(app), chunks[2]);
+    render_command_line(app, frame, chunks[2]);
+    // frame.render_widget(render_command_line(app), chunks[2]);
 
     Ok(())
 }
@@ -334,50 +336,6 @@ fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
     temp_items
 }
 
-/// Function used to generate Paragraph at command-line layout.
-fn render_command_line<'a>(app: &App) -> Paragraph<'a> {
-    use app::Block as AppBlock;
-
-    let block = Block::default();
-
-    let message = match app.selected_block {
-        AppBlock::Browser(_) => {
-            let _selected_file = app.get_file_saver();
-            if let Some(selected_file) = _selected_file {
-                if selected_file.cannot_read {
-                    Line::styled("DENIED", Style::default().red())
-                } else if selected_file.dangling_symlink {
-                    Line::styled(
-                        "DANGLING_SYMLINK",
-                        app.term_colors.orphan_style
-                    )
-                } else {
-                    Line::from(vec![
-                        selected_file.permission_span(),
-                        Span::raw(" "),
-                        selected_file.modified_span(),
-                        Span::raw(" "),
-                        selected_file.size_span(),
-                        Span::raw(" "),
-                        selected_file.symlink_span(app.term_colors.symlink_style)
-                    ])
-                }
-            } else {
-                Line::raw("")
-            }
-        },
-        AppBlock::CommandLine(ref input, cursor) => {
-            Line::from(get_command_line_span_list(
-                input.to_owned(),
-                cursor,
-                app.command_error || app.command_warning
-            ))
-        }
-    };
-
-    Paragraph::new(message).block(block)
-}
-
 /// Return the item which has the style of normal file.
 fn get_normal_item_color<'a>(file: &'a FileSaver,
                              colors: &TermColors,
@@ -415,45 +373,6 @@ fn get_file_font_style(is_dir: bool) -> Modifier {
     }
 }
 
-fn get_command_line_span_list<'a, S>(command: S,
-                                     cursor: CursorPos,
-                                     eye_catching: bool
-) -> Vec<Span<'a>>
-where S: Into<Cow<'a, str>>
-{
-    let mut span_list: Vec<Span> = Vec::new();
-    if let CursorPos::Index(idx) = cursor {
-        let mut i = 0;
-        for c in command.into().chars() {
-            span_list.push(
-                if i == idx {
-                    Span::raw(String::from(c))
-                        .fg(Color::Black)
-                        .bg(Color::White)
-                } else {
-                    Span::raw(String::from(c))
-                        .fg(Color::White)
-                }
-            );
-            i += 1;
-        }
-
-        return span_list
-    }
-
-    span_list.push(Span::from(command).fg(if eye_catching {
-        Color::Red
-    } else {
-        Color::White
-    }));
-
-    if let CursorPos::End = cursor {
-        span_list.push(Span::from(" ").fg(Color::Black).bg(Color::White));
-    }
-
-    span_list
-}
-
 fn get_item_num_para(app: &App) -> String {
     let info = if app.path.to_string_lossy() == "/" {
         format!(
@@ -474,36 +393,6 @@ fn get_item_num_para(app: &App) -> String {
     };
 
     info
-}
-
-/// Create Paragraph structure with different color.
-///
-/// Make the text red when it's an error message.
-fn get_command_line_style<'a, S>(app: &App,
-                                 content: S,
-                                 cursor: CursorPos
-) -> Paragraph<'a>
-where S: Into<Cow<'a, str>>
-{
-    if let CursorPos::None = cursor {
-        let temp = Paragraph::new(
-            Text::raw(content)
-        )
-            .scroll(app.command_scroll.unwrap());
-
-        if app.command_error {
-            return temp.red()
-        }
-
-        temp
-    } else {
-        Paragraph::new(Line::from(get_command_line_span_list(
-            content,
-            cursor,
-            app.command_error
-        )))
-            .scroll(app.command_scroll.unwrap())
-    }
 }
 
 fn short_display_path(app: &App) -> String {

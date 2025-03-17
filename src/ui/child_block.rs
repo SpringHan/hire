@@ -6,7 +6,7 @@ use anyhow::bail;
 use ansi_to_tui::IntoText;
 use ratatui_image::thread::ThreadImage;
 use ratatui::{
-    widgets::{Block, Borders, Clear, Padding, Paragraph},
+    widgets::{Block, Clear, Padding, Paragraph},
     layout::Rect,
     text::Text,
     Frame
@@ -17,7 +17,6 @@ use crate::app::{App, FileContent};
 pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Result<()> {
     frame.render_widget(Clear, layout);
     let block = Block::default()
-        .borders(Borders::NONE)
         .padding(Padding::right(1));
 
     if app.file_content == FileContent::Image {
