@@ -19,6 +19,49 @@ There're three config files for hire: `auto_config.toml`, `user_config.toml` and
 
 Notice: The `auto_config.toml` is generated & edited by app.
 
+### user_config.toml
+
+This file contains user-specific configuration options. Here are the available settings:
+
+```toml
+# Default shell to use for commands
+default_shell = "bash"
+
+# GUI commands to show in the interface to avoid a required key press.
+gui_commands = ["lazygit", "vim"]
+
+# Program to use for reading files, such as vim, cat, bat, etc.
+file_read_program = "vim"
+
+# Editor to use for file operations
+file_operation_editor = "vim"
+```
+
+### keymap.toml
+
+This file defines key bindings for the application.  
+Defaultly, the `keymap.toml` will be copied to `~/.config/springhan/hire` folder after running `install.sh`.
+
+The format is:
+
+```toml
+[[keymap]]
+key = "k"  # The key to bind
+run = "command_name"  # The command to run
+
+# Example:
+[[keymap]] 
+key = "j"
+run = "goto_operation"
+
+# Define custom shell commands that can be executed with a key binding
+# Format: "shell_command *Whether refresh displaying files after command* *command*"
+# Use "$." to substitute the currently selected file/directory
+[[keymap]]
+key = "v"
+run = "shell_command true vim $."
+```
+
 ## Usage
 
 You can get usage by:
