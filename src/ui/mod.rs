@@ -2,6 +2,7 @@
 
 mod child_block;
 mod command_line;
+mod cmdline_popup;
 
 use std::ops::AddAssign;
 use std::collections::HashMap;

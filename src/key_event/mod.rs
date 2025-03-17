@@ -5,6 +5,7 @@ mod shell;
 mod switch;
 mod interaction;
 mod file_search;
+mod command_line;
 mod goto_operation;
 mod cursor_movement;
 mod file_operations;
@@ -16,7 +17,7 @@ use std::ops::{SubAssign, AddAssign};
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use simple_operations::output_path;
 use tab::tab_operation;
@@ -56,13 +57,19 @@ pub enum Goto {
 // NOTE(for coding): DO NOT use return in the match control to skip specific code, which
 // could cause missing the following procedures.
 /// Handle KEY event.
-pub fn handle_event(key: KeyCode,
-                    app: &mut App,
-                    terminal: &mut Terminal
+pub fn handle_event(
+    key: KeyEvent,
+    app: &mut App,
+    terminal: &mut Terminal
 ) -> AppResult<()>
 {
-    match key {
+    match key.code {
         KeyCode::Char(c) => {
+            // NOTE: Maybe there'll add a function to handle character with modifiers.
+            if !(key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT) {
+                return Ok(())
+            }
+
             if app.command_error {
                 app.quit_command_mode();
                 return Ok(())
@@ -207,15 +214,25 @@ pub fn handle_event(key: KeyCode,
         },
 
         KeyCode::Tab => {
-            // TODO(to be removed): Pay attention to command_error.
-            if let app::Block::CommandLine(_, _) = app.selected_block {
-                // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
-                if app.command_expand {
-                    app.command_expand = false;
-                    app.command_scroll = None;
-                } else {
-                    app.expand_init();
-                }
+            match key.modifiers {
+                KeyModifiers::ALT => {
+                    // TODO(to be removed): Pay attention to command_error.
+                    if let app::Block::CommandLine(_, _) = app.selected_block {
+                        // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+                        if app.command_expand {
+                            app.command_expand = false;
+                            app.command_scroll = None;
+                        } else {
+                            app.expand_init();
+                        }
+                    }
+                },
+
+                KeyModifiers::NONE => {
+                    
+                },
+
+                _ => ()
             }
         },
 

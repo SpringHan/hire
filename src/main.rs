@@ -71,13 +71,15 @@ fn main() -> AppResult<()> {
         if event::poll(Duration::from_millis(200))? {
             if let event::Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    if key.code == KeyCode::Char('q') {
+                    if key.code == KeyCode::Char('q') &&
+                        key.modifiers.is_empty()
+                    {
                         if let app::Block::Browser(_) = app.selected_block {
                             break;
                         }
                     }
 
-                    let result = handle_event(key.code, &mut app, &mut terminal);
+                    let result = handle_event(key, &mut app, &mut terminal);
                     if let Err(err) = result {
                         app.app_error.append_errors(err.iter());
                     }
