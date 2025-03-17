@@ -26,6 +26,7 @@ pub type ResizeRequest = (StatefulProtocol, Resize, Rect);
 
 #[derive(Default)]
 pub struct ImagePreview {
+    pub useless: bool,
     picker: Option<Picker>,
     protocol: Option<ThreadProtocol>,
     image_path: Arc<Mutex<(PathBuf, bool)>>,
@@ -141,6 +142,7 @@ impl<'a> App<'a> {
             }
         });
 
+        preview.useless = true;
         preview.resize_sender = Some(resize_tx);
 
         Some((prot_rx, image_rx))

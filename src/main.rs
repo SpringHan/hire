@@ -96,6 +96,10 @@ fn main() -> AppResult<()> {
 
         // Image perview handler
         if let Some((ref prx, ref irx)) = image_recvs {
+            if app.image_preview.useless {
+                continue;
+            }
+
             if let Ok(data) = irx.try_recv() {
                 if let Some(image) = data {
                     match app.image_preview.make_protocol(image) {

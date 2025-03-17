@@ -613,11 +613,18 @@ impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
         use io::{Read, ErrorKind};
 
-        let selected_file = self.get_file_saver();
-        if let Some(selected_file) = selected_file {
+        let selected = self.get_file_saver();
+        if let Some(selected_item) = selected {
+            let selected_file = selected_item.to_owned();
             let file_path = self.current_path()
                 .join(&selected_file.name);
             let mut content = String::new();
+
+            // To avoid the wrong display of file content caused by
+            // image decoding delay.
+            if !self.image_preview.useless {
+                self.image_preview.useless = true;
+            }
 
             match fs::File::open(file_path.to_owned()) {
                 Err(e) => {
@@ -639,6 +646,7 @@ impl<'a> App<'a> {
                             // Try to display image file
                             if self.image_preview.with_image_feat() {
                                 self.image_preview.send_path(file_path)?;
+                                self.image_preview.useless = false;
 
                                 return Ok(())
                             }
