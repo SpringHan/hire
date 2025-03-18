@@ -148,9 +148,9 @@ pub fn make_single_symlink(app: &mut App) -> AppResult<()> {
     for (path, files) in app.marked_files.iter() {
         for (file, _) in files.files.iter() {
             let original_file = path.join(file);
-            app.set_command_line(
+            app.selected_block.set_command_line(
                 format!(
-                    ":create_symlink {} -> {}",
+                    ":create_symlink {} {}",
                     original_file.to_string_lossy(),
                     app.current_path().join(file).to_string_lossy()
                 ),

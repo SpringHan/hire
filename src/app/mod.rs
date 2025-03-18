@@ -15,7 +15,7 @@ use ratatui::widgets::ListState;
 
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::FileSearcher;
+use crate::key_event::{AppCompletion, FileSearcher};
 
 pub use special_types::*;
 pub use filesaver::{sort, FileSaver};
@@ -50,6 +50,8 @@ pub struct App<'a> {
 
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
+
+    pub command_completion: AppCompletion<'a>,
 
     // Search file
     pub file_searcher: FileSearcher,
@@ -128,6 +130,7 @@ impl<'a> Default for App<'a> {
             command_expand: false,
             command_warning: false,
             command_history: Vec::new(),
+            command_completion: AppCompletion::default(),
 
             // Error handle
             command_error: false,

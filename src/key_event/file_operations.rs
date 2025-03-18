@@ -17,7 +17,7 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
         let current_file = &file_saver.name;
 
         if file_saver.is_dir || to_end {
-            app.set_command_line(
+            app.selected_block.set_command_line(
                 format!(":rename {}", current_file),
                 CursorPos::End
             );
@@ -29,7 +29,7 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
             .rev()
             .position(|x| x == '.');
 
-        app.set_command_line(
+        app.selected_block.set_command_line(
             format!(":rename {}", current_file),
             if let Some(idx) = cursor_pos {
                 let idx = current_file.len() - 1 - idx;

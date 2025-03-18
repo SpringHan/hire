@@ -188,9 +188,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.4.1"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
+checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 
 [[package]]
 name = "bitstream-io"
@@ -404,7 +404,7 @@ version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
- "bitflags 2.4.1",
+ "bitflags 2.9.0",
  "crossterm_winapi",
  "mio",
  "parking_lot",
@@ -550,6 +550,7 @@ version = "0.2.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
+ "bitflags 2.9.0",
  "chrono",
  "clap",
  "copy_dir",
@@ -1059,7 +1060,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabd94c2f37801c20583fc49dd5cd6b0ba68c716787c2dd6ed18571e1e63117b"
 dependencies = [
- "bitflags 2.4.1",
+ "bitflags 2.9.0",
  "cassowary",
  "compact_str",
  "crossterm",
@@ -1181,7 +1182,7 @@ version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
 dependencies = [
- "bitflags 2.4.1",
+ "bitflags 2.9.0",
  "errno",
  "libc",
  "linux-raw-sys",

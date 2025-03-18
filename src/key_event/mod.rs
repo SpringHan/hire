@@ -42,6 +42,7 @@ pub use switch::{SwitchCase, SwitchCaseData};
 pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
 
 // Export for auto config
+pub use command_line::AppCompletion;
 pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
 
@@ -260,18 +261,18 @@ impl AppCommand {
             AppCommand::CmdShell           => shell::cmdline_shell(app)?,
             AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
             AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
-            AppCommand::Search             => app.set_command_line("/", CursorPos::End),
             AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
+            AppCommand::Search             => app.selected_block.set_command_line("/", CursorPos::End),
 
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
 
-            AppCommand::CreateDir => app.set_command_line(
+            AppCommand::CreateDir => app.selected_block.set_command_line(
                 ":create_dir ",
                 CursorPos::End
             ),
 
-            AppCommand::CreateFile => app.set_command_line(
+            AppCommand::CreateFile => app.selected_block.set_command_line(
                 ":create_file ",
                 CursorPos::End
             ),

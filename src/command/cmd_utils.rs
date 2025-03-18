@@ -13,11 +13,13 @@ use crate::{
     App
 };
 
-impl<'a> App<'a> {
+impl Block {
     pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
-        self.selected_block = Block::CommandLine(content.into(), pos);
+        *self = Block::CommandLine(content.into(), pos);
     }
+}
 
+impl<'a> App<'a> {
     pub fn command_line_append(&mut self, content: char) {
         if let
             Block::CommandLine(
@@ -210,10 +212,10 @@ impl<'a> App<'a> {
                     self.marked_operation = FileOperation::None;
 
                     command_slices.remove(0);
-                    let files = command_slices.join(" ");
-                    let files: Vec<&str> = files
-                        .split("->")
-                        .collect();
+                    let files = command_slices;
+                    // let files: Vec<&str> = files
+                    //     .split("->")
+                    //     .collect();
                     super::cmds::create_symlink(
                         self,
                         [(files[0].trim(), files[1].trim())].into_iter()

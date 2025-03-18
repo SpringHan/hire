@@ -48,3 +48,14 @@ impl Direction {
         )
     }
 }
+
+/// Split String into Vec<String>
+pub fn str_split(_string: String) -> Vec<String> {
+    let mut str_vec: Vec<String> = Vec::new();
+
+    for _str in _string.split(" ") {
+        str_vec.push(_str.to_owned());
+    }
+
+    str_vec
+}
