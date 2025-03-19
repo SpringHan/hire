@@ -15,6 +15,7 @@ mod simple_operations;
 use std::io::Stderr;
 use std::ops::{SubAssign, AddAssign};
 
+use command_line::completion;
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -39,10 +40,10 @@ pub use tab::TabList;
 pub use file_search::FileSearcher;
 pub use cursor_movement::move_cursor;
 pub use switch::{SwitchCase, SwitchCaseData};
+pub use command_line::{AppCompletion, get_content};
 pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
 
 // Export for auto config
-pub use command_line::AppCompletion;
 pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
 
@@ -67,7 +68,19 @@ pub fn handle_event(
     match key.code {
         KeyCode::Char(c) => {
             // NOTE: Maybe there'll add a function to handle character with modifiers.
-            if !(key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT) {
+            if !(key.modifiers.is_empty() ||
+                 key.modifiers == KeyModifiers::SHIFT)
+            {
+                match key.modifiers {
+                    KeyModifiers::CONTROL => {
+                        // TODO: Add keybinding for cursor movement.
+                        if c == 'n' || c == 'p' {
+                            command_line::switch_to(app, c == 'n')?;
+                        }
+                    },
+                    _ => ()
+                }
+
                 return Ok(())
             }
 
@@ -115,6 +128,10 @@ pub fn handle_event(
                         origin.pop();
                     },
                     _ => ()
+                }
+
+                if !app.command_completion.popup_info().0.is_empty() {
+                    app.command_completion.reset();
                 }
             }
         },
@@ -230,7 +247,7 @@ pub fn handle_event(
                 },
 
                 KeyModifiers::NONE => {
-                    
+                    completion(app)?;
                 },
 
                 _ => ()

@@ -34,6 +34,10 @@ impl<'a> App<'a> {
             }
 
             origin.push(content);
+
+            if !self.command_completion.popup_info().0.is_empty() {
+                self.command_completion.reset();
+            }
         }
     }
     
@@ -55,6 +59,10 @@ impl<'a> App<'a> {
 
         if self.command_warning {
             self.command_warning = false;
+        }
+
+        if !self.command_completion.popup_info().0.is_empty() {
+            self.command_completion.reset();
         }
 
         self.option_key = OptionFor::None;

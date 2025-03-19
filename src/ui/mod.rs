@@ -7,6 +7,7 @@ mod cmdline_popup;
 use std::ops::AddAssign;
 use std::collections::HashMap;
 
+use cmdline_popup::render_completion;
 // use command_line::
 use ratatui::{
     widgets::{Block, List, ListItem, Padding, Paragraph},
@@ -228,7 +229,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
     // Command Block
     render_command_line(app, frame, chunks[2]);
-    // frame.render_widget(render_command_line(app), chunks[2]);
+    render_completion(app, frame, chunks[2]);
 
     Ok(())
 }

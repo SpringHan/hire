@@ -2,25 +2,55 @@
 
 use std::borrow::Cow;
 
-use bitflags::bitflags;
 use ratatui::widgets::ListState;
 
-use crate::{app::{App, Block, CursorPos}, error::AppResult, option_get, utils::str_split};
+use crate::{
+    app::{App, Block, CursorPos},
+    error::AppResult,
+    utils::str_split,
+    option_get,
+};
 
 // TODO(remove it): It seems that bitflags is not needed.
-bitflags! {
-    #[derive(PartialEq, Eq)]
-    struct CompletionType: u8 {
-        const FILE = 0b0000_0001;
-        const SHELL = 0b0000_0010;
-        const BUILTIN = 0b0000_0100;
-    }
+#[derive(PartialEq, Eq)]
+enum CompletionType {
+    File,
+    Builtin
 }
 
 #[derive(Default)]
 pub struct AppCompletion<'a> {
+    max_width: u16,
+    show_frame: bool,
+    origin_length: u16,
     selected_item: ListState,
     candidates: Vec<Cow<'a, str>>,
+}
+
+impl<'a> AppCompletion<'a> {
+    pub fn show_frame(&self) -> bool {
+        self.show_frame
+    }
+
+    pub fn popup_position(&self) -> (u16, u16) {
+        (self.origin_length, self.max_width)
+    }
+
+    pub fn popup_info(&mut self) -> (
+        &Vec<Cow<'a, str>>,
+        &mut ListState
+    )
+    {
+        (&self.candidates, &mut self.selected_item)
+    }
+
+    pub fn reset(&mut self) {
+        self.max_width = 0;
+        self.origin_length = 0;
+        self.show_frame = false;
+        self.candidates.clear();
+        self.selected_item.select(None);
+    }
 }
 
 pub fn completion(app: &mut App) -> AppResult<()> {
@@ -31,37 +61,55 @@ pub fn completion(app: &mut App) -> AppResult<()> {
 
     let (content, _) = content_info.unwrap();
     let command_slice: Vec<&str> = content.split(" ").collect();
+    let mut position = 0;
 
     let updated = match command_slice.len() {
         1 => {
             if !command_slice[0].starts_with(":!") &&
                 command_slice[0].starts_with(":")
             {
+                position = 1;
                 update_completion(
                     app,
-                    CompletionType::BUILTIN,
+                    CompletionType::Builtin,
                     &command_slice[0][1..]
-                )
+                )?
             } else {
                 false
             }
         },
 
-        2 => update_completion(
-            app,
-            if command_slice[0].starts_with(":!") {
-                CompletionType::SHELL | CompletionType::FILE
-            } else {
-                CompletionType::FILE
-            },
-            command_slice[1]
-        ),
+        // 2 => {
+        //     position = command_slice[0].len() + 1;
+        //     update_completion(
+        //         app,
+        //         CompletionType::File,
+        //         command_slice[1]
+        //     )?
+        // },
 
-        _ => update_completion(
-            app,
-            CompletionType::FILE,
-            command_slice.last().unwrap()
-        )
+        _ => {
+            let mut slice = None;
+            for i in 0..command_slice.len() {
+                if i == command_slice.len() - 1 {
+                    if command_slice[i].starts_with("./") {
+                        slice = Some(&command_slice[i][2..]);
+                        position += 2;
+                    } else {
+                        slice = Some(command_slice[i]);
+                    }
+
+                    break;
+                }
+
+                position += command_slice[i].len() + 1;
+            }
+            update_completion(
+                app,
+                CompletionType::File,
+                slice.unwrap()
+            )?
+        }
     };
 
     if updated {
@@ -69,6 +117,32 @@ pub fn completion(app: &mut App) -> AppResult<()> {
             &mut app.selected_block,
             &mut app.command_completion,
         )?;
+        app.command_completion.origin_length = position as u16;
+    }
+
+    Ok(())
+}
+
+pub fn switch_to(app: &mut App, next: bool) -> AppResult<()> {
+    let completion = &mut app.command_completion;
+    if completion.candidates.is_empty() {
+        return Ok(())
+    }
+
+    if let Some(idx) = completion.selected_item.selected_mut() {
+        if (*idx == completion.candidates.len() - 1 && next) ||
+            (*idx == 0 && !next)
+        {
+            return Ok(())
+        }
+
+        *idx = if next {
+            *idx + 1
+        } else {
+            *idx - 1
+        };
+
+        update_cmdline(&mut app.selected_block, completion)?;
     }
 
     Ok(())
@@ -85,8 +159,7 @@ pub fn update_cmdline(
 
     let content_info = get_content(app_block);
     if content_info.is_none() {
-        completion.candidates.clear();
-        completion.selected_item.select(None);
+        completion.reset();
         return Ok(())
     }
 
@@ -108,7 +181,12 @@ pub fn update_cmdline(
     if command_slice.len() == 1 {
         command_slice[0] = format!(":{}", new_value);
     } else {
-        *command_slice.last_mut().unwrap() = new_value.as_ref().into();
+        let slice = command_slice.last_mut().unwrap();
+        *slice = if slice.starts_with("./") {
+            format!("./{}", new_value.as_ref())
+        } else {
+            new_value.as_ref().into()
+        };
     }
 
     let updated_content = command_slice.join(" ");
@@ -121,61 +199,7 @@ pub fn update_cmdline(
     Ok(())
 }
 
-/// Return true if the completion candidates is updated.
-fn update_completion(
-    app: &mut App,
-    _type: CompletionType,
-    current: &str
-) -> bool
-{
-    let mut candidates: Vec<Cow<str>> = Vec::new();
-
-    if _type.contains(CompletionType::FILE) {
-        let files_iter = if app.root() {
-            app.parent_files.iter()
-        } else {
-            app.current_files.iter()
-        };
-        
-        for file in files_iter {
-            if file.name.starts_with(current) {
-                candidates.push(Cow::Owned(file.name.to_owned()));
-            }
-        }
-    }
-
-    // NOTE: I don't think the program need a shell completion.
-    // if _type.contains(CompletionType::SHELL) {
-    //     let bin = read_dir("/usr/bin")?;
-
-    //     for file in bin {
-    //     }
-    // }
-
-    if _type == CompletionType::BUILTIN {
-        let commands = ["rename", "create_file", "create_dir", "create_symlink"];
-
-        for cmd in commands.into_iter() {
-            if cmd.starts_with(current) {
-                candidates.push(Cow::Borrowed(cmd));
-            }
-        }
-    }
-
-    if candidates.is_empty() {
-        return false
-    }
-
-    candidates.sort_by(|a, b| a.len().cmp(&b.len()));
-
-    let completion = &mut app.command_completion;
-    completion.candidates = candidates;
-    completion.selected_item.select(Some(0));
-
-    true
-}
-
-fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
+pub fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
     let (_content, cursor) = if let Block::CommandLine(
         ref cont,
         pos
@@ -198,4 +222,57 @@ fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
     let content = &_content[..=idx];
 
     Some((content.to_owned(), cursor))
+}
+
+/// Return true if the completion candidates is updated.
+fn update_completion(
+    app: &mut App,
+    _type: CompletionType,
+    current: &str
+) -> anyhow::Result<bool>
+{
+    let mut max_width = 0;
+    let mut candidates: Vec<Cow<str>> = Vec::new();
+
+    if _type == CompletionType::File {
+        let files_iter = if app.root() {
+            app.parent_files.iter()
+        } else {
+            app.current_files.iter()
+        };
+        
+        for file in files_iter {
+            if file.name.starts_with(current) {
+                if max_width < file.name.len() {
+                    max_width = file.name.len();
+                }
+                candidates.push(Cow::Owned(file.name.to_owned()));
+            }
+        }
+    } else {
+        let commands = ["rename", "create_file", "create_dir", "create_symlink"];
+
+        for cmd in commands.into_iter() {
+            if cmd.starts_with(current) {
+                if max_width < cmd.len() {
+                    max_width = cmd.len();
+                }
+                candidates.push(Cow::Borrowed(cmd));
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(false)
+    }
+
+    candidates.sort_by(|a, b| a.len().cmp(&b.len()));
+
+    let completion = &mut app.command_completion;
+    completion.show_frame = true;
+    completion.candidates = candidates;
+    completion.max_width = max_width as u16;
+    completion.selected_item.select(Some(0));
+
+    Ok(true)
 }
