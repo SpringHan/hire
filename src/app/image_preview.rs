@@ -4,25 +4,23 @@ use std::{
     thread,
     path::{Path, PathBuf},
     sync::{
-        Arc,
-        Mutex,
         mpsc::{self, Receiver, Sender},
+        Mutex,
+        Arc
     },
 };
 
 use image::DynamicImage;
-use ratatui::layout::Rect;
 use anyhow::{bail, Result};
 use ratatui_image::{
-    Resize,
+    thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
+    errors::Errors,
     picker::Picker,
-    thread::ThreadProtocol,
-    protocol::StatefulProtocol,
 };
 
 use super::App;
 
-pub type ResizeRequest = (StatefulProtocol, Resize, Rect);
+pub type Response = Result<ResizeResponse, Errors>;
 
 #[derive(Default)]
 pub struct ImagePreview {
@@ -53,7 +51,7 @@ impl ImagePreview {
 
         self.protocol = Some(ThreadProtocol::new(
             rtx,
-            self.picker.unwrap().new_resize_protocol(image)
+            Some(self.picker.unwrap().new_resize_protocol(image))
         ));
 
         Ok(())
@@ -80,7 +78,7 @@ impl ImagePreview {
 impl<'a> App<'a> {
     pub fn init_image_picker(
         &mut self
-    ) -> Option<(Receiver<StatefulProtocol>, Receiver<Option<DynamicImage>>)>
+    ) -> Option<(Receiver<Response>, Receiver<Option<DynamicImage>>)>
     {
         let preview = &mut self.image_preview;
 
@@ -91,16 +89,14 @@ impl<'a> App<'a> {
 
         preview.picker = Some(picker.unwrap());
 
+        let (prot_tx, prot_rx)     = mpsc::channel::<Response>();
         let (resize_tx, resize_rx) = mpsc::channel::<ResizeRequest>();
-        let (prot_tx, prot_rx)     = mpsc::channel::<StatefulProtocol>();
         let (image_tx, image_rx)   = mpsc::channel::<Option<DynamicImage>>();
 
         // Image resize thread
         thread::spawn(move || loop {
-            if let Ok((mut protocol, resize, area)) = resize_rx.recv() {
-                protocol.resize_encode(&resize, protocol.background_color(), area);
-
-                if prot_tx.send(protocol).is_err() {
+            if let Ok(request) = resize_rx.recv() {
+                if prot_tx.send(request.resize_encode()).is_err() {
                     break;
                 }
             }

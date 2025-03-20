@@ -113,9 +113,11 @@ fn main() -> AppResult<()> {
                 }
             }
 
-            if let Ok(protocol) = prx.try_recv() {
+            if let Ok(response) = prx.try_recv() {
                 if let Some(_ref) = app.image_preview.image_protocol() {
-                    _ref.set_protocol(protocol);
+                    _ref.update_resized_protocol(
+                        response.expect("Failed to get image resize response!")
+                    );
                 }
             }
         }

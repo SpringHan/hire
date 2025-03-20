@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use anyhow::bail;
 use ansi_to_tui::IntoText;
-use ratatui_image::thread::ThreadImage;
+use ratatui_image::{thread::ThreadImage, Resize};
 
 use ratatui::{
     widgets::{Block, Borders, List, Paragraph},
@@ -58,10 +58,11 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
 
         if let Some(protocol) = _ref {
             frame.render_stateful_widget(
-                ThreadImage::default(),
+                ThreadImage::default().resize(Resize::Fit(None)),
                 block.inner(layout),
                 protocol
             );
+            frame.render_widget(block, layout);
 
             return Ok(())
         }
