@@ -45,21 +45,21 @@ Defaultly, the `keymap.toml` will be copied to `~/.config/springhan/hire` folder
 The format is:
 
 ```toml
-[[keymap]]
-key = "k"  # The key to bind
-run = "command_name"  # The command to run
+keymap = [
+    # ... other keybindings ...
 
-# Example:
-[[keymap]] 
-key = "j"
-run = "goto_operation"
+    { key = "k", run = "command" }
+]
 
 # Define custom shell commands that can be executed with a key binding
 # Format: "shell_command *Whether refresh displaying files after command* *command*"
 # Use "$." to substitute the currently selected file/directory
-[[keymap]]
-key = "v"
-run = "shell_command true vim $."
+# E.g.
+keymap = [
+    # ... other keybindings ...
+
+    { key = "v", run = "shell_command true vim $." }
+]
 ```
 
 ## Usage
@@ -75,7 +75,7 @@ hire --help
 - [x] Image preview support
 - [x] Storage of specific tabs
 - [x] Keymap config support
-- [ ] Optimize the editing ability for command line
+- [x] Optimize the editing ability for command line
 - [ ] Edit multiple files with terminal editor
 - [ ] Bottom hint for whether current shell process is run by hire
 - [ ] Refactor dir tree
