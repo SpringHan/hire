@@ -1,35 +1,28 @@
 // UI
 
+mod utils;
 mod child_block;
 mod command_line;
+mod parent_block;
+mod current_block;
 mod cmdline_popup;
 
-use std::ops::AddAssign;
-use std::collections::HashMap;
-
-use cmdline_popup::render_completion;
-// use command_line::
 use ratatui::{
-    widgets::{Block, List, ListItem, Padding, Paragraph},
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Stylize},
+    widgets::{Block, Paragraph},
+    style::{Modifier, Stylize},
     text::{Line, Span},
     Frame
 };
 
 use crate::App;
-use crate::app::{
-    self,
-    FileSaver,
-    CursorPos,
-    TermColors,
-    MarkedFiles,
-    FileOperation,
-    reverse_style,
-};
+use crate::app::{self, CursorPos};
 
 use command_line::*;
-use child_block::render_file;
+use parent_block::render_parent;
+use current_block::render_current;
+use cmdline_popup::render_completion;
+use child_block::{render_child, render_file};
 
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     let chunks = Layout::default()
@@ -117,6 +110,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
             frame.render_widget(computer_info, chunks[0]);
             frame.render_widget(command_errors, chunks[1]);
+            render_completion(app, frame, chunks[1]);
             return Ok(())
         }
 
@@ -146,25 +140,12 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .constraints(constraints)
         .split(chunks[1]);
 
-    // Parent Block
-    let parent_block = Block::default()
-        .padding(Padding::left(1));
-    let parent_items = render_list(
-        app.parent_files.iter(),
-        app.selected_item.parent_selected(),
-        &app.term_colors,
-        None,
-        FileOperation::None
-    );
-    let parent_list = List::new(parent_items).block(parent_block);
-
+    // Title layer
     frame.render_widget(computer_info, title_layout[0]);
     frame.render_widget(item_num_info, title_layout[1]);
-    frame.render_stateful_widget(
-        parent_list,
-        browser_layout[0],
-        &mut app.selected_item.parent
-    );
+
+    // Parent block
+    render_parent(app, frame, browser_layout[0]);
     
     // Child Block
     match app.selected_block {
@@ -172,7 +153,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
             if app.file_content.is_some() {
                 render_file(frame, app, browser_layout[1])?;
                 render_command_line(app, frame, chunks[2]);
-                // frame.render_widget(render_command_line(app), chunks[2]);
                 return Ok(())
             }
         },
@@ -180,52 +160,13 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
             if app.file_content.is_some() {
                 render_file(frame, app, browser_layout[2])?;
             } else {
-                let child_block = Block::default()
-                    .padding(Padding::right(1));
-                let child_items = render_list(
-                    app.child_files.iter(),
-                    app.selected_item.child_selected(),
-                    &app.term_colors,
-                    None,
-                    FileOperation::None
-                );
-                let child_items = List::new(child_items).block(child_block);
-
-                frame.render_stateful_widget(
-                    child_items,
-                    browser_layout[2],
-                    &mut app.selected_item.child
-                );
+                render_child(app, frame, browser_layout[2]);
             }
         }
     }
 
     // Current Block
-    // Move current block to here to make preparation for file content of parent file.
-    let current_block = Block::default()
-        .padding(Padding::horizontal(1));
-    let marked_items = if app.path.to_string_lossy() == "/" {
-        let path = app.path
-            .join(&app.get_file_saver().unwrap().name);
-        app.marked_files.get(&path)
-    } else {
-        app.marked_files.get(&app.path)
-    };
-    let current_items = render_list(
-        app.current_files.iter(),
-        app.selected_item.current_selected(),
-        &app.term_colors,
-        marked_items,
-        app.marked_operation
-    );
-    let current_list = List::new(current_items)
-        .block(current_block);
-
-    frame.render_stateful_widget(
-        current_list,
-        browser_layout[1],
-        &mut app.selected_item.current
-    );
+    render_current(app, frame, browser_layout[1]);
 
     // Command Block
     render_command_line(app, frame, chunks[2]);
@@ -255,123 +196,6 @@ fn check_app_error(app: &mut App) {
 
         app.command_error = true;
         app.app_error.clear();
-    }
-}
-
-/// Create a list of ListItem
-fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
-                   idx: Option<usize>,
-                   colors: &TermColors,
-                   marked_items: Option<&'a MarkedFiles>,
-                   marked_operation: FileOperation
-) -> Vec<ListItem<'a>>
-{
-    let mut temp_items: Vec<ListItem> = Vec::new();
-    if files.len() == 0 {
-        temp_items.push(ListItem::new("Empty").fg(Color::Red));
-
-        return temp_items
-    }
-
-    let mut current_item: Option<usize> =  if let Some(_) = idx {
-        Some(0)
-    } else {
-        None
-    };
-
-    // Use this method to avoid extra clone.
-    let temp_set: HashMap<String, bool> = HashMap::new();
-    let mut to_be_moved = false;
-    let marked_files = if let Some(item) = marked_items {
-        if marked_operation == FileOperation::Move {
-            to_be_moved = true;
-        }
-        &item.files
-    } else {
-        &temp_set
-    };
-
-    for file in files {
-        temp_items.push(
-            if let Some(ref mut num) = current_item {
-                match idx {
-                    Some(i) => {
-                        // Make the style of selected item
-                        if marked_files.contains_key(&file.name) {
-                            let item = ListItem::new(Line::from(
-                                Span::raw(&file.name)
-                                    .fg(if *num == i {
-                                        Color::Black
-                                    } else {
-                                        Color::LightYellow
-                                    })
-                                    .add_modifier(get_file_font_style(file.is_dir))
-                                    .add_modifier(if to_be_moved {
-                                        Modifier::ITALIC
-                                    } else {
-                                        Modifier::empty()
-                                    })
-                            ));
-                            if *num == i {
-                                num.add_assign(1);
-                                item.bg(Color::LightYellow)
-                            } else {
-                                num.add_assign(1);
-                                item
-                            }
-                        } else if *num == i {
-                            num.add_assign(1);
-                            get_normal_item_color(file, colors, true)
-                        } else {
-                            num.add_assign(1);
-                            get_normal_item_color(file, colors, false)
-                        }
-                    },
-                    None => panic!("Unknow error when rendering list!")
-                }
-            } else {
-                get_normal_item_color(file, colors, false)
-            }
-        );
-    }
-
-    temp_items
-}
-
-/// Return the item which has the style of normal file.
-fn get_normal_item_color<'a>(file: &'a FileSaver,
-                             colors: &TermColors,
-                             reverse: bool
-) -> ListItem<'a>
-{
-    let style = if file.is_dir {
-        colors.dir_style
-    } else if file.dangling_symlink {
-        colors.orphan_style
-    } else if file.executable {
-        colors.executable_style
-    } else if file.symlink_file.is_some() {
-        colors.symlink_style
-    } else {
-        colors.file_style
-    };
-
-    ListItem::new(Line::raw(&file.name)).style(
-        if reverse {
-            reverse_style(style)
-        } else {
-            style
-        }
-    )
-}
-
-/// Return bold if the file is a directory.
-/// Otherwise return undefined.
-fn get_file_font_style(is_dir: bool) -> Modifier {
-    if is_dir {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
     }
 }
 

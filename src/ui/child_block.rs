@@ -5,19 +5,53 @@ use std::borrow::Cow;
 use anyhow::bail;
 use ansi_to_tui::IntoText;
 use ratatui_image::thread::ThreadImage;
+
 use ratatui::{
-    widgets::{Block, Clear, Padding, Paragraph},
+    widgets::{Block, Borders, List, Paragraph},
+    symbols::{border::{Set, PLAIN}, line},
     layout::Rect,
     text::Text,
     Frame
 };
 
-use crate::app::{App, FileContent};
+use crate::app::{App, FileContent, FileOperation};
+
+use super::utils::render_list;
+
+pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
+    let border_set = Set {
+        top_left: line::NORMAL.horizontal_down,
+        bottom_left: line::NORMAL.horizontal_up,
+        ..PLAIN
+    };
+    let child_block = Block::default()
+        .border_set(border_set)
+        .borders(Borders::ALL);
+
+    let child_items = render_list(
+        app.child_files.iter(),
+        app.selected_item.child_selected(),
+        &app.term_colors,
+        None,
+        FileOperation::None
+    );
+
+    frame.render_stateful_widget(
+        List::new(child_items).block(child_block),
+        area,
+        &mut app.selected_item.child
+    );
+}
 
 pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Result<()> {
-    frame.render_widget(Clear, layout);
+    let border_set = Set {
+        top_left: line::NORMAL.horizontal_down,
+        bottom_left: line::NORMAL.horizontal_up,
+        ..PLAIN
+    };
     let block = Block::default()
-        .padding(Padding::right(1));
+        .border_set(border_set)
+        .borders(Borders::ALL);
 
     if app.file_content == FileContent::Image {
         let _ref = app.image_preview.image_protocol();

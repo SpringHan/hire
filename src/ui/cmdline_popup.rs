@@ -56,7 +56,7 @@ impl StatefulWidget for CompletionPopup<'_> {
 pub fn render_completion(
     app: &mut App,
     frame: &mut Frame,
-    mut area: Rect
+    mut area: Rect,
 )
 {
     if !app.command_completion.show_frame() {
@@ -76,10 +76,15 @@ pub fn render_completion(
         return ()
     }
 
-    // TODO: Add adaptation for expanding command line.
-    // Modify area for non-expanding command line
-    area.y -= 5;
-    area.x += origin_len - 1;
+    // Adjust area for completion popup window
+    if app.command_expand {
+        area.y += 1;
+        area.x += origin_len - 1;
+    } else {
+        area.x += origin_len - 1;
+        area_minus(&mut area.y, 5);
+    }
+
     area.height = 5;
     area.width = max_length + 2;
     
@@ -92,4 +97,12 @@ pub fn render_completion(
         area,
         list_state
     );
+}
+
+fn area_minus(_num: &mut u16, rhs: u16) {
+    if rhs > *_num {
+        return ()
+    }
+
+    *_num -= rhs;
 }

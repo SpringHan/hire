@@ -4,8 +4,8 @@ use std::borrow::Cow;
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    widgets::{Block, Padding, Paragraph, Widget},
     style::{Color, Modifier, Style, Stylize},
+    widgets::{Block, Paragraph, Widget},
     text::{Line, Span, Text},
     Frame
 };
@@ -38,11 +38,8 @@ impl<'a> Widget for StateLine<'a> {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where Self: Sized
     {
-        let left_block = Block::default()
-            .padding(Padding::left(1));
-
         if self.right_side.is_none() {
-            self.left_side.render(left_block.inner(area), buf);
+            self.left_side.render(area, buf);
             return ()
         }
 
@@ -53,12 +50,9 @@ impl<'a> Widget for StateLine<'a> {
                 Constraint::Min(7)
             ])
             .split(area);
-        let right_block = Block::default()
-            .padding(Padding::right(1));
 
-        self.left_side.render(left_block.inner(layout[0]), buf);
-        self.right_side.unwrap()
-            .render(right_block.inner(layout[1]), buf);
+        self.left_side.render(layout[0], buf);
+        self.right_side.unwrap().render(layout[1], buf);
     }
 }
 
