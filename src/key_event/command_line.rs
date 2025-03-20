@@ -1,6 +1,6 @@
 // Operations on command line.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::{AddAssign, SubAssign}};
 
 use ratatui::widgets::ListState;
 
@@ -44,6 +44,10 @@ impl<'a> AppCompletion<'a> {
         (&self.candidates, &mut self.selected_item)
     }
 
+    pub fn hide(&mut self) {
+        self.show_frame = false;
+    }
+
     pub fn reset(&mut self) {
         self.max_width = 0;
         self.origin_length = 0;
@@ -54,6 +58,11 @@ impl<'a> AppCompletion<'a> {
 }
 
 pub fn completion(app: &mut App) -> AppResult<()> {
+    if !app.command_completion.candidates.is_empty() {
+        app.command_completion.show_frame = true;
+        return Ok(())
+    }
+
     let content_info = get_content(&app.selected_block);
     if content_info.is_none() {
         return Ok(())
@@ -78,15 +87,6 @@ pub fn completion(app: &mut App) -> AppResult<()> {
                 false
             }
         },
-
-        // 2 => {
-        //     position = command_slice[0].len() + 1;
-        //     update_completion(
-        //         app,
-        //         CompletionType::File,
-        //         command_slice[1]
-        //     )?
-        // },
 
         _ => {
             let mut slice = None;
@@ -222,6 +222,71 @@ pub fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
     let content = &_content[..=idx];
 
     Some((content.to_owned(), cursor))
+}
+
+impl<'a> App<'a> {
+    pub fn cursor_left(&mut self, edge: bool) {
+        if let Block::CommandLine(
+            ref command,
+            ref mut cursor
+        ) = self.selected_block
+        {
+            if edge {
+                *cursor = CursorPos::Index(0);
+                if self.command_completion.show_frame {
+                    self.command_completion.reset();
+                }
+
+                return ()
+            }
+
+            match cursor {
+                CursorPos::Index(idx) => {
+                    if *idx == 0 {
+                        return ()
+                    }
+                    idx.sub_assign(1);
+                },
+                CursorPos::End => {
+                    *cursor = CursorPos::Index(command.len() - 1);
+                },
+                _ => ()
+            }
+
+            if self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
+
+    pub fn cursor_right(&mut self, edge: bool) {
+        if let Block::CommandLine(
+            ref command,
+            ref mut cursor
+        ) = self.selected_block
+        {
+            if edge {
+                *cursor = CursorPos::End;
+                if self.command_completion.show_frame {
+                    self.command_completion.reset();
+                }
+
+                return ()
+            }
+
+            if let CursorPos::Index(idx) = cursor {
+                if *idx == command.len() - 1 {
+                    *cursor = CursorPos::End;
+                } else {
+                    idx.add_assign(1);
+                }
+
+                if self.command_completion.show_frame {
+                    self.command_completion.reset();
+                }
+            }
+        }
+    }
 }
 
 /// Return true if the completion candidates is updated.

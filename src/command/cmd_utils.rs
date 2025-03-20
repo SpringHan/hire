@@ -6,7 +6,7 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     app::{Block, CursorPos, FileOperation, OptionFor},
-    key_event::{CommandStr, Goto, ShellCommand},
+    key_event::{CommandStr, ShellCommand},
     error::{AppResult, ErrorType},
     utils::Direction,
     rt_error,
@@ -67,15 +67,15 @@ impl<'a> App<'a> {
 
         self.option_key = OptionFor::None;
     }
-    
+
+    // TODO: Code of this function can be optimized.
     /// The function will change content in command line.
     /// In the meanwhile, adjusting current command index.
-    pub fn command_select(&mut self, direct: Goto) {
-        if let
-            Block::CommandLine(
-                ref mut current,
-                ref mut cursor
-            ) = self.selected_block
+    pub fn command_select(&mut self, next: bool) {
+        if let Block::CommandLine(
+            ref mut current,
+            ref mut cursor
+        ) = self.selected_block
         {
             if self.command_history.is_empty() {
                 return ()
@@ -86,66 +86,66 @@ impl<'a> App<'a> {
             }
 
             if let Some(index) = self.command_idx {
-                match direct {
-                    Goto::Up => {
-                        if index == 0 {
-                            return ()
-                        }
-                        self.command_idx = Some(index - 1);
-                        *current = self.command_history[index - 1].to_owned();
-                    },
-                    Goto::Down => {
-                        if index == self.command_history.len() - 1 {
-                            return ()
-                        }
-                        self.command_idx = Some(index + 1);
-                        *current = self.command_history[index + 1].to_owned()
-                    },
-                    _ => panic!("Unvalid value!")
+                if next {
+                    if index == self.command_history.len() - 1 {
+                        return ()
+                    }
+
+                    self.command_idx = Some(index + 1);
+                    *current = self.command_history[index + 1].to_owned();
+                    return ()
                 }
+
+                if index == 0 {
+                    return ()
+                }
+
+                self.command_idx = Some(index - 1);
+                *current = self.command_history[index - 1].to_owned();
                 return ()
             }
 
             // Initial selection.
-            let current_idx = match direct {
-                Goto::Up => {
-                    self.command_history
-                        .iter()
-                        .rev()
-                        .position(|x| x == current)
-                },
-                Goto::Down => {
-                    // The command search function can only be executed by UP key.
-                    return ()
-                },
-                _ => panic!("Unvalid value!")
+            let current_idx = if !next {
+                self.command_history
+                    .iter()
+                    .rev()
+                    .position(|x| x == current)
+            } else {
+                return ()
             };
+
             if let Some(idx) = current_idx {
-                if direct == Goto::Up {
+                if !next {
                     // The real idx is: len - 1 - IDX
                     if idx == self.command_history.len() - 1 {
                         self.command_idx = Some(0);
                         return ()
                     }
+
                     let temp_idx = self.command_history.len() - 2 - idx;
                     self.command_idx = Some(temp_idx);
                     *current = self.command_history[temp_idx].to_owned();
+
+                    return ()
+                } 
+
+                if idx + 1 == self.command_history.len() {
+                    self.command_idx = Some(idx);
                 } else {
-                    if idx + 1 == self.command_history.len() {
-                        self.command_idx = Some(idx);
-                        return ()
-                    }
                     self.command_idx = Some(idx + 1);
                     *current = self.command_history[idx + 1].to_owned();
                 }
+
+                return ()
+            } 
+
+            if !next {
+                self.command_idx = Some(self.command_history.len() - 1);
+                *current = self.command_history.last().unwrap().to_owned();
             } else {
-                if direct == Goto::Up {
-                    self.command_idx = Some(self.command_history.len() - 1);
-                    *current = self.command_history.last().unwrap().to_owned();
-                } else {
-                    self.command_idx = Some(0);
-                    *current = self.command_history.first().unwrap().to_owned();
-                }
+                self.command_idx = Some(0);
+                *current = self.command_history.first().unwrap().to_owned();
             }
         }
     }

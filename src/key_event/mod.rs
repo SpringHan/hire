@@ -13,7 +13,7 @@ mod paste_operation;
 mod simple_operations;
 
 use std::io::Stderr;
-use std::ops::{SubAssign, AddAssign};
+use std::ops::SubAssign;
 
 use command_line::completion;
 use ratatui::Terminal as RTerminal;
@@ -67,17 +67,29 @@ pub fn handle_event(
 {
     match key.code {
         KeyCode::Char(c) => {
-            // NOTE: Maybe there'll add a function to handle character with modifiers.
+            // Handle keys with modifiers
             if !(key.modifiers.is_empty() ||
                  key.modifiers == KeyModifiers::SHIFT)
             {
                 match key.modifiers {
                     KeyModifiers::CONTROL => {
-                        // TODO: Add keybinding for cursor movement.
-                        if c == 'n' || c == 'p' {
-                            command_line::switch_to(app, c == 'n')?;
+                        match c {
+                            'g' => app.command_completion.hide(),
+                            'b' | 'a' => app.cursor_left(c == 'a'),
+                            'f' | 'e' => app.cursor_right(c == 'e'),
+
+                            'n' | 'p' => {
+                                if app.command_completion.show_frame() {
+                                    command_line::switch_to(app, c == 'n')?;
+                                } else {
+                                    app.command_select(c == 'n');
+                                }
+                            },
+
+                            _ => ()
                         }
                     },
+
                     _ => ()
                 }
 
@@ -139,6 +151,11 @@ pub fn handle_event(
         KeyCode::Esc => {
             match app.selected_block {
                 app::Block::CommandLine(_, _) => {
+                    if app.command_completion.show_frame() {
+                        app.command_completion.hide();
+                        return Ok(())
+                    }
+
                     app.quit_command_mode();
                 },
                 _ => {
@@ -171,13 +188,12 @@ pub fn handle_event(
             }
         },
 
-        // TODO: Modify these keymaps
         KeyCode::Up => {
             if let app::Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
                     app.expand_scroll(Direction::Up);
                 } else {
-                    app.command_select(Goto::Up);
+                    app.command_select(false);
                 }
             }
         },
@@ -187,48 +203,25 @@ pub fn handle_event(
                 if app.command_expand {
                     app.expand_scroll(Direction::Down);
                 } else {
-                    app.command_select(Goto::Down);
+                    app.command_select(true);
                 }
             }
         },
 
         KeyCode::Left => {
-            if let
-                app::Block::CommandLine(
-                    ref command,
-                    ref mut cursor
-                ) = app.selected_block
-            {
-                match cursor {
-                    CursorPos::Index(idx) => {
-                        if *idx == 0 {
-                            return Ok(())
-                        }
-                        idx.sub_assign(1);
-                    },
-                    CursorPos::End => {
-                        *cursor = CursorPos::Index(command.len() - 1);
-                    },
-                    _ => ()
-                }
+            if app.command_expand && key.modifiers == KeyModifiers::ALT {
+                app.expand_scroll(Direction::Left);
+                return Ok(())
             }
+            app.cursor_left(false)
         },
 
         KeyCode::Right => {
-            if let
-                app::Block::CommandLine(
-                    ref command,
-                    ref mut cursor
-                ) = app.selected_block
-            {
-                if let CursorPos::Index(idx) = cursor {
-                    if *idx == command.len() - 1 {
-                        *cursor = CursorPos::End;
-                        return Ok(())
-                    }
-                    idx.add_assign(1);
-                }
+            if app.command_expand && key.modifiers == KeyModifiers::ALT {
+                app.expand_scroll(Direction::Right);
+                return Ok(())
             }
+            app.cursor_right(false)
         },
 
         KeyCode::Tab => {
