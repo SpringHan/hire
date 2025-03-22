@@ -24,6 +24,8 @@ use current_block::render_current;
 use cmdline_popup::render_completion;
 use child_block::{render_child, render_file};
 
+pub use child_block::update_file_linenr;
+
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     let chunks = Layout::default()
         .direction(Direction::Vertical)

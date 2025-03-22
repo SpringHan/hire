@@ -11,11 +11,13 @@ use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
 use image_preview::ImagePreview;
+use ratatui::text::Text;
 use ratatui::widgets::ListState;
 
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::{AppCompletion, FileSearcher};
+use crate::utils::read_to_text;
 
 pub use special_types::*;
 pub use filesaver::{sort, FileSaver};
@@ -32,6 +34,7 @@ pub struct App<'a> {
     pub current_files: Vec<FileSaver>,
 
     // NOTE: When file_content is not None, child_files must be empty.
+    pub file_lines: u16,
     pub file_content: FileContent,
 
     // Block
@@ -110,6 +113,7 @@ impl<'a> Default for App<'a> {
 
             // UI
             term_colors,
+            file_lines: 0,
             selected_block,
             hide_files: true,
             file_content: FileContent::None,
@@ -614,14 +618,14 @@ impl<'a> App<'a> {
 // File Content
 impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
-        use io::{Read, ErrorKind};
+        use io::ErrorKind;
 
         let selected = self.get_file_saver();
         if let Some(selected_item) = selected {
             let selected_file = selected_item.to_owned();
             let file_path = self.current_path()
                 .join(&selected_file.name);
-            let mut content = String::new();
+            let mut content = Text::default();
 
             // To avoid the wrong display of file content caused by
             // image decoding delay.
@@ -634,17 +638,22 @@ impl<'a> App<'a> {
                     match e.kind() {
                         ErrorKind::NotFound => (),
                         ErrorKind::PermissionDenied => {
-                            content = String::from("Permission Denied");
+                            content = Text::raw("Permission Denied");
                         },
                         _ => return Err(e.into())
                     }
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
-                        if let Err(e) = file.read_to_string(&mut content) {
-                            if e.kind() != io::ErrorKind::InvalidData {
-                                return Err(e.into())
-                            }
+                        if let Err(_) = read_to_text(
+                            &mut content,
+                            file,
+                            self.file_lines
+                        )
+                        {
+                            // if e.kind() != io::ErrorKind::InvalidData {
+                            //     return Err(e.into())
+                            // }
 
                             // Try to display image file
                             if self.image_preview.with_image_feat() {
@@ -654,10 +663,10 @@ impl<'a> App<'a> {
                                 return Ok(())
                             }
 
-                            content = String::from("Non Text File");
+                            content = Text::raw("Non Text File");
                         }
                     } else {
-                        content = String::from("Non Normal File");
+                        content = Text::raw("Non Normal File");
                     }
                 },
             };

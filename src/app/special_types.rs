@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ratatui::widgets::ListState;
+use ratatui::{text::Text, widgets::ListState};
 
 use crate::key_event::SwitchCase;
 
@@ -54,7 +54,7 @@ pub enum SearchFile {
 /// Enumeration for File Content
 #[derive(Clone, PartialEq, Eq)]
 pub enum FileContent {
-    Text(String),
+    Text(Text<'static>),
     Image,
     None
 }

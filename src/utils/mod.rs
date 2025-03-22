@@ -1,7 +1,11 @@
 // Utils for crate.
 
-use clap::Parser;
+use std::{borrow::Cow, fs::File, io::Read};
+
 use anyhow::bail;
+use clap::Parser;
+use ratatui::text::Text;
+use ansi_to_tui::IntoText;
 
 #[derive(Parser)]
 pub struct Args {
@@ -58,4 +62,45 @@ pub fn str_split(_string: String) -> Vec<String> {
     }
 
     str_vec
+}
+
+/// Read limited lines from file, and pass content as `Text` structure to `text_ref`.
+/// In the meanwhile, the newline character of Windows will be removed
+/// and the '\t' will be replaced with 4 spaces.
+pub fn read_to_text(
+    text_ref: &mut Text,
+    file: &File,
+    line_nr: u16
+) -> anyhow::Result<()>
+{
+    let mut idx = 1;
+    let mut bytes: Vec<u8> = Vec::new();
+    for _b in file.bytes() {
+        let byte = _b?;
+        if byte != 13 {
+            // To limit content read from file
+            if byte == 10 {
+                if idx == line_nr {
+                    break;
+                }
+
+                idx += 1;
+            }
+
+            bytes.push(byte);
+        }
+    }
+
+    let _string = String::from_utf8(bytes)?;
+    let mut text = _string.into_text()?;
+
+    for line in text.iter_mut() {
+        for span in line.iter_mut() {
+            span.content = Cow::Owned(span.content.replace("\t", "    "));
+        }
+    }
+
+    *text_ref = text;
+
+    Ok(())
 }

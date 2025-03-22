@@ -10,6 +10,7 @@ use std::time::Duration;
 use std::io::{stderr, Stderr};
 
 use clap::Parser;
+use ratatui::text::Text;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -37,11 +38,11 @@ use key_event::{
 
 fn main() -> AppResult<()> {
     let args = utils::Args::parse();
-    
+
+    let mut initial = true;
     let mut app = App::default();
     let image_recvs = app.init_image_picker();
     let search_recv = app.init_search_channel();
-    app.init_all_files()?;
 
     // Init config information.
     config::init_config(&mut app)?;
@@ -63,6 +64,15 @@ fn main() -> AppResult<()> {
         }
 
         terminal.draw(|frame| {
+            if initial {
+                initial = false;
+
+                if let Err(err) = app.init_all_files() {
+                    app.app_error.append_errors(err.iter());
+                }
+                ui::update_file_linenr(&mut app, frame.area());
+            }
+
             if let Err(err) = ui::ui(frame, &mut app) {
                 app.app_error.add_error(err);
             }
@@ -109,7 +119,9 @@ fn main() -> AppResult<()> {
                         Ok(_) => app.file_content = FileContent::Image,
                     }
                 } else {
-                    app.file_content = FileContent::Text(String::from("Non Text File"));
+                    app.file_content = FileContent::Text(
+                        Text::raw("Non Text File")
+                    );
                 }
             }
 
