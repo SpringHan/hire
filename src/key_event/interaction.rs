@@ -5,7 +5,7 @@ use std::io::Stderr;
 use ratatui::{prelude::CrosstermBackend, Terminal as RTerminal};
 
 use super::{shell::fetch_output, CommandStr, ShellCommand};
-use crate::{app::App, error::AppResult, rt_error};
+use crate::{app::App, error::AppResult, option_get, rt_error};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
@@ -27,8 +27,14 @@ pub fn fzf_jump(app: &mut App, terminal: &mut Terminal) -> AppResult<()> {
         target.pop();
     }
 
+    let mut file_name: Option<String> = None;
     let mut full_path = app.path.to_owned().join(target);
     if full_path.is_file() {
+        file_name = option_get!(full_path.file_name(), "Cannot find target file")
+            .to_os_string()
+            .into_string()
+            .ok();
+
         if let Some(parent) = full_path.parent() {
             full_path = parent.to_path_buf();
         } else {
@@ -37,6 +43,10 @@ pub fn fzf_jump(app: &mut App, terminal: &mut Terminal) -> AppResult<()> {
     }
 
     app.goto_dir(full_path, None)?;
+
+    if let Some(name) = file_name {
+        app.file_search_sync(name, true)?;
+    }
 
     Ok(())
 }

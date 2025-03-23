@@ -25,7 +25,7 @@ macro_rules! option_get {
     ($e: expr, $msg: expr) => {
         match $e {
             Some(value) => value,
-            None => anyhow::bail!("{}", $msg),
+            None => return Err(anyhow::anyhow!("{}", $msg).into()),
         }
     };
 }
