@@ -34,8 +34,10 @@ pub struct App<'a> {
     pub current_files: Vec<FileSaver>,
 
     // NOTE: When file_content is not None, child_files must be empty.
-    pub file_lines: u16,
     pub file_content: FileContent,
+
+    /// Whether to show the index of file to allow user to jump to.
+    pub move_index: bool,
 
     // Block
     pub selected_block: Block,
@@ -113,7 +115,6 @@ impl<'a> Default for App<'a> {
 
             // UI
             term_colors,
-            file_lines: 0,
             selected_block,
             hide_files: true,
             file_content: FileContent::None,
@@ -121,6 +122,7 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
+            move_index: false,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,
@@ -645,12 +647,7 @@ impl<'a> App<'a> {
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
-                        if let Err(_) = read_to_text(
-                            &mut content,
-                            file,
-                            self.file_lines
-                        )
-                        {
+                        if let Err(_) = read_to_text(&mut content, file) {
                             // if e.kind() != io::ErrorKind::InvalidData {
                             //     return Err(e.into())
                             // }

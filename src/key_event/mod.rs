@@ -20,9 +20,9 @@ use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use simple_operations::output_path;
 use tab::tab_operation;
 use interaction::fzf_jump;
+use simple_operations::output_path;
 use goto_operation::goto_operation;
 use paste_operation::paste_operation;
 use cursor_movement::directory_movement;
@@ -38,7 +38,7 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 // Export
 pub use tab::TabList;
 pub use file_search::FileSearcher;
-pub use cursor_movement::move_cursor;
+pub use cursor_movement::{move_cursor, Goto};
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
@@ -46,14 +46,6 @@ pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory
 // Export for auto config
 pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
-
-/// The enum that used to declare method to move.
-#[derive(PartialEq, Eq)]
-pub enum Goto {
-    Up,
-    Down,
-    Index(usize)
-}
 
 // NOTE(for coding): When quiting command-line mode, you're required to use quit_command_mode function!
 // NOTE(for coding): DO NOT use return in the match control to skip specific code, which
@@ -306,6 +298,16 @@ impl AppCommand {
                 in_root
             )?,
 
+            AppCommand::ListScroll(down) => move_cursor(
+                app,
+                if down {
+                    Goto::ScrollDown
+                } else {
+                    Goto::ScrollUp
+                },
+                app.root()
+            )?,
+
             AppCommand::MoveCandidate(next) => if next {
                 app.next_candidate()?
             } else {
@@ -346,7 +348,7 @@ impl AppCommand {
                     ShellCommand::Command(None, cmd),
                     refresh
                 )?
-            },
+            }
         }
 
         Ok(())

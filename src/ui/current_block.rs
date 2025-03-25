@@ -33,6 +33,7 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     let current_items = render_list(
         app.current_files.iter(),
         app.selected_item.current_selected(),
+        app.move_index,
         &app.term_colors,
         marked_items,
         app.marked_operation

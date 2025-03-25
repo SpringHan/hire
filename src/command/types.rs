@@ -26,6 +26,9 @@ pub enum AppCommand {
     /// When the boolean is true, only mark single file.
     Mark(bool),
 
+    /// When the boolean is true, scroll down.
+    ListScroll(bool),
+
     /// When boolean value is true, the cursor will be moved to the edge.
     AppendFsName(bool),
 
@@ -70,9 +73,14 @@ impl AppCommand {
             "single_symlink"       => Self::SingleSymlink,
             "change_output_status" => Self::ChangeOutputStatus,
 
+
             "move" => Self::ItemMove(Direction::from_str(
                 option_get!(cmd_arg, command_err)
             )?),
+
+            "list_scroll" => Self::ListScroll(
+                *option_get!(cmd_arg, command_err) == "next"
+            ),
 
             "move_candidate" => Self::MoveCandidate(
                 *option_get!(cmd_arg, command_err) == "next"

@@ -5,10 +5,20 @@ use std::mem::swap;
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 
-use super::{simple_operations::output_path, Goto};
-use crate::{app::{self, App}, error::AppResult, utils::Direction};
+use super::simple_operations::output_path;
+use crate::{app::{self, App}, error::AppResult, utils::{get_window_height, Direction}};
 
 type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
+
+/// The enum that used to control move of `List` widget in ratatui.
+#[derive(PartialEq, Eq)]
+pub enum Goto {
+    Up,
+    Down,
+    ScrollUp,
+    ScrollDown,
+    Index(usize),
+}
 
 pub fn directory_movement(
     direction: Direction,
@@ -158,6 +168,7 @@ pub fn move_cursor(
                     selected_item.select(Some(current_idx - 1));
                 }
             },
+
             Goto::Down => {
                 let current_len = if in_root {
                     app.parent_files.len()
@@ -169,6 +180,37 @@ pub fn move_cursor(
                     selected_item.select(Some(current_idx + 1));
                 }
             },
+
+            Goto::ScrollUp => {
+                let wind_height = get_window_height() as usize;
+
+                if current_idx < wind_height {
+                    selected_item.select_first();
+                } else {
+                    let after_scroll = current_idx - wind_height;
+                    selected_item.select(Some(after_scroll));
+                    *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
+                }
+            },
+
+            Goto::ScrollDown => {
+                let wind_height = get_window_height() as usize;
+                let after_scroll = current_idx.saturating_add(wind_height);
+                let current_len = if in_root {
+                    app.parent_files.len()
+                } else {
+                    app.current_files.len()
+                };
+
+                if after_scroll >= current_len {
+                    selected_item.select(Some(current_len - 1));
+                    *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
+                } else {
+                    selected_item.select(Some(after_scroll));
+                    *selected_item.offset_mut() = after_scroll;
+                }
+            },
+
             Goto::Index(idx) => selected_item.select(Some(idx))
         }
 

@@ -70,7 +70,7 @@ fn main() -> AppResult<()> {
                 if let Err(err) = app.init_all_files() {
                     app.app_error.append_errors(err.iter());
                 }
-                ui::update_file_linenr(&mut app, frame.area());
+                ui::update_file_linenr(frame.area());
             }
 
             if let Err(err) = ui::ui(frame, &mut app) {

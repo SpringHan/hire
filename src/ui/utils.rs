@@ -3,9 +3,7 @@
 use std::{collections::HashMap, ops::AddAssign};
 
 use ratatui::{
-    style::{Color, Modifier, Stylize},
-    text::{Line, Span},
-    widgets::ListItem
+    layout::Alignment, style::{Color, Modifier, Stylize}, text::{Line, Span}, widgets::ListItem
 };
 
 use crate::app::{
@@ -17,11 +15,13 @@ use crate::app::{
 };
 
 /// Create a list of ListItem
-pub fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
-                   idx: Option<usize>,
-                   colors: &TermColors,
-                   marked_items: Option<&'a MarkedFiles>,
-                   marked_operation: FileOperation
+pub fn render_list<'a>(
+    files: std::slice::Iter<'a, FileSaver>,
+    selected_idx: Option<usize>,
+    move_index: bool,
+    colors: &TermColors,
+    marked_items: Option<&'a MarkedFiles>,
+    marked_operation: FileOperation
 ) -> Vec<ListItem<'a>>
 {
     let mut temp_items: Vec<ListItem> = Vec::new();
@@ -31,7 +31,7 @@ pub fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
         return temp_items
     }
 
-    let mut current_item: Option<usize> =  if let Some(_) = idx {
+    let mut current_item: Option<usize> =  if let Some(_) = selected_idx {
         Some(0)
     } else {
         None
@@ -51,13 +51,15 @@ pub fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
 
     // TODO: Refactor this lines.
     for file in files {
-        temp_items.push(
-            if let Some(ref mut num) = current_item {
-                match idx {
-                    Some(i) => {
-                        // Make the style of selected item
-                        if marked_files.contains_key(&file.name) {
-                            let item = ListItem::new(Line::from(
+        let mut item;
+
+        if let Some(ref mut num) = current_item {
+            match selected_idx {
+                Some(i) => {
+                    // Make the style of selected item
+                    if marked_files.contains_key(&file.name) {
+                        item = ListItem::new(
+                            Line::from(
                                 Span::raw(&file.name)
                                     .fg(if *num == i {
                                         Color::Black
@@ -71,27 +73,28 @@ pub fn render_list<'a>(files: std::slice::Iter<'a, FileSaver>,
                                         Modifier::empty()
                                     })
                             ));
-                            if *num == i {
-                                num.add_assign(1);
-                                item.bg(Color::LightYellow)
-                            } else {
-                                num.add_assign(1);
-                                item
-                            }
-                        } else if *num == i {
+
+                        if *num == i {
                             num.add_assign(1);
-                            get_normal_item_color(file, colors, true)
+                            item = item.bg(Color::LightYellow);
                         } else {
                             num.add_assign(1);
-                            get_normal_item_color(file, colors, false)
                         }
-                    },
-                    None => panic!("Unknow error when rendering list!")
-                }
-            } else {
-                get_normal_item_color(file, colors, false)
+                    } else if *num == i {
+                        num.add_assign(1);
+                        item = get_normal_item_color(file, colors, true);
+                    } else {
+                        num.add_assign(1);
+                        item = get_normal_item_color(file, colors, false);
+                    }
+                },
+                None => panic!("Unknow error when rendering list!")
             }
-        );
+        } else {
+            item = get_normal_item_color(file, colors, false);
+        }
+
+        temp_items.push(item);
     }
 
     temp_items
@@ -115,7 +118,7 @@ fn get_normal_item_color<'a>(file: &'a FileSaver,
         colors.file_style
     };
 
-    ListItem::new(Line::raw(&file.name)).style(
+    ListItem::new(Line::raw(&file.name).alignment(Alignment::Left)).style(
         if reverse {
             reverse_style(style)
         } else {

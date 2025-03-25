@@ -12,6 +12,7 @@ pub fn render_parent(app: &mut App, frame: &mut Frame, area: Rect) {
     let parent_items = render_list(
         app.parent_files.iter(),
         app.selected_item.parent_selected(),
+        app.move_index,
         &app.term_colors,
         None,
         FileOperation::None

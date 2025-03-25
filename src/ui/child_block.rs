@@ -11,7 +11,7 @@ use ratatui::{
     Frame
 };
 
-use crate::app::{App, FileContent, FileOperation};
+use crate::{app::{App, FileContent, FileOperation}, utils::update_window_height};
 
 use super::utils::render_list;
 
@@ -26,11 +26,12 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
         .borders(Borders::ALL);
 
     // Update file linenr
-    update_file_linenr(app, child_block.inner(area));
+    update_file_linenr(child_block.inner(area));
 
     let child_items = render_list(
         app.child_files.iter(),
         app.selected_item.child_selected(),
+        app.move_index,
         &app.term_colors,
         None,
         FileOperation::None
@@ -53,7 +54,7 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
         .border_set(border_set)
         .borders(Borders::ALL);
 
-    update_file_linenr(app, block.inner(layout));
+    update_file_linenr(block.inner(layout));
 
     if app.file_content == FileContent::Image {
         let _ref = app.image_preview.image_protocol();
@@ -78,10 +79,8 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
     Ok(())
 }
 
-pub fn update_file_linenr(app: &mut App, area: Rect) {
-    if app.file_lines != area.height {
-        app.file_lines = area.height;
-    }
+pub fn update_file_linenr(area: Rect) {
+    update_window_height(area.height);
 }
 
 /// Wrap current file content with Pragraph Widget.

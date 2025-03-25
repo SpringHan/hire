@@ -1,11 +1,17 @@
 // Utils for crate.
 
-use std::{borrow::Cow, fs::File, io::Read};
+use std::{borrow::Cow, fs::File, io::Read, sync::atomic::{AtomicU16, Ordering}};
 
 use anyhow::bail;
 use clap::Parser;
 use ratatui::text::Text;
 use ansi_to_tui::IntoText;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    /// The height of file list & content preview windows.
+    pub static ref WINDOW_HEIGHT: AtomicU16 = AtomicU16::new(0);
+}
 
 #[derive(Parser)]
 pub struct Args {
@@ -70,9 +76,10 @@ pub fn str_split(_string: String) -> Vec<String> {
 pub fn read_to_text(
     text_ref: &mut Text,
     file: &File,
-    line_nr: u16
 ) -> anyhow::Result<()>
 {
+    let line_nr = get_window_height();
+
     let mut idx = 1;
     let mut bytes: Vec<u8> = Vec::new();
     for _b in file.bytes() {
@@ -103,4 +110,15 @@ pub fn read_to_text(
     *text_ref = text;
 
     Ok(())
+}
+
+pub fn update_window_height(height: u16) {
+    let current = WINDOW_HEIGHT.load(Ordering::Acquire);
+    if current != height {
+        WINDOW_HEIGHT.store(height, Ordering::Release);
+    }
+}
+
+pub fn get_window_height() -> u16 {
+    WINDOW_HEIGHT.load(Ordering::Acquire)
 }

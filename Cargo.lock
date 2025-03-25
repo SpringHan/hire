@@ -550,13 +550,13 @@ version = "0.2.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
- "bitflags 2.9.0",
  "chrono",
  "clap",
  "copy_dir",
  "file-size",
  "image",
  "is_executable",
+ "lazy_static",
  "ratatui",
  "ratatui-image",
  "thiserror 2.0.11",
@@ -730,6 +730,12 @@ checksum = "54c0c35952f67de54bb584e9fd912b3023117cbafc0a77d8f3dee1fb5f572fe8"
 dependencies = [
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lebe"
