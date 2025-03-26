@@ -5,19 +5,20 @@ mod filesaver;
 mod special_types;
 mod image_preview;
 
-use std::borrow::Cow;
 use std::{env, fs, io};
+
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
-use image_preview::ImagePreview;
 use ratatui::text::Text;
+use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
+use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::{AppCompletion, FileSearcher};
-use crate::utils::read_to_text;
 
 pub use special_types::*;
 pub use color::TermColors;
@@ -122,7 +123,7 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
-            move_index: true,
+            move_index: false,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,

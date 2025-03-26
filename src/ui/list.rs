@@ -14,6 +14,8 @@ pub struct Item<'a> {
     style: Style,
     left: Text<'a>,
     right: Option<Text<'a>>,
+
+    empty_list: bool,
 }
 
 pub struct List<'a> {
@@ -36,9 +38,20 @@ impl<'a> Item<'a> {
         };
 
         Self {
-            left: left.into(),
             right: _right,
-            style: Style::default()
+            left: left.into(),
+            empty_list: false,
+            style: Style::default(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            right: None,
+            left: Text::raw("Empty").red(),
+
+            empty_list: true,
+            style: Style::default(),
         }
     }
 }
@@ -135,6 +148,13 @@ impl StatefulWidget for List<'_> {
             .skip(state.offset())
             .take(get_window_height() as usize)
         {
+            if item.empty_list {
+                item.render(item_area, buf);
+                self.block.render(area, buf);
+
+                return ()
+            }
+
             if let Some(selected_idx) = state.selected() {
                 if current_idx == selected_idx {
                     item.style = item.style.reversed();

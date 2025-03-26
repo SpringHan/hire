@@ -215,6 +215,7 @@ fn get_item_num_para(app: &App) -> String {
         } else {
             format!(
                 "{}/{}",
+                // TODO: Rewrite without unwrap.
                 app.selected_item.current_selected().unwrap() + 1,
                 app.current_files.len()
             )
