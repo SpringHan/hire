@@ -20,8 +20,8 @@ use crate::key_event::{AppCompletion, FileSearcher};
 use crate::utils::read_to_text;
 
 pub use special_types::*;
+pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
-pub use color::{TermColors, reverse_style};
 
 pub struct App<'a> {
     // Core
@@ -122,7 +122,7 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
-            move_index: false,
+            move_index: true,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,

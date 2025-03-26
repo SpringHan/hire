@@ -5,7 +5,7 @@ use ratatui_image::{thread::ThreadImage, Resize};
 
 use ratatui::{
     symbols::{border::{Set, PLAIN}, line},
-    widgets::{Block, Borders, List},
+    widgets::{Block, Borders},
     layout::Rect,
     text::Text,
     Frame
@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::{app::{App, FileContent, FileOperation}, utils::update_window_height};
 
-use super::utils::render_list;
+use super::{list::List, utils::render_list};
 
 pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
     let border_set = Set {
@@ -30,15 +30,13 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let child_items = render_list(
         app.child_files.iter(),
-        app.selected_item.child_selected(),
-        app.move_index,
         &app.term_colors,
         None,
         FileOperation::None
     );
 
     frame.render_stateful_widget(
-        List::new(child_items).block(child_block),
+        List::new(child_block, child_items),
         area,
         &mut app.selected_item.child
     );

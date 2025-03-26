@@ -83,19 +83,6 @@ impl TermColors {
     }
 }
 
-pub fn reverse_style(origin: Style) -> Style {
-    let mut origin = origin;
-    let temp_color = origin.bg;
-    origin.bg = origin.fg;
-    origin.fg = if temp_color.is_some() {
-        temp_color
-    } else {
-        Some(Color::Black)
-    };
-
-    origin
-}
-
 fn fetch_style(from: &Vec<&str>,
                map: &HashMap<&str, Style>,
                target: &str

@@ -151,7 +151,7 @@ pub fn handle_event(
                     app.quit_command_mode();
                 },
                 _ => {
-                    if let OptionFor::None = app.option_key {
+                    if let OptionFor::Switch(_) = app.option_key {
                         app.option_key = OptionFor::None;
                         return Ok(())
                     }

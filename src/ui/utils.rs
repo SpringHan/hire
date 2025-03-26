@@ -1,41 +1,32 @@
 // Utils
 
-use std::{collections::HashMap, ops::AddAssign};
+use std::collections::HashMap;
 
-use ratatui::{
-    layout::Alignment, style::{Color, Modifier, Stylize}, text::{Line, Span}, widgets::ListItem
-};
+use ratatui::style::{Color, Modifier, Styled, Stylize};
 
 use crate::app::{
-    reverse_style,
     FileOperation,
     MarkedFiles,
     FileSaver,
     TermColors
 };
 
+use super::list::Item;
+
 /// Create a list of ListItem
 pub fn render_list<'a>(
     files: std::slice::Iter<'a, FileSaver>,
-    selected_idx: Option<usize>,
-    move_index: bool,
     colors: &TermColors,
     marked_items: Option<&'a MarkedFiles>,
     marked_operation: FileOperation
-) -> Vec<ListItem<'a>>
+) -> Vec<Item<'a>>
 {
-    let mut temp_items: Vec<ListItem> = Vec::new();
+    let mut temp_items: Vec<Item> = Vec::new();
     if files.len() == 0 {
-        temp_items.push(ListItem::new("Empty").fg(Color::Red));
+        temp_items.push(Item::new("Empty", None).fg(Color::Red));
 
         return temp_items
     }
-
-    let mut current_item: Option<usize> =  if let Some(_) = selected_idx {
-        Some(0)
-    } else {
-        None
-    };
 
     // Use this method to avoid extra clone.
     let temp_set: HashMap<String, bool> = HashMap::new();
@@ -49,50 +40,19 @@ pub fn render_list<'a>(
         &temp_set
     };
 
-    // TODO: Refactor this lines.
     for file in files {
-        let mut item;
-
-        if let Some(ref mut num) = current_item {
-            match selected_idx {
-                Some(i) => {
-                    // Make the style of selected item
-                    if marked_files.contains_key(&file.name) {
-                        item = ListItem::new(
-                            Line::from(
-                                Span::raw(&file.name)
-                                    .fg(if *num == i {
-                                        Color::Black
-                                    } else {
-                                        Color::LightYellow
-                                    })
-                                    .add_modifier(get_file_font_style(file.is_dir))
-                                    .add_modifier(if to_be_moved {
-                                        Modifier::ITALIC
-                                    } else {
-                                        Modifier::empty()
-                                    })
-                            ));
-
-                        if *num == i {
-                            num.add_assign(1);
-                            item = item.bg(Color::LightYellow);
-                        } else {
-                            num.add_assign(1);
-                        }
-                    } else if *num == i {
-                        num.add_assign(1);
-                        item = get_normal_item_color(file, colors, true);
-                    } else {
-                        num.add_assign(1);
-                        item = get_normal_item_color(file, colors, false);
-                    }
-                },
-                None => panic!("Unknow error when rendering list!")
-            }
+        let item = if marked_files.contains_key(&file.name) {
+            Item::new::<&str>(&file.name, None)
+                .fg(Color::LightYellow)
+                .add_modifier(get_file_font_style(file.is_dir))
+                .add_modifier(if to_be_moved {
+                    Modifier::ITALIC
+                } else {
+                    Modifier::empty()
+                })
         } else {
-            item = get_normal_item_color(file, colors, false);
-        }
+            get_normal_item_color(file, colors)
+        };
 
         temp_items.push(item);
     }
@@ -103,8 +63,8 @@ pub fn render_list<'a>(
 /// Return the item which has the style of normal file.
 fn get_normal_item_color<'a>(file: &'a FileSaver,
                              colors: &TermColors,
-                             reverse: bool
-) -> ListItem<'a>
+                             // reverse: bool
+) -> Item<'a>
 {
     let style = if file.is_dir {
         colors.dir_style
@@ -118,13 +78,7 @@ fn get_normal_item_color<'a>(file: &'a FileSaver,
         colors.file_style
     };
 
-    ListItem::new(Line::raw(&file.name).alignment(Alignment::Left)).style(
-        if reverse {
-            reverse_style(style)
-        } else {
-            style
-        }
-    )
+    Item::new::<&str>(&file.name, None).set_style(style)
 }
 
 /// Return bold if the file is a directory.
