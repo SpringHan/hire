@@ -19,6 +19,7 @@ pub enum AppCommand {
     CreateFile,
     GotoBottom,
     HideOrShow,
+    ShowNaviIndex,
     SingleSymlink,
     PrintFullPath,
     ChangeOutputStatus,
@@ -28,6 +29,10 @@ pub enum AppCommand {
 
     /// When the boolean is true, scroll down.
     ListScroll(bool),
+
+    /// The command to insert navigation index.
+    /// Element of it is used to imply what the index number is.
+    NaviIndexInput(u8),
 
     /// When boolean value is true, the cursor will be moved to the edge.
     AppendFsName(bool),
@@ -71,8 +76,8 @@ impl AppCommand {
             "hide_or_show"         => Self::HideOrShow,
             "full_path"            => Self::PrintFullPath,
             "single_symlink"       => Self::SingleSymlink,
+            "show_navi_index"      => Self::ShowNaviIndex,
             "change_output_status" => Self::ChangeOutputStatus,
-
 
             "move" => Self::ItemMove(Direction::from_str(
                 option_get!(cmd_arg, command_err)
@@ -96,6 +101,10 @@ impl AppCommand {
 
             "append_filename" => Self::AppendFsName(
                 *option_get!(cmd_arg, command_err) == "extension"
+            ),
+
+            "navi_input" => Self::NaviIndexInput(
+                option_get!(cmd_arg, command_err).parse::<u8>()?
             ),
 
             "shell_command" => {

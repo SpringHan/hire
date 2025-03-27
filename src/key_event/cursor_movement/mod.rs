@@ -1,24 +1,18 @@
 // Cursor Movement.
 
+mod types;
+
 use std::mem::swap;
 
 use ratatui::Terminal as RTerminal;
 use ratatui::backend::CrosstermBackend;
 
 use super::simple_operations::output_path;
-use crate::{app::{self, App}, error::AppResult, utils::{get_window_height, Direction}};
+use crate::{app::{self, App}, error::AppResult, option_get, rt_error, utils::{get_window_height, Direction}};
+
+pub use types::*;
 
 type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
-
-/// The enum that used to control move of `List` widget in ratatui.
-#[derive(PartialEq, Eq)]
-pub enum Goto {
-    Up,
-    Down,
-    ScrollUp,
-    ScrollDown,
-    Index(usize),
-}
 
 pub fn directory_movement(
     direction: Direction,
@@ -61,6 +55,7 @@ pub fn directory_movement(
                 app.clean_search_idx();
             }
         },
+
         Direction::Right => {
             let mut current_empty = false;
 
@@ -133,9 +128,11 @@ pub fn directory_movement(
             app.refresh_select_item();
             app.clean_search_idx();
         },
+
         Direction::Up => {
             move_cursor(app, Goto::Up, in_root)?;
         },
+
         Direction::Down => {
             move_cursor(app, Goto::Down, in_root)?;
         },
@@ -232,6 +229,47 @@ pub fn move_cursor(
         app.init_child_files()?;
         app.refresh_select_item();
     }
+
+    Ok(())
+}
+
+/// Jump to specific item with navigation index entered by user.
+pub fn jump_to_index(app: &mut App) -> AppResult<()> {
+    let current_state = if app.root() {
+        &app.selected_item.parent
+    } else {
+        &app.selected_item.current
+    };
+
+    let current_len = if app.root() {
+        app.parent_files.len()
+    } else {
+        app.current_files.len()
+    };
+
+    if current_state.selected().is_none() {
+        app.navi_index.reset();
+        rt_error!("Cannot get current selected index")
+    }
+
+    if current_len == 0 {
+        app.navi_index.reset();
+        rt_error!("There's no item can be selected")
+    }
+
+    let index = option_get!(
+        app.navi_index.index(),
+        "You have not input the index"
+    );
+    let mut after_move = current_state.offset() + index;
+
+    if after_move >= current_len {
+        after_move = current_len - 1;
+    }
+
+    move_cursor(app, Goto::Index(after_move), app.root())?;
+
+    app.navi_index.reset();
 
     Ok(())
 }

@@ -1,10 +1,12 @@
 keymap = [
     # Motion
-    { key = "u", run = "move up"     },
-    { key = "e", run = "move down"   },
-    { key = "n", run = "move left"   },
-    { key = "i", run = "move right"  },
-    { key = "G", run = "goto_bottom" },
+    { key = "u", run = "move up"          },
+    { key = "e", run = "move down"        },
+    { key = "n", run = "move left"        },
+    { key = "i", run = "move right"       },
+    { key = "G", run = "goto_bottom"      },
+    { key = "v", run = "list_scroll next" },
+    { key = "V", run = "list_scroll prev" },
 
     # Operations with menu
     { key = "t", run = "tab_operation"    },
@@ -45,4 +47,17 @@ keymap = [
     { key = "-", run = "hide_or_show"          },
     { key = "s", run = "single_symlink"        },
     { key = "\\", run = "change_output_status" },
+
+    # Navigation Index
+    { key = "1", run = "navi_input 1"    },
+    { key = "2", run = "navi_input 2"    },
+    { key = "3", run = "navi_input 3"    },
+    { key = "4", run = "navi_input 4"    },
+    { key = "5", run = "navi_input 5"    },
+    { key = "6", run = "navi_input 6"    },
+    { key = "7", run = "navi_input 7"    },
+    { key = "8", run = "navi_input 8"    },
+    { key = "9", run = "navi_input 9"    },
+    { key = "0", run = "navi_input 0"    },
+    { key = ".", run = "show_navi_index" },
 ]

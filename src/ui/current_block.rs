@@ -40,7 +40,8 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     frame.render_stateful_widget(
         List::new(current_block, current_items)
             .index(
-                app.move_index && !app.root(),
+                app.navi_index.show() && !app.root(),
+                app.navi_index.index(),
                 app.term_colors.executable_style
             ),
         area,

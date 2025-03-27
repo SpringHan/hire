@@ -23,8 +23,6 @@ pub fn render_list<'a>(
 {
     let mut temp_items: Vec<Item> = Vec::new();
     if files.len() == 0 {
-        temp_items.push(Item::empty());
-
         return temp_items
     }
 

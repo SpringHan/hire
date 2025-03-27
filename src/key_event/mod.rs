@@ -25,7 +25,7 @@ use interaction::fzf_jump;
 use simple_operations::output_path;
 use goto_operation::goto_operation;
 use paste_operation::paste_operation;
-use cursor_movement::directory_movement;
+use cursor_movement::{directory_movement, jump_to_index};
 use file_operations::{append_file_name, delete_operation, mark_operation};
 
 use crate::utils::Direction;
@@ -38,9 +38,9 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 // Export
 pub use tab::TabList;
 pub use file_search::FileSearcher;
-pub use cursor_movement::{move_cursor, Goto};
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
+pub use cursor_movement::{move_cursor, Goto, NaviIndex};
 pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
 
 // Export for auto config
@@ -106,7 +106,12 @@ pub fn handle_event(
 
             // Execute keybinding or insert character.
             if let app::Block::Browser(in_root) = app.selected_block {
-                let command = app.keymap.get(c)?;
+                let command = if app.navi_index.show() {
+                    app.keymap.navi_get(c)?
+                } else {
+                    app.keymap.get(c)?
+                };
+
                 command.execute(app, terminal, in_root)?;
             } else {
                 app.command_line_append(c);
@@ -137,6 +142,12 @@ pub fn handle_event(
                 if !app.command_completion.popup_info().0.is_empty() {
                     app.command_completion.reset();
                 }
+
+                return Ok(())
+            }
+
+            if app.navi_index.show() {
+                app.navi_index.backspace();
             }
         },
 
@@ -153,6 +164,11 @@ pub fn handle_event(
                 _ => {
                     if let OptionFor::Switch(_) = app.option_key {
                         app.option_key = OptionFor::None;
+                        return Ok(())
+                    }
+
+                    if app.navi_index.show() {
+                        app.navi_index.reset();
                         return Ok(())
                     }
 
@@ -173,6 +189,10 @@ pub fn handle_event(
                     app.command_parse(terminal)?;
                     return Ok(())
                 }
+            }
+
+            if app.navi_index.show() {
+                jump_to_index(app)?;
             }
 
             if app.output_file.is_some() && app.confirm_output {
@@ -258,6 +278,7 @@ impl AppCommand {
             AppCommand::Goto               => goto_operation(app),
             AppCommand::Paste              => paste_operation(app)?,
             AppCommand::Delete             => delete_operation(app),
+            AppCommand::ShowNaviIndex      => app.navi_index.init(),
             AppCommand::HideOrShow         => app.hide_or_show(None)?,
             AppCommand::FzfJump            => fzf_jump(app, terminal)?,
             AppCommand::CmdShell           => shell::cmdline_shell(app)?,
@@ -266,6 +287,7 @@ impl AppCommand {
             AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
             AppCommand::Search             => app.selected_block.set_command_line("/", CursorPos::End),
 
+            AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
 
@@ -348,7 +370,7 @@ impl AppCommand {
                     ShellCommand::Command(None, cmd),
                     refresh
                 )?
-            }
+            },
         }
 
         Ok(())

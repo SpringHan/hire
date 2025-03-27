@@ -18,7 +18,7 @@ use ratatui::widgets::ListState;
 use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::{AppCompletion, FileSearcher};
+use crate::key_event::{AppCompletion, FileSearcher, NaviIndex};
 
 pub use special_types::*;
 pub use color::TermColors;
@@ -38,7 +38,7 @@ pub struct App<'a> {
     pub file_content: FileContent,
 
     /// Whether to show the index of file to allow user to jump to.
-    pub move_index: bool,
+    pub navi_index: NaviIndex,
 
     // Block
     pub selected_block: Block,
@@ -123,11 +123,11 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
-            move_index: false,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,
             marked_files: HashMap::new(),
+            navi_index: NaviIndex::default(),
             marked_operation: FileOperation::None,
             image_preview: ImagePreview::default(),
             file_searcher: FileSearcher::default(),

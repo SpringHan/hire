@@ -2,19 +2,28 @@
 
 use std::collections::HashMap;
 
-use crate::{app::App, command::AppCommand, error::{AppError, AppResult}, option_get};
+use crate::option_get;
+use crate::{error::{AppError, AppResult}, command::AppCommand, app::App};
 
 use super::get_document;
 
 #[derive(Default)]
 pub struct Keymap {
-    maps: HashMap<char, AppCommand>
+    navi_maps: HashMap<char, AppCommand>,
+    normal_maps: HashMap<char, AppCommand>
 }
 
 impl Keymap {
     pub fn get(&self, key: char) -> anyhow::Result<AppCommand> {
         Ok(
-            option_get!(self.maps.get(&key), "Invalid keybinding")
+            option_get!(self.normal_maps.get(&key), "Invalid keybinding")
+                .to_owned()
+        )
+    }
+
+    pub fn navi_get(&self, key: char) -> anyhow::Result<AppCommand> {
+        Ok(
+            option_get!(self.navi_maps.get(&key), "Invalid keybinding")
                 .to_owned()
         )
     }
@@ -43,10 +52,21 @@ pub fn init_keymap(app: &mut App, path: String) -> AppResult<()> {
 
         match AppCommand::from_str(bind) {
             Ok(command) => {
-                app.keymap.maps.insert(
-                    key.chars().next().expect(err_msg),
-                    command
-                );
+                match command {
+                    AppCommand::NaviIndexInput(_) => {
+                        app.keymap.navi_maps.insert(
+                            key.chars().next().expect(err_msg),
+                            command
+                        );
+                    },
+
+                    _ => {
+                        app.keymap.normal_maps.insert(
+                            key.chars().next().expect(err_msg),
+                            command
+                        );
+                    }
+                }
             },
             Err(err) => errors.add_error(err),
         }

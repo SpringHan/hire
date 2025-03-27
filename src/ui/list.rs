@@ -1,21 +1,15 @@
 // List Widget
 
 use ratatui::{
-    widgets::{Block, ListState, StatefulWidget, Widget},
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Styled, Stylize},
-    buffer::Buffer,
-    text::Text,
+    buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Styled, Stylize}, text::{Line, Span, Text}, widgets::{Block, ListState, StatefulWidget, Widget}
 };
 
 use crate::utils::get_window_height;
 
 pub struct Item<'a> {
     style: Style,
-    left: Text<'a>,
-    right: Option<Text<'a>>,
-
-    empty_list: bool,
+    left: Line<'a>,
+    right: Option<Line<'a>>,
 }
 
 pub struct List<'a> {
@@ -23,13 +17,14 @@ pub struct List<'a> {
     items: Vec<Item<'a>>,
 
     // Navigation index
-    navi_index: bool,
+    navi_show: bool,
+    navi_index: Option<usize>,
     index_color: Color,
 }
 
 impl<'a> Item<'a> {
     pub fn new<T>(left: T, right: Option<T>) -> Self
-    where T: Into<Text<'a>>
+    where T: Into<Line<'a>>
     {
         let _right = if let Some(text) = right {
             Some(text.into())
@@ -40,17 +35,6 @@ impl<'a> Item<'a> {
         Self {
             right: _right,
             left: left.into(),
-            empty_list: false,
-            style: Style::default(),
-        }
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            right: None,
-            left: Text::raw("Empty").red(),
-
-            empty_list: true,
             style: Style::default(),
         }
     }
@@ -98,13 +82,25 @@ impl<'a> List<'a> {
         Self {
             block,
             items,
-            navi_index: false,
+            navi_index: None,
+            navi_show: false,
             index_color: Color::default()
         }
     }
 
-    pub fn index(mut self, enable: bool, style: Style) -> Self {
-        self.navi_index = enable;
+    pub fn index(
+        mut self,
+        navi_show: bool,
+        index: Option<usize>,
+        style: Style
+    ) -> Self
+    {
+        if !navi_show {
+            return self
+        }
+
+        self.navi_show = true;
+        self.navi_index = index;
 
         if let Some(color) = style.fg {
             self.index_color = color;
@@ -132,12 +128,18 @@ impl StatefulWidget for List<'_> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        // Adjust offset firstly
-        Self::adjust_offset(state);
-
         let inner_area = self.block.inner(area);
         let mut item_area = inner_area;
         item_area.height = 1;
+
+        if self.items.is_empty() {
+            Text::raw("Empty").red().render(inner_area, buf);
+            self.block.render(area, buf);
+            return ()
+        }
+
+        // Adjust offset firstly
+        Self::adjust_offset(state);
 
         let mut current_number = 0;
         let mut is_selected = false;
@@ -148,13 +150,6 @@ impl StatefulWidget for List<'_> {
             .skip(state.offset())
             .take(get_window_height() as usize)
         {
-            if item.empty_list {
-                item.render(item_area, buf);
-                self.block.render(area, buf);
-
-                return ()
-            }
-
             if let Some(selected_idx) = state.selected() {
                 if current_idx == selected_idx {
                     item.style = item.style.reversed();
@@ -162,9 +157,36 @@ impl StatefulWidget for List<'_> {
                 }
             }
 
+
             // Set Index for each item
-            if self.navi_index {
-                let mut right = Text::raw(current_number.to_string());
+            if self.navi_show {
+                let mut right: Line;
+
+                if let Some(index) = self.navi_index {
+                    let splitted = prefix_split(index, current_number);
+                    let mut right_spans: Vec<Span> = Vec::new();
+
+                    if let Some(_prefix) = splitted.0 {
+                        right_spans.push(
+                            Span::raw(_prefix)
+                                .add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
+                        );
+                    }
+
+                    if let Some(_normal) = splitted.1 {
+                        right_spans.push(
+                            Span::raw(_normal)
+                                .add_modifier(Modifier::DIM)
+                                .remove_modifier(Modifier::BOLD)
+                        );
+                    }
+
+                    right = Line::from(right_spans);
+                } else {
+                    right = Line::raw(current_number.to_string())
+                        .add_modifier(Modifier::DIM)
+                        .remove_modifier(Modifier::BOLD);
+                }
 
                 if !is_selected {
                     right.style.fg = Some(self.index_color);
@@ -172,6 +194,7 @@ impl StatefulWidget for List<'_> {
 
                 item.right = Some(right);
             }
+
 
             item.render(item_area, buf);
 
@@ -183,4 +206,42 @@ impl StatefulWidget for List<'_> {
 
         self.block.render(area, buf);
     }
+}
+
+#[inline]
+fn prefix_split(
+    prefix: usize,
+    number: usize
+) -> (Option<String>, Option<String>)
+{
+    let num_str = number.to_string();
+
+    if prefix == 0 {
+        if number == 0 {
+            return (Some(num_str), None)
+        }
+
+        return (None, Some(num_str))
+    }
+
+    if number == prefix {
+        return (Some(num_str), None)
+    }
+
+    // Calculate the pow of prefix
+    let mut pow = 1;
+    let mut temp = prefix;
+    while temp >= 10 {
+        temp /= 10;
+        pow += 1;
+    }
+
+    if number / 10usize.pow(pow) != prefix {
+        return (None, Some(num_str))
+    }
+
+    let prefix_side = num_str[..pow as usize].to_owned();
+    let right_side = num_str[pow as usize..].to_owned();
+
+    (Some(prefix_side), Some(right_side))
 }
