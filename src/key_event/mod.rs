@@ -193,6 +193,7 @@ pub fn handle_event(
 
             if app.navi_index.show() {
                 jump_to_index(app)?;
+                return Ok(())
             }
 
             if app.output_file.is_some() && app.confirm_output {
