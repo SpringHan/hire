@@ -212,7 +212,7 @@ impl<'a> App<'a> {
                 },
 
                 ":create_symlink" => {
-                    if command_slices.len() != 4 {
+                    if command_slices.len() != 3 {
                         rt_error!("{argu_err}")
                     }
 
@@ -221,9 +221,6 @@ impl<'a> App<'a> {
 
                     command_slices.remove(0);
                     let files = command_slices;
-                    // let files: Vec<&str> = files
-                    //     .split("->")
-                    //     .collect();
                     super::cmds::create_symlink(
                         self,
                         [(files[0].trim(), files[1].trim())].into_iter()
