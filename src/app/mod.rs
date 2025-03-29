@@ -44,14 +44,11 @@ pub struct App<'a> {
     pub selected_block: Block,
 
     pub option_key: OptionFor,       // Use the next key as option.
-    pub marked_operation: FileOperation,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
     /// When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
     pub command_expand: bool,
-    /// Like `command_error`, the content will be in red, but will not reset current key_event.
-    pub command_warning: bool,
     pub command_scroll: Option<(u16, u16)>, // Used for expanded mode.
 
     pub command_idx: Option<usize>,
@@ -128,14 +125,12 @@ impl<'a> Default for App<'a> {
             option_key: OptionFor::None,
             marked_files: HashMap::new(),
             navi_index: NaviIndex::default(),
-            marked_operation: FileOperation::None,
             image_preview: ImagePreview::default(),
             file_searcher: FileSearcher::default(),
 
             // Command
             command_idx: None,
             command_expand: false,
-            command_warning: false,
             command_history: Vec::new(),
             command_completion: AppCompletion::default(),
 

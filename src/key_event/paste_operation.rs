@@ -9,11 +9,7 @@ use super::SwitchCase;
 use super::file_operations::delete_file;
 
 use crate::{rt_error, App};
-use crate::app::{
-    CursorPos,
-    FileOperation,
-    MarkedFiles,
-};
+use crate::app::{CmdContent, CursorPos, MarkedFiles};
 use crate::error::{
     AppResult,
     AppError,
@@ -22,7 +18,7 @@ use crate::error::{
 };
 
 pub fn paste_operation(app: &mut App) -> AppResult<()> {
-    if app.marked_files.is_empty() || app.marked_operation != FileOperation::Move {
+    if app.marked_files.is_empty() {
         return Err(ErrorType::NoSelected.pack())
     }
 
@@ -270,7 +266,7 @@ fn paste_switch(
     Ok(true)
 }
 
-fn generate_msg(app: &App) -> String {
+fn generate_msg(app: &App) -> CmdContent {
     let mut msg = String::from("[p] move to here  [s] make symbolic link  [c] copy to here
 [o] copy to here forcely  [O] move to here forcely  [x] clear selected files
 \nSelected files:\n");
@@ -287,12 +283,11 @@ fn generate_msg(app: &App) -> String {
         }
     }
 
-    msg
+    CmdContent::String(msg)
 }
 
 fn restore_status(app: &mut App) -> AppResult<()> {
     app.marked_files.clear();
-    app.marked_operation = FileOperation::None;
     app.goto_dir(app.current_path(), None)?;
 
     Ok(())

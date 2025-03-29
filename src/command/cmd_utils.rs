@@ -5,7 +5,7 @@ use std::{io::Stderr, ops::AddAssign};
 use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
-    app::{Block, CursorPos, FileOperation, OptionFor},
+    app::{Block, CmdContent, CursorPos, OptionFor},
     key_event::{CommandStr, ShellCommand},
     error::{AppResult, ErrorType},
     utils::Direction,
@@ -14,8 +14,8 @@ use crate::{
 };
 
 impl Block {
-    pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
-        *self = Block::CommandLine(content.into(), pos);
+    pub fn set_command_line<S: Into<String>>(&mut self, content: S, pos: CursorPos) {
+        *self = Block::CommandLine(CmdContent::String(content.into()), pos);
     }
 }
 
@@ -27,13 +27,14 @@ impl<'a> App<'a> {
                 ref mut cursor
             ) = self.selected_block
         {
+            let content_ref = origin.get_mut();
             if let CursorPos::Index(idx) = cursor {
-                origin.insert(*idx, content);
+                content_ref.insert(*idx, content);
                 idx.add_assign(1);
                 return ()
             }
 
-            origin.push(content);
+            content_ref.push(content);
 
             if !self.command_completion.popup_info().0.is_empty() {
                 self.command_completion.reset();
@@ -57,10 +58,6 @@ impl<'a> App<'a> {
             self.command_error = false;
         }
 
-        if self.command_warning {
-            self.command_warning = false;
-        }
-
         if !self.command_completion.popup_info().0.is_empty() {
             self.command_completion.reset();
         }
@@ -81,6 +78,8 @@ impl<'a> App<'a> {
                 return ()
             }
 
+            let content_ref = current.get_mut();
+
             if *cursor != CursorPos::End {
                 *cursor = CursorPos::End;
             }
@@ -92,7 +91,7 @@ impl<'a> App<'a> {
                     }
 
                     self.command_idx = Some(index + 1);
-                    *current = self.command_history[index + 1].to_owned();
+                    *content_ref = self.command_history[index + 1].to_owned();
                     return ()
                 }
 
@@ -101,7 +100,7 @@ impl<'a> App<'a> {
                 }
 
                 self.command_idx = Some(index - 1);
-                *current = self.command_history[index - 1].to_owned();
+                *content_ref = self.command_history[index - 1].to_owned();
                 return ()
             }
 
@@ -110,7 +109,7 @@ impl<'a> App<'a> {
                 self.command_history
                     .iter()
                     .rev()
-                    .position(|x| x == current)
+                    .position(|x| x == content_ref)
             } else {
                 return ()
             };
@@ -125,7 +124,7 @@ impl<'a> App<'a> {
 
                     let temp_idx = self.command_history.len() - 2 - idx;
                     self.command_idx = Some(temp_idx);
-                    *current = self.command_history[temp_idx].to_owned();
+                    *content_ref = self.command_history[temp_idx].to_owned();
 
                     return ()
                 } 
@@ -134,7 +133,7 @@ impl<'a> App<'a> {
                     self.command_idx = Some(idx);
                 } else {
                     self.command_idx = Some(idx + 1);
-                    *current = self.command_history[idx + 1].to_owned();
+                    *content_ref = self.command_history[idx + 1].to_owned();
                 }
 
                 return ()
@@ -142,10 +141,10 @@ impl<'a> App<'a> {
 
             if !next {
                 self.command_idx = Some(self.command_history.len() - 1);
-                *current = self.command_history.last().unwrap().to_owned();
+                *content_ref = self.command_history.last().unwrap().to_owned();
             } else {
                 self.command_idx = Some(0);
-                *current = self.command_history.first().unwrap().to_owned();
+                *content_ref = self.command_history.first().unwrap().to_owned();
             }
         }
     }
@@ -155,14 +154,16 @@ impl<'a> App<'a> {
         terminal: &mut Terminal<CrosstermBackend<Stderr>>
     ) -> AppResult<()> {
         if let Block::CommandLine(ref _command, _) = self.selected_block {
-            if _command.starts_with("/") {
-                self.file_search(_command[1..].to_owned(), false)?;
+            let content_ref = _command.get();
+
+            if content_ref.starts_with("/") {
+                self.file_search(content_ref[1..].to_owned(), false)?;
                 return Ok(self.quit_command_mode())
             }
 
             let argu_err = "Wrong number argument for current command";
 
-            let command = _command.to_owned();
+            let command = content_ref.to_owned();
             self.command_history.push(command.to_owned());
             let mut command_slices: Vec<&str> = command.split(" ").collect();
 
@@ -217,7 +218,6 @@ impl<'a> App<'a> {
                     }
 
                     self.marked_files.clear();
-                    self.marked_operation = FileOperation::None;
 
                     command_slices.remove(0);
                     let files = command_slices;

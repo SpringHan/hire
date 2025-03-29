@@ -4,12 +4,7 @@ use std::collections::HashMap;
 
 use ratatui::style::{Color, Modifier, Styled, Stylize};
 
-use crate::app::{
-    FileOperation,
-    MarkedFiles,
-    FileSaver,
-    TermColors
-};
+use crate::app::{MarkedFiles, FileSaver, TermColors};
 
 use super::list::Item;
 
@@ -18,7 +13,6 @@ pub fn render_list<'a>(
     files: std::slice::Iter<'a, FileSaver>,
     colors: &TermColors,
     marked_items: Option<&'a MarkedFiles>,
-    marked_operation: FileOperation
 ) -> Vec<Item<'a>>
 {
     let mut temp_items: Vec<Item> = Vec::new();
@@ -28,11 +22,7 @@ pub fn render_list<'a>(
 
     // Use this method to avoid extra clone.
     let temp_set: HashMap<String, bool> = HashMap::new();
-    let mut to_be_moved = false;
     let marked_files = if let Some(item) = marked_items {
-        if marked_operation == FileOperation::Move {
-            to_be_moved = true;
-        }
         &item.files
     } else {
         &temp_set
@@ -43,11 +33,6 @@ pub fn render_list<'a>(
             Item::new::<&str>(&file.name, None)
                 .fg(Color::LightYellow)
                 .add_modifier(get_file_font_style(file.is_dir))
-                .add_modifier(if to_be_moved {
-                    Modifier::ITALIC
-                } else {
-                    Modifier::empty()
-                })
         } else {
             get_normal_item_color(file, colors)
         };

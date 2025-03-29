@@ -31,7 +31,7 @@ use file_operations::{append_file_name, delete_operation, mark_operation};
 use crate::utils::Direction;
 use crate::error::AppResult;
 use crate::command::AppCommand;
-use crate::app::{self, App, CursorPos, OptionFor, FileOperation};
+use crate::app::{self, App, CursorPos, OptionFor};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
@@ -125,16 +125,17 @@ pub fn handle_event(
                     ref mut cursor
                 ) = app.selected_block
             {
+                let content_ref = origin.get_mut();
                 match cursor {
                     app::CursorPos::Index(idx) => {
                         if *idx == 0 {
                             return Ok(())
                         }
-                        origin.remove(*idx - 1);
+                        content_ref.remove(*idx - 1);
                         idx.sub_assign(1);
                     },
                     app::CursorPos::End => {
-                        origin.pop();
+                        content_ref.pop();
                     },
                     _ => ()
                 }
@@ -174,7 +175,6 @@ pub fn handle_event(
 
                     if !app.marked_files.is_empty() {
                         app.marked_files.clear();
-                        app.marked_operation = FileOperation::None;
                     }
                 }
             }
@@ -286,11 +286,15 @@ impl AppCommand {
             AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
             AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
             AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
-            AppCommand::Search             => app.selected_block.set_command_line("/", CursorPos::End),
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
+
+            AppCommand::Search  => app.selected_block.set_command_line(
+                "/",
+                CursorPos::End
+            ),
 
             AppCommand::CreateDir => app.selected_block.set_command_line(
                 ":create_dir ",

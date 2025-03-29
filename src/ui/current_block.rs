@@ -33,8 +33,7 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     let current_items = render_list(
         app.current_files.iter(),
         &app.term_colors,
-        marked_items,
-        app.marked_operation
+        marked_items
     );
 
     frame.render_stateful_widget(

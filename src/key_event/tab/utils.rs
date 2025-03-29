@@ -4,12 +4,13 @@ use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
 use anyhow::bail;
 use toml_edit::{value, Array};
+use ratatui::{style::Stylize, text::{Line, Text}};
 
 use crate::{
     config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
     key_event::{SwitchCase, SwitchCaseData},
-    app::{path_is_hidden, App},
+    app::{path_is_hidden, App, CmdContent},
     option_get,
     rt_error
 };
@@ -68,7 +69,9 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
                 app,
                 switch,
                 false,
-                String::from("Are you sure to store current tabs?"),
+                CmdContent::Text(Text::raw(
+                    "Are you sure to store current tabs?"
+                ).red()),
                 SwitchCaseData::Struct(Box::new(data))
             );
             return Ok(false)
@@ -372,37 +375,35 @@ fn remove_storage_tabs(app: &mut App, idx: usize) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<String> {
-    let mut msg = if let Some(_app) = app {
-        if data.storage {
-            storage_tab_string(_app.tab_list.storage.iter())?
-        } else {
-            tab_string_list(_app.tab_list.list.iter())
-        }
-    } else {
-        String::new()
-    };
-
-    if data.storage {
-        msg.insert_str(0, "Storage tabs:\n");
-    }
-
-    if data.delete {
-        msg.insert_str(0, "Executing delete operation!\n\n");
-    }
-
-    msg.insert_str(0, "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
+fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<CmdContent> {
+    let mut text = Text::raw("[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
 [d] delete tab with number  [s] open tabs from storage  [S] store opening tabs
 [o] delete other tabs\n\n");
 
-    Ok(msg)
+    if data.delete {
+        text.push_line(Line::raw("Executing delete operation!").red());
+        text.push_line("");
+    }
+
+    if data.storage {
+        text.push_line("Storage tabs:");
+    }
+
+    if let Some(_app) = app {
+        if data.storage {
+            storage_tab_string(&mut text, _app.tab_list.storage.iter())?;
+        } else {
+            tab_string_list(&mut text, _app.tab_list.list.iter());
+        }
+    }
+
+    Ok(CmdContent::Text(text))
 }
 
 #[inline]
-fn storage_tab_string<'a, I>(iter: I) -> AppResult<String>
+fn storage_tab_string<'a, I>(text: &mut Text, iter: I) -> AppResult<()>
 where I: Iterator<Item = &'a Rc<[Cow<'a, str>]>>
 {
-    let mut msg = String::new();
     let mut idx = 1;
 
     for tabs in iter {
@@ -410,29 +411,26 @@ where I: Iterator<Item = &'a Rc<[Cow<'a, str>]>>
             rt_error!("Found empty tabs from `storage_tabs`")
         }
 
-        msg.push_str(&format!("[{}]: {}\n", idx, tabs[0]));
+        text.push_line(format!("[{}]: {}\n", idx, tabs[0]));
         for j in 1..tabs.len() {
-            msg.push_str(&format!("     {}\n", tabs[j]));
+            text.push_line(format!("     {}\n", tabs[j]));
         }
-        msg.push('\n');
+        text.push_line("");
 
         idx += 1;
     }
 
-    Ok(msg)
+    Ok(())
 }
 
 #[inline]
-fn tab_string_list<'a, I>(iter: I) -> String
+fn tab_string_list<'a, I>(text: &mut Text, iter: I)
 where I: Iterator<Item = &'a (PathBuf, bool)>
 {
-    let mut msg = String::new();
     let mut idx = 1;
 
     for e in iter {
-        msg.push_str(&format!("[{}]: {}\n", idx, e.0.to_string_lossy()));
+        text.push_line(format!("[{}]: {}\n", idx, e.0.to_string_lossy()));
         idx += 1;
     }
-
-    msg
 }

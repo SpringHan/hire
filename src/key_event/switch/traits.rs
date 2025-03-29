@@ -24,7 +24,7 @@ impl Clone for SwitchCaseData {
     fn clone(&self) -> Self {
         match *self {
             SwitchCaseData::None => Self::None,
-            // SwitchCaseData::Bool(value) => Self::Bool(value),
+            SwitchCaseData::Bool(value) => Self::Bool(value),
             SwitchCaseData::Char(value) => Self::Char(value),
             SwitchCaseData::Struct(ref _struct) => Self::Struct(_struct.switch_clone()),
         }

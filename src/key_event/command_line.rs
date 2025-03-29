@@ -204,7 +204,7 @@ pub fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
         ref cont,
         pos
     ) = *app_block {
-        (cont.to_owned(), pos)
+        (cont.get().to_owned(), pos)
     } else {
         return None
     };
@@ -248,7 +248,9 @@ impl<'a> App<'a> {
                     idx.sub_assign(1);
                 },
                 CursorPos::End => {
-                    *cursor = CursorPos::Index(command.len() - 1);
+                    *cursor = CursorPos::Index(
+                        command.get().len() - 1
+                    );
                 },
                 _ => ()
             }
@@ -275,7 +277,7 @@ impl<'a> App<'a> {
             }
 
             if let CursorPos::Index(idx) = cursor {
-                if *idx == command.len() - 1 {
+                if *idx == command.get().len() - 1 {
                     *cursor = CursorPos::End;
                 } else {
                     idx.add_assign(1);

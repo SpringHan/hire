@@ -16,7 +16,7 @@ use ratatui::{
     Frame
 };
 
-use crate::App;
+use crate::{app::CmdContent, App};
 use crate::app::{self, CursorPos};
 
 use command_line::*;
@@ -186,15 +186,25 @@ fn check_app_error(app: &mut App) {
 
         if let SBlock::CommandLine(ref mut _msg, ref mut _cursor) = app.selected_block {
             if *_cursor != CursorPos::None {
-                app.command_history.push(_msg.to_owned());
+                app.command_history.push(_msg.get_str().to_owned());
                 *_cursor = CursorPos::None;
 
-                *_msg = err_msg;
+                *_msg = CmdContent::String(err_msg);
             } else {
-                _msg.push_str(&format!("\n{}", err_msg));
+                match *_msg {
+                    CmdContent::String(ref mut messages) => {
+                        messages.push_str(&format!("\n{}", err_msg));
+                    },
+                    CmdContent::Text(ref mut text) => {
+                        text.push_line(err_msg);
+                    },
+                }
             }
         } else {
-            app.selected_block = SBlock::CommandLine(err_msg, CursorPos::None);
+            app.selected_block = SBlock::CommandLine(
+                CmdContent::String(err_msg),
+                CursorPos::None
+            );
         }
 
         app.command_error = true;

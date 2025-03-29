@@ -2,7 +2,7 @@
 
 use ratatui::{layout::Rect, widgets::{Block, Borders}, Frame};
 
-use crate::app::{App, FileOperation};
+use crate::app::App;
 
 use super::{list::List, utils::render_list};
 
@@ -12,8 +12,7 @@ pub fn render_parent(app: &mut App, frame: &mut Frame, area: Rect) {
     let parent_items = render_list(
         app.parent_files.iter(),
         &app.term_colors,
-        None,
-        FileOperation::None
+        None
     );
 
     frame.render_stateful_widget(

@@ -1,16 +1,14 @@
 // Command line
 
-use std::borrow::Cow;
-
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     widgets::{Block, Paragraph, Widget},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     Frame
 };
 
-use crate::app::{self, App, CursorPos};
+use crate::app::{self, App, CmdContent, CursorPos};
 
 /// The widget to show states, such as file permission, size, etc.
 pub struct StateLine<'a> {
@@ -108,35 +106,39 @@ pub fn render_command_line<'a>(
                 area
             );
         },
+
         AppBlock::CommandLine(ref input, cursor) => {
             let block = Block::default();
-            let para = Paragraph::new(vec![Line::from(
-                get_command_line_span_list(
-                    input.to_owned(),
-                    cursor,
-                    app.command_error || app.command_warning
-                )
-            )]).block(block);
+            let para = if let CmdContent::Text(ref text) = input {
+                Paragraph::new(text.to_owned())
+            } else {
+                Paragraph::new(Line::from(
+                    get_command_line_span_list(
+                        input,
+                        cursor,
+                        app.command_error
+                    )
+                ))
+            }
+            .block(block);
 
             frame.render_widget(para, area);
         }
     }
-
-    // Paragraph::new(message).block(block)
 }
 
 /// Create Paragraph structure with different color.
 ///
 /// Make the text red when it's an error message.
-pub fn get_command_line_style<'a, S>(app: &App,
-                                 content: S,
-                                 cursor: CursorPos
+pub fn get_command_line_style<'a>(
+    app: &'a App,
+    content: &'a CmdContent,
+    cursor: CursorPos
 ) -> Paragraph<'a>
-where S: Into<Cow<'a, str>>
 {
     if let CursorPos::None = cursor {
         let temp = Paragraph::new(
-            Text::raw(content)
+            content.into_text()
         )
             .scroll(app.command_scroll.unwrap());
 
@@ -155,16 +157,16 @@ where S: Into<Cow<'a, str>>
     }
 }
 
-fn get_command_line_span_list<'a, S>(command: S,
-                                     cursor: CursorPos,
-                                     eye_catching: bool
+fn get_command_line_span_list<'a>(
+    command_cont: &'a CmdContent,
+    cursor: CursorPos,
+    eye_catching: bool
 ) -> Vec<Span<'a>>
-where S: Into<Cow<'a, str>>
 {
     let mut span_list: Vec<Span> = Vec::new();
     if let CursorPos::Index(idx) = cursor {
         let mut i = 0;
-        for c in command.into().chars() {
+        for c in command_cont.get().chars() {
             span_list.push(
                 if i == idx {
                     Span::raw(String::from(c))
@@ -181,7 +183,7 @@ where S: Into<Cow<'a, str>>
         return span_list
     }
 
-    span_list.push(Span::from(command).fg(if eye_catching {
+    span_list.push(Span::from(command_cont.get()).fg(if eye_catching {
         Color::Red
     } else {
         Color::White

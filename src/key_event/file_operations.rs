@@ -3,11 +3,14 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 
+use ratatui::{style::Stylize, text::{Line, Text}};
+
 use super::Goto;
 use super::cursor_movement;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::{App, CursorPos, FileOperation,};
+use crate::app::CmdContent;
+use crate::app::{App, CursorPos};
 use crate::error::{AppResult, AppError, ErrorType};
 
 // File name modify
@@ -57,7 +60,7 @@ pub fn delete_operation(app: &mut App) {
         app,
         delete_switch,
         true,
-        generate_msg(),
+        generate_msg(app, false),
         SwitchCaseData::None
     );
 }
@@ -65,66 +68,69 @@ pub fn delete_operation(app: &mut App) {
 fn delete_switch(
     app: &mut App,
     key: char,
-    _: SwitchCaseData
+    data: SwitchCaseData
 ) -> AppResult<bool>
 {
     let in_root = app.path.to_string_lossy() == "/";
 
     match key {
-        'd' => {
-            // Check whether the target dir is accessible firstly.
-            if app.marked_files.is_empty() {
+        'D' => {
+            if let SwitchCaseData::None = data {
+                SwitchCase::new(
+                    app,
+                    delete_switch,
+                    true,
+                    generate_msg(app, true),
+                    SwitchCaseData::Bool(true)
+                );
+
+                return Ok(false)
+            }
+        },
+
+        'y' => {
+            if let SwitchCaseData::Bool(value) = data {
+                if !value {
+                    return Ok(true)
+                }
+
+                if !app.marked_files.is_empty() {
+                    let current_dir = app.current_path();
+                    let marked_files = app.marked_files.clone();
+                    for (path, files) in marked_files.into_iter() {
+                        delete_file(
+                            app,
+                            path,
+                            files.files.into_iter(),
+                            false,
+                            in_root
+                        )?;
+                    }
+                    app.goto_dir(current_dir, None)?;
+                    app.marked_files.clear();
+
+                    return Ok(true)
+                }
+
                 let current_file = app.get_file_saver();
-                if let Some(current_file) = current_file {
-                    app.append_marked_file(
-                        current_file.name.to_owned(),
-                        current_file.is_dir
-                    );
+                if let Some(current_file) = current_file.cloned() {
+                    if current_file.cannot_read || current_file.read_only() {
+                        return Err(ErrorType::PermissionDenied(Vec::new()).pack())
+                    }
+
+                    let mut temp_hashmap = HashMap::new();
+                    temp_hashmap.insert(current_file.name, current_file.is_dir);
+
+                    delete_file(
+                        app,
+                        app.current_path(),
+                        temp_hashmap.into_iter(),
+                        true,
+                        in_root
+                    )?;
                 } else {
                     return Err(ErrorType::NoSelected.pack())
                 }
-            }
-
-            app.marked_operation = FileOperation::Move;
-            cursor_movement::move_cursor(app, Goto::Down, in_root)?;
-        },
-        'D' => {
-            if !app.marked_files.is_empty() {
-                let current_dir = app.current_path();
-                let marked_files = app.marked_files.clone();
-                for (path, files) in marked_files.into_iter() {
-                    delete_file(
-                        app,
-                        path,
-                        files.files.into_iter(),
-                        false,
-                        in_root
-                    )?;
-                }
-                app.goto_dir(current_dir, None)?;
-                app.marked_files.clear();
-
-                return Ok(true)
-            }
-
-            let current_file = app.get_file_saver();
-            if let Some(current_file) = current_file.cloned() {
-                if current_file.cannot_read || current_file.read_only() {
-                    return Err(ErrorType::PermissionDenied(Vec::new()).pack())
-                }
-
-                let mut temp_hashmap = HashMap::new();
-                temp_hashmap.insert(current_file.name, current_file.is_dir);
-
-                delete_file(
-                    app,
-                    app.current_path(),
-                    temp_hashmap.into_iter(),
-                    true,
-                    in_root
-                )?;
-            } else {
-                return Err(ErrorType::NoSelected.pack())
             }
         },
         _ => ()
@@ -133,10 +139,49 @@ fn delete_switch(
     Ok(true)
 }
 
-fn generate_msg() -> String {
-    let msg = String::from("[d] mark files  [D] delete files");
+fn generate_msg(app: &App, confirm: bool) -> CmdContent {
+    let mut msg = String::from("[D] delete files\n\n");
 
-    msg
+    if app.marked_files.is_empty() {
+        if let Some(file) = app.get_file_saver() {
+            msg.push_str(&format!(
+                "{}/{}",
+                app.current_path().to_string_lossy(),
+                file.name
+            ));
+
+            if file.is_dir {
+                msg.push('/');
+            }
+
+            msg.push('\n');
+        } else {
+            msg.push_str("No file to be deleted!");
+        }
+    }
+
+    for (path, files) in app.marked_files.iter() {
+        for (file, is_dir) in files.files.iter() {
+            msg.push_str(&format!("{}/{}", path.to_string_lossy(), file));
+
+            if *is_dir {
+                msg.push('/');
+            }
+
+            msg.push('\n');
+        }
+    }
+
+    let mut text = Text::raw(msg);
+
+    if confirm {
+        text.push_line("");
+        text.push_line(Line::raw(
+            "Are you sure to remove these files? (y to confirm)"
+        ).red());
+    }
+
+    CmdContent::Text(text)
 }
 
 

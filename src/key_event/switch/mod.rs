@@ -2,7 +2,7 @@
 
 mod traits;
 
-use crate::{app::{self, App}, error::AppResult};
+use crate::{app::{self, App, CmdContent}, error::AppResult};
 
 pub use traits::SwitchStruct;
 
@@ -12,8 +12,8 @@ type FuncPointer = fn(&mut App, char, SwitchCaseData) -> AppResult<bool>;
 pub enum SwitchCaseData {
     None,
     Char(char),
+    Bool(bool),
     Struct(Box<dyn SwitchStruct>)
-    // Bool(bool),
     // Number(i32),
     // DString(String)
 }
@@ -26,7 +26,7 @@ impl SwitchCase {
         app: &mut App,
         func: FuncPointer,
         expand: bool,
-        msg: String,
+        msg: CmdContent,
         data: SwitchCaseData
     )
     {
@@ -37,9 +37,7 @@ impl SwitchCase {
         if expand {
             app.expand_init();
         } else {
-            // When do not expand command line, turn on command_warning to get confirm.
             app.expand_quit();
-            app.command_warning = true;
         }
 
         app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);

@@ -11,7 +11,7 @@ use ratatui::{
     Frame
 };
 
-use crate::{app::{App, FileContent, FileOperation}, utils::update_window_height};
+use crate::{app::{App, FileContent}, utils::update_window_height};
 
 use super::{list::List, utils::render_list};
 
@@ -31,8 +31,7 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
     let child_items = render_list(
         app.child_files.iter(),
         &app.term_colors,
-        None,
-        FileOperation::None
+        None
     );
 
     frame.render_stateful_widget(
