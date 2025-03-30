@@ -223,7 +223,7 @@ impl<'a> App<'a> {
                     let files = command_slices;
                     super::cmds::create_symlink(
                         self,
-                        [(files[0].trim(), files[1].trim())].into_iter()
+                        [(files[0], files[1])].into_iter()
                     )?
                 },
 
