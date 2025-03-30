@@ -1,7 +1,11 @@
 // List Widget
 
 use ratatui::{
-    buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Styled, Stylize}, text::{Line, Span, Text}, widgets::{Block, ListState, StatefulWidget, Widget}
+    widgets::{Block, ListState, StatefulWidget, Widget},
+    style::{Color, Modifier, Style, Styled, Stylize},
+    layout::{Constraint, Direction, Layout, Rect},
+    text::{Line, Span, Text},
+    buffer::Buffer,
 };
 
 use crate::utils::get_window_height;
@@ -10,6 +14,7 @@ pub struct Item<'a> {
     style: Style,
     left: Line<'a>,
     right: Option<Line<'a>>,
+    marked_style: Option<Style>,
 }
 
 pub struct List<'a> {
@@ -19,6 +24,8 @@ pub struct List<'a> {
     // Navigation index
     navi_show: bool,
     navi_index: Option<usize>,
+
+    marked: bool,
     index_color: Color,
 }
 
@@ -35,8 +42,14 @@ impl<'a> Item<'a> {
         Self {
             right: _right,
             left: left.into(),
+            marked_style: None,
             style: Style::default(),
         }
+    }
+
+    pub fn marked(mut self, marked: Option<Style>) -> Self {
+        self.marked_style = marked;
+        self
     }
 }
 
@@ -57,31 +70,45 @@ impl Widget for Item<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         buf.set_style(area, self.style);
 
-        if self.right.is_none() {
+        let right = if let Some(mut line) = self.right {
+            if let Some(style) = self.marked_style {
+                line.push_span(Span::raw(" ").style(style));
+            }
+
+            Some(line)
+        } else {
+            if let Some(style) = self.marked_style {
+                Some(Line::raw(" ").style(style))
+            } else {
+                None
+            }
+        };
+
+        if right.is_none() {
             self.left.render(area, buf);
             return ()
         }
 
-        let right = self.right.unwrap();
-
+        let right_line = right.unwrap();
         let layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(100),
-                Constraint::Min(right.width() as u16)
+                Constraint::Min(right_line.width() as u16)
             ])
             .split(area);
 
         self.left.render(layout[0], buf);
-        right.render(layout[1], buf);
+        right_line.render(layout[1], buf);
     }
 }
 
 impl<'a> List<'a> {
-    pub fn new(block: Block<'a>, items: Vec<Item<'a>>) -> Self {
+    pub fn new(block: Block<'a>, items: Vec<Item<'a>>, marked: bool) -> Self {
         Self {
             block,
             items,
+            marked,
             navi_index: None,
             navi_show: false,
             index_color: Color::default()
@@ -158,43 +185,50 @@ impl StatefulWidget for List<'_> {
             }
 
 
+            let mut right = Line::default();
+
             // Set Index for each item
             if self.navi_show {
-                let mut right: Line;
-
                 if let Some(index) = self.navi_index {
                     let splitted = prefix_split(index, current_number);
-                    let mut right_spans: Vec<Span> = Vec::new();
 
                     if let Some(_prefix) = splitted.0 {
-                        right_spans.push(
+                        right.push_span(
                             Span::raw(_prefix)
                                 .add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
                         );
                     }
 
                     if let Some(_normal) = splitted.1 {
-                        right_spans.push(
+                        right.push_span(
                             Span::raw(_normal)
                                 .add_modifier(Modifier::DIM)
                                 .remove_modifier(Modifier::BOLD)
                         );
                     }
-
-                    right = Line::from(right_spans);
                 } else {
-                    right = Line::raw(current_number.to_string())
-                        .add_modifier(Modifier::DIM)
-                        .remove_modifier(Modifier::BOLD);
+                    right.push_span(
+                        Span::raw(current_number.to_string())
+                            .add_modifier(Modifier::DIM)
+                            .remove_modifier(Modifier::BOLD)
+                    );
                 }
 
                 if !is_selected {
                     right.style.fg = Some(self.index_color);
                 }
-
-                item.right = Some(right);
             }
 
+            // Set whitespace to make 
+            if self.navi_show && item.marked_style.is_none() && self.marked {
+                right.push_span(Span::raw(" "));
+            }
+
+
+            // Render item
+            if !right.spans.is_empty() {
+                item.right = Some(right);
+            }
 
             item.render(item_area, buf);
 

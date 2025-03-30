@@ -736,7 +736,7 @@ impl<'a> App<'a> {
     
     /// Append FILE to marked file list.
     pub fn append_marked_file<S: Into<String>>(&mut self, file: S, is_dir: bool) {
-        let path = self.current_path();
+        let path = self.path.to_owned();
 
         self.marked_files
             .entry(path)
@@ -748,7 +748,7 @@ impl<'a> App<'a> {
     pub fn append_marked_files<I>(&mut self, iter: I)
     where I: Iterator<Item = FileSaver>
     {
-        let path = self.current_path();
+        let path = self.path.to_owned();
 
         let temp_set = self.marked_files
             .entry(path)
@@ -759,7 +759,7 @@ impl<'a> App<'a> {
     }
 
     pub fn marked_file_contains<S: Into<String>>(&self, file: S) -> bool {
-        let path = self.current_path();
+        let path = self.path.to_owned();
         if let Some(marked_files) = self.marked_files.get(&path) {
             // In Linux, there could not be more than one files that have the same name.
             // (Include directories)
@@ -770,7 +770,7 @@ impl<'a> App<'a> {
     }
 
     pub fn remove_marked_file<S: Into<String>>(&mut self, file: S) {
-        let path = self.current_path();
+        let path = self.path.to_owned();
         if let Some(marked_files) = self.marked_files.get_mut(&path) {
             marked_files.files.remove(&file.into());
 

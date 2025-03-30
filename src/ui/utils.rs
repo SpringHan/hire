@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ratatui::style::{Color, Modifier, Styled, Stylize};
+use ratatui::style::Styled;
 
 use crate::app::{MarkedFiles, FileSaver, TermColors};
 
@@ -13,14 +13,15 @@ pub fn render_list<'a>(
     files: std::slice::Iter<'a, FileSaver>,
     colors: &TermColors,
     marked_items: Option<&'a MarkedFiles>,
-) -> Vec<Item<'a>>
+) -> (Vec<Item<'a>>, bool)
 {
     let mut temp_items: Vec<Item> = Vec::new();
     if files.len() == 0 {
-        return temp_items
+        return (temp_items, false)
     }
 
     // Use this method to avoid extra clone.
+    let mut marked = false;
     let temp_set: HashMap<String, bool> = HashMap::new();
     let marked_files = if let Some(item) = marked_items {
         &item.files
@@ -29,23 +30,28 @@ pub fn render_list<'a>(
     };
 
     for file in files {
-        let item = if marked_files.contains_key(&file.name) {
-            Item::new::<&str>(&file.name, None)
-                .fg(Color::LightYellow)
-                .add_modifier(get_file_font_style(file.is_dir))
-        } else {
-            get_normal_item_color(file, colors)
-        };
+        temp_items.push(get_normal_item_color(
+            file,
+            colors,
+            if marked_files.contains_key(&file.name) {
+                if !marked {
+                    marked = true;
+                }
 
-        temp_items.push(item);
+                true
+            } else {
+                false
+            }
+        ));
     }
 
-    temp_items
+    (temp_items, marked)
 }
 
 /// Return the item which has the style of normal file.
 fn get_normal_item_color<'a>(file: &'a FileSaver,
                              colors: &TermColors,
+                             marked: bool
                              // reverse: bool
 ) -> Item<'a>
 {
@@ -62,14 +68,9 @@ fn get_normal_item_color<'a>(file: &'a FileSaver,
     };
 
     Item::new::<&str>(&file.name, None).set_style(style)
-}
-
-/// Return bold if the file is a directory.
-/// Otherwise return undefined.
-fn get_file_font_style(is_dir: bool) -> Modifier {
-    if is_dir {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    }
+        .marked(if marked {
+            Some(colors.marked_style)
+        } else {
+            None
+        })
 }

@@ -28,14 +28,24 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
     // Update file linenr
     update_file_linenr(child_block.inner(area));
 
-    let child_items = render_list(
+    let marked_files = if app.root() {
+        None
+    } else {
+        if let Some(file) = app.get_file_saver() {
+            app.marked_files.get(&app.path.join(&file.name))
+        } else {
+            None
+        }
+    };
+
+    let (child_items, marked) = render_list(
         app.child_files.iter(),
         &app.term_colors,
-        None
+        marked_files
     );
 
     frame.render_stateful_widget(
-        List::new(child_block, child_items),
+        List::new(child_block, child_items, marked),
         area,
         &mut app.selected_item.child
     );

@@ -146,7 +146,13 @@ fn generate_msg(app: &App, confirm: bool) -> CmdContent {
         if let Some(file) = app.get_file_saver() {
             msg.push_str(&format!(
                 "{}/{}",
-                app.current_path().to_string_lossy(),
+                if app.root() {
+                    String::new()
+                } else {
+                    app.current_path()
+                        .to_string_lossy()
+                        .to_string()
+                },
                 file.name
             ));
 
@@ -162,7 +168,15 @@ fn generate_msg(app: &App, confirm: bool) -> CmdContent {
 
     for (path, files) in app.marked_files.iter() {
         for (file, is_dir) in files.files.iter() {
-            msg.push_str(&format!("{}/{}", path.to_string_lossy(), file));
+            msg.push_str(&format!(
+                "{}/{}",
+                if path.to_string_lossy() == "/" {
+                    String::new()
+                } else {
+                    path.to_string_lossy().to_string()
+                },
+                file
+            ));
 
             if *is_dir {
                 msg.push('/');
