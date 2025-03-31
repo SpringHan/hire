@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use ratatui::style::Styled;
 
-use crate::app::{MarkedFiles, FileSaver, TermColors};
+use crate::{app::{FileSaver, MarkedFiles, TermColors}, key_event::EditItem};
 
 use super::list::Item;
 
@@ -48,11 +48,56 @@ pub fn render_list<'a>(
     (temp_items, marked)
 }
 
+/// Create ListItems for EditItems
+pub fn render_editing_list<'a, I>(iter: I, colors: &TermColors) -> Vec<Item<'a>>
+where I: Iterator<Item = &'a EditItem>
+{
+    let mut temp_items: Vec<Item> = Vec::new();
+
+    for item in iter {
+        temp_items.push(get_editing_item_color(item, colors));
+    }
+
+    temp_items
+}
+
+fn get_editing_item_color<'a>(
+    item: &'a EditItem,
+    colors: &TermColors,
+) -> Item<'a> {
+    let mut temp_item = Item::new(item.name(), None);
+
+    // TODO: Uncommment these lines.
+    // if let Some(file) = item.reference {
+    //     let style = if file.is_dir {
+    //         colors.dir_style
+    //     } else if file.dangling_symlink {
+    //         colors.orphan_style
+    //     } else if file.executable {
+    //         colors.executable_style
+    //     } else if file.symlink_file.is_some() {
+    //         colors.symlink_style
+    //     } else {
+    //         colors.file_style
+    //     };
+
+    //     temp_item = temp_item.set_style(style);
+    // }
+
+    // TODO: Add cursor & item type display
+
+    temp_item.marked(if item.marked() {
+        Some(colors.marked_style)
+    } else {
+        None
+    })
+}
+
 /// Return the item which has the style of normal file.
-fn get_normal_item_color<'a>(file: &'a FileSaver,
-                             colors: &TermColors,
-                             marked: bool
-                             // reverse: bool
+fn get_normal_item_color<'a>(
+    file: &'a FileSaver,
+    colors: &TermColors,
+    marked: bool
 ) -> Item<'a>
 {
     let style = if file.is_dir {

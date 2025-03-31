@@ -18,11 +18,11 @@ use ratatui::widgets::ListState;
 use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::{AppCompletion, FileSearcher, NaviIndex};
+use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex};
 
 pub use special_types::*;
 pub use color::TermColors;
-pub use filesaver::{sort, FileSaver};
+pub use filesaver::{sort, FileSaver, FileData};
 
 pub struct App<'a> {
     // Core
@@ -70,6 +70,12 @@ pub struct App<'a> {
 
     // Image Preview
     pub image_preview: ImagePreview,
+
+    // Edit Mode
+    pub edit_mode: EditMode<'a>,
+
+    /// When this var is true, the navigation will be with selection.
+    pub mark_expand: bool,
 
     // App Config
     pub keymap: Keymap,
@@ -120,10 +126,12 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
+            mark_expand: false,
             command_scroll: None,
             target_dir: HashMap::new(),
             option_key: OptionFor::None,
             marked_files: HashMap::new(),
+            edit_mode: EditMode::default(),
             navi_index: NaviIndex::default(),
             image_preview: ImagePreview::default(),
             file_searcher: FileSearcher::default(),

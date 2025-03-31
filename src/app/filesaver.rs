@@ -1,8 +1,8 @@
 // FileSaver
 
 use std::io;
-use std::time::SystemTime;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use std::fs::{self, Permissions};
 
 use is_executable::is_executable;
@@ -10,6 +10,10 @@ use ratatui::{
     text::Span,
     style::{Stylize, Style}
 };
+
+pub struct FileData {
+    
+}
 
 /// The structure used to save file information.
 #[derive(Debug, Clone)]

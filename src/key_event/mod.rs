@@ -1,6 +1,7 @@
 // Key Event
 
 mod tab;
+mod edit;
 mod shell;
 mod switch;
 mod interaction;
@@ -38,6 +39,7 @@ type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 // Export
 pub use tab::TabList;
 pub use file_search::FileSearcher;
+pub use edit::{EditMode, EditItem};
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
@@ -286,6 +288,10 @@ impl AppCommand {
             AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
             AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
             AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
+            AppCommand::EditMode           => {
+                // let files: Vec<_> = app.current_files.iter().collect();
+                // app.edit_mode.init(files.into_iter());
+            },
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,

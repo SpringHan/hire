@@ -3,8 +3,9 @@
 mod types;
 
 use std::mem::swap;
+use std::ops::Range;
 
-use ratatui::Terminal as RTerminal;
+use ratatui::{widgets::ListState, Terminal as RTerminal};
 use ratatui::backend::CrosstermBackend;
 
 use super::simple_operations::output_path;
@@ -157,80 +158,145 @@ pub fn move_cursor(
         &mut app.selected_item.current
     };
 
-    // CURRENT_ITEM is used for change itself. Cannot used to search.
-    if let Some(current_idx) = selected_item.selected() {
-        match goto {
-            Goto::Up => {
-                if current_idx > 0 {
-                    selected_item.select(Some(current_idx - 1));
-                }
-            },
-
-            Goto::Down => {
-                let current_len = if in_root {
-                    app.parent_files.len()
-                } else {
-                    app.current_files.len()
-                };
-
-                if current_idx < current_len - 1 {
-                    selected_item.select(Some(current_idx + 1));
-                }
-            },
-
-            Goto::ScrollUp => {
-                let wind_height = get_window_height() as usize;
-
-                if current_idx < wind_height {
-                    selected_item.select_first();
-                } else {
-                    let after_scroll = current_idx - wind_height;
-                    selected_item.select(Some(after_scroll));
-                    *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
-                }
-            },
-
-            Goto::ScrollDown => {
-                let wind_height = get_window_height() as usize;
-                let after_scroll = current_idx.saturating_add(wind_height);
-                let current_len = if in_root {
-                    app.parent_files.len()
-                } else {
-                    app.current_files.len()
-                };
-
-                if after_scroll >= current_len {
-                    selected_item.select(Some(current_len - 1));
-                    *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
-                } else {
-                    selected_item.select(Some(after_scroll));
-                    *selected_item.offset_mut() = after_scroll;
-                }
-            },
-
-            Goto::Index(idx) => selected_item.select(Some(idx))
-        }
-
-        if in_root {
-            let current_file = app.get_file_saver().unwrap();
-
-            if current_file.is_dir {
-                app.init_current_files()?;
-                app.selected_item.current_select(Some(0));
-                if app.file_content.is_some() {
-                    app.file_content.reset();
-                }
-            } else {
-                app.set_file_content()?;
-            }
-            return Ok(())
-        }
-        
-        app.init_child_files()?;
-        app.refresh_select_item();
+    if selected_item.selected().is_none() {
+        return Ok(())
     }
 
+    // Move cursor
+    // TODO: Add codes for expand mark.
+    let expand_range = move_cursor_core(
+        goto,
+        selected_item,
+        if in_root {
+            app.parent_files.len()
+        } else {
+            app.current_files.len()
+        },
+        app.mark_expand
+    );
+
+    // Update child block
+    if in_root {
+        let current_file = app.get_file_saver().unwrap();
+
+        if current_file.is_dir {
+            app.init_current_files()?;
+            app.selected_item.current_select(Some(0));
+            if app.file_content.is_some() {
+                app.file_content.reset();
+            }
+        } else {
+            app.set_file_content()?;
+        }
+        return Ok(())
+    }
+    
+    app.init_child_files()?;
+    app.refresh_select_item();
+    
+
     Ok(())
+}
+
+/// Core logic for moving cursor.
+/// This function will return a range to mark files if it's needed.
+pub fn move_cursor_core(
+    direction: Goto,
+    selected_item: &mut ListState,
+    item_length: usize,
+    mark_expand: bool,
+) -> Option<Range<usize>> {
+    let origin_index = selected_item.selected().unwrap();
+    let mut expand_range: Option<Range<usize>> = None;
+
+    match direction {
+        Goto::Up => {
+            if origin_index > 0 {
+                selected_item.select(Some(origin_index - 1));
+
+                if mark_expand {
+                    expand_range = Some(Range {
+                        start: origin_index - 1,
+                        end: origin_index
+                    });
+                }
+            }
+        },
+
+        Goto::Down => {
+            if origin_index < item_length - 1 {
+                selected_item.select(Some(origin_index + 1));
+
+                if mark_expand {
+                    expand_range = Some(Range {
+                        start: origin_index + 1,
+                        end: origin_index + 2
+                    });
+                }
+            }
+        },
+
+        Goto::ScrollUp => {
+            let wind_height = get_window_height() as usize;
+            let after_scroll: usize;
+
+            if origin_index < wind_height {
+                after_scroll = 0;
+                selected_item.select_first();
+
+            } else {
+                after_scroll = origin_index - wind_height;
+                selected_item.select(Some(after_scroll));
+                *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
+            }
+
+            if mark_expand && after_scroll != origin_index {
+                expand_range = Some(Range {
+                    start: 0,
+                    end: origin_index
+                });
+            }
+        },
+
+        Goto::ScrollDown => {
+            let wind_height = get_window_height() as usize;
+            let after_scroll = origin_index.saturating_add(wind_height);
+
+            if after_scroll >= item_length {
+                selected_item.select(Some(item_length - 1));
+                *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
+            } else {
+                selected_item.select(Some(after_scroll));
+                *selected_item.offset_mut() = after_scroll;
+            }
+
+            if mark_expand && after_scroll != origin_index {
+                expand_range = Some(Range {
+                    start: origin_index + 1,
+                    end: after_scroll + 1
+                });
+            }
+        },
+
+        Goto::Index(idx) => {
+            selected_item.select(Some(idx));
+
+            if mark_expand && idx != origin_index {
+                let (start, end): (usize, usize);
+                if idx > origin_index {
+                    start = origin_index + 1;
+                    end = idx + 1;
+                } else {
+                    start = idx;
+                    end = origin_index;
+                }
+
+                expand_range = Some(Range { start, end });
+            }
+        }
+    }
+
+    expand_range
 }
 
 /// Jump to specific item with navigation index entered by user.

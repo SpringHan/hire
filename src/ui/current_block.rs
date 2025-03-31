@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::app::App;
 
-use super::{list::List, utils::render_list};
+use super::{list::List, utils::{render_editing_list, render_list}};
 
 pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     let border_set = Set {
@@ -33,11 +33,18 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
         app.marked_files.get(&app.path)
     };
 
-    let (current_items, marked) = render_list(
-        app.current_files.iter(),
-        &app.term_colors,
-        marked_items
-    );
+    let (current_items, marked) = if app.edit_mode.enabled {
+        (
+            render_editing_list(app.edit_mode.iter(), &app.term_colors),
+            false
+        )
+    } else {
+        render_list(
+            app.current_files.iter(),
+            &app.term_colors,
+            marked_items
+        )   
+    };
 
     frame.render_stateful_widget(
         List::new(current_block, current_items, marked)
