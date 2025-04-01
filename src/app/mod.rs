@@ -22,7 +22,7 @@ use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex};
 
 pub use special_types::*;
 pub use color::TermColors;
-pub use filesaver::{sort, FileSaver, FileData};
+pub use filesaver::{sort, FileSaver};
 
 pub struct App<'a> {
     // Core
@@ -72,7 +72,7 @@ pub struct App<'a> {
     pub image_preview: ImagePreview,
 
     // Edit Mode
-    pub edit_mode: EditMode<'a>,
+    pub edit_mode: EditMode,
 
     /// When this var is true, the navigation will be with selection.
     pub mark_expand: bool,

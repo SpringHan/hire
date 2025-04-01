@@ -45,13 +45,19 @@ pub enum AppCommand {
     /// otherwise jump to the working directory.
     WorkDirectory(bool),
 
-    /// The first element is the direction for movement,
-    /// and the second element refers to whether move to the edeg.
+    /// The value of it is the direction for movement,
     ItemMove(Direction),
 
     /// The first element is the shell command with its arguments,
     /// the second element refers to whether refreshing showing file items.
     ShellCommand(Vec<String>, bool),
+
+    // Edit Mode
+    EditGotoTop,
+    EditGotoBottom,
+
+    EditMark(bool),
+    EditMoveItem(bool),
 }
 
 impl AppCommand {
@@ -117,6 +123,18 @@ impl AppCommand {
 
                 Self::ShellCommand(command_vec, refresh)
             },
+
+            // Edit Mode
+            "edit_top" => Self::EditGotoTop,
+            "edit_bottom" => Self::EditGotoBottom,
+
+            "edit_move" => Self::EditMoveItem(
+                *option_get!(cmd_arg, command_err) == "next"
+            ),
+
+            "edit_mark" => Self::EditMark(
+                *option_get!(cmd_arg, command_err) == "single"
+            ),
 
             _ => bail!("Unknow command for keybinding")
         };

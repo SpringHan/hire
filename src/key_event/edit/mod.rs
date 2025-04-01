@@ -2,11 +2,9 @@
 
 mod types;
 
-use std::ops::Range;
+use ratatui::{text::Text, widgets::ListState};
 
-use ratatui::widgets::ListState;
-
-use crate::{app::CursorPos, error::AppResult, rt_error, utils::{get_window_height, Direction}};
+use crate::{app::{App, CursorPos, FileContent}, error::AppResult, rt_error, utils::Direction};
 
 use super::{cursor_movement::move_cursor_core, Goto};
 
@@ -14,84 +12,53 @@ pub use types::*;
 
 // NOTE: The Edit mode can only be used for current_block.
 // And it's not allow to enable it in root directory of Linux.
-impl<'a> EditMode<'a> {
-    pub fn item_navigation(
-        &mut self,
-        state: &mut ListState,
-        direction: Goto,
-        mark_expand: bool
-    ) -> AppResult<()> {
-        if self.items.is_empty() || state.selected().is_none() {
-            return Ok(())
-        }
-
-        let expand_region = move_cursor_core(
-            direction,
-            state,
-            self.items.len(),
-            mark_expand
-        );
-
-        if let Some(range) = expand_region {
-            for i in range {
-                self.items[i].mark = true;
-            }
-        }
-
-        Ok(())
-    }
-
+impl EditMode {
     pub fn cursor_move(
         &mut self,
-        direction: Direction,
+        right: bool,
         edge: bool
     ) -> AppResult<()> {
         for item in self.items.iter_mut() {
-            match direction {
-                Direction::Left => {
-                    match item.cursor {
-                        CursorPos::Index(ref mut idx) => {
-                            if edge {
-                                item.cursor = CursorPos::Index(0);
-                            } else {
-                                if *idx > 0 {
-                                    *idx -= 1;
-                                }
+            if !right {
+                match item.cursor {
+                    CursorPos::Index(ref mut idx) => {
+                        if edge {
+                            item.cursor = CursorPos::Index(0);
+                        } else {
+                            if *idx > 0 {
+                                *idx -= 1;
                             }
-                        },
-                        CursorPos::End => {
-                            if edge {
-                                item.cursor = CursorPos::Index(0);
-                            } else {
-                                item.cursor = CursorPos::Index(
-                                    item.editing_name.len() - 1
-                                );
+                        }
+                    },
+                    CursorPos::End => {
+                        if edge {
+                            item.cursor = CursorPos::Index(0);
+                        } else {
+                            item.cursor = CursorPos::Index(
+                                item.editing_name.len() - 1
+                            );
+                        }
+                    },
+                    CursorPos::None => ()
+                }
+            } else {
+                match item.cursor {
+                    CursorPos::Index(ref mut index) => {
+                        if edge {
+                            item.cursor = CursorPos::End;
+                        } else {
+                            if *index < item.editing_name.len() - 1 {
+                                *index += 1;
+                                continue;
                             }
-                        },
-                        CursorPos::None => ()
-                    }
-                },
 
-                Direction::Right => {
-                    match item.cursor {
-                        CursorPos::Index(ref mut index) => {
-                            if edge {
+                            if *index == item.editing_name.len() - 1 {
                                 item.cursor = CursorPos::End;
-                            } else {
-                                if *index < item.editing_name.len() - 1 {
-                                    *index += 1;
-                                    continue;
-                                }
-
-                                if *index == item.editing_name.len() - 1 {
-                                    item.cursor = CursorPos::End;
-                                }
                             }
-                        },
-                        _ => ()
-                    }
-                },
-                _ => rt_error!("Wrong direction to cursor movement")
+                        }
+                    },
+                    _ => ()
+                }
             }
         }
 
@@ -99,14 +66,14 @@ impl<'a> EditMode<'a> {
     }
 
     /// Enter insert modal.
-    pub fn insert(&mut self, state: &mut ListState, pos: CursorPos) {
+    pub fn enter_insert(&mut self, state: &mut ListState, pos: CursorPos) {
         if self.items.is_empty() {
             return ()
         }
 
         let mut really_insert = false;
-        for item in self.items.iter_mut() {
-            if item.mark {
+        for (idx, item) in self.items.iter_mut().enumerate() {
+            if self.marked.contains(&idx) {
                 if !really_insert {
                     really_insert = true;
                 }
@@ -117,7 +84,7 @@ impl<'a> EditMode<'a> {
 
         if let Some(selected_item) = state.selected() {
             let item = &mut self.items[selected_item];
-            if !item.mark {
+            if !self.marked.contains(&selected_item) {
                 if !really_insert {
                     really_insert = true;
                 }
@@ -130,8 +97,62 @@ impl<'a> EditMode<'a> {
             self.insert = true;
         }
     }
+}
 
-    // pub fn mark_delete(&mut self, ) -> Type {
-        
-    // }
+pub fn item_navigation(
+    app: &mut App,
+    direction: Goto,
+) -> AppResult<()>
+{
+    let edit_ref = &mut app.edit_mode;
+    let state = &mut app.selected_item.current;
+
+    if edit_ref.items.is_empty() || state.selected().is_none() {
+        return Ok(())
+    }
+
+    let expand_region = move_cursor_core(
+        direction,
+        state,
+        edit_ref.items.len(),
+        app.mark_expand
+    );
+
+    if let Some(range) = expand_region {
+        for i in range {
+            edit_ref.mark_unmark(i)?;
+        }
+    }
+
+    if let Some(idx) = app.selected_item.current.selected() {
+        if idx < app.current_files.len() {
+            app.init_child_files()?;
+            app.refresh_child_item();
+        } else {
+            // BUG: Maybe there'll be a bug.
+            app.file_content = FileContent::Text(Text::default());
+        }
+    }
+
+    Ok(())
+}
+
+pub fn mark_operation(app: &mut App, single: bool) -> AppResult<()> {
+    let edit_ref = &mut app.edit_mode;
+
+    if single {
+        if let Some(idx) = app.selected_item.current.selected() {
+            edit_ref.mark_unmark(idx)?;
+
+            item_navigation(app, Goto::Down)?;
+        }
+    } else {
+        if edit_ref.marked.is_empty() {
+            edit_ref.marked.extend(0..edit_ref.items.len());
+        } else {
+            edit_ref.marked.clear();
+        }
+    }
+
+    Ok(())
 }

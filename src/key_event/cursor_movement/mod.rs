@@ -193,7 +193,6 @@ pub fn move_cursor(
     
     app.init_child_files()?;
     app.refresh_select_item();
-    
 
     Ok(())
 }

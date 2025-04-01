@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use ratatui::style::Styled;
 
-use crate::{app::{FileSaver, MarkedFiles, TermColors}, key_event::EditItem};
+use crate::{app::{FileSaver, MarkedFiles, TermColors}, key_event::{EditItem, EditMode}};
 
 use super::list::Item;
 
@@ -49,13 +49,21 @@ pub fn render_list<'a>(
 }
 
 /// Create ListItems for EditItems
-pub fn render_editing_list<'a, I>(iter: I, colors: &TermColors) -> Vec<Item<'a>>
-where I: Iterator<Item = &'a EditItem>
+pub fn render_editing_list<'a>(
+    edit_ref: &'a EditMode,
+    files: &Vec<FileSaver>,
+    colors: &TermColors
+) -> Vec<Item<'a>>
 {
     let mut temp_items: Vec<Item> = Vec::new();
 
-    for item in iter {
-        temp_items.push(get_editing_item_color(item, colors));
+    for (idx, item) in edit_ref.iter().enumerate() {
+        temp_items.push(get_editing_item_color(
+            item,
+            files.get(idx),
+            colors,
+            edit_ref.is_marked(idx)
+        ));
     }
 
     temp_items
@@ -63,30 +71,33 @@ where I: Iterator<Item = &'a EditItem>
 
 fn get_editing_item_color<'a>(
     item: &'a EditItem,
+    file: Option<&FileSaver>,
     colors: &TermColors,
+    marked: bool
 ) -> Item<'a> {
     let mut temp_item = Item::new(item.name(), None);
 
-    // TODO: Uncommment these lines.
-    // if let Some(file) = item.reference {
-    //     let style = if file.is_dir {
-    //         colors.dir_style
-    //     } else if file.dangling_symlink {
-    //         colors.orphan_style
-    //     } else if file.executable {
-    //         colors.executable_style
-    //     } else if file.symlink_file.is_some() {
-    //         colors.symlink_style
-    //     } else {
-    //         colors.file_style
-    //     };
+    if let Some(_file) = file {
+        let style = if _file.is_dir {
+            colors.dir_style
+        } else if _file.dangling_symlink {
+            colors.orphan_style
+        } else if _file.executable {
+            colors.executable_style
+        } else if _file.symlink_file.is_some() {
+            colors.symlink_style
+        } else {
+            colors.file_style
+        };
 
-    //     temp_item = temp_item.set_style(style);
-    // }
+        temp_item = temp_item.set_style(style);
+    } else if item.is_dir {
+        temp_item = temp_item.set_style(colors.dir_style);
+    }
 
     // TODO: Add cursor & item type display
 
-    temp_item.marked(if item.marked() {
+    temp_item.marked(if marked {
         Some(colors.marked_style)
     } else {
         None

@@ -29,6 +29,7 @@ use paste_operation::paste_operation;
 use cursor_movement::{directory_movement, jump_to_index};
 use file_operations::{append_file_name, delete_operation, mark_operation};
 
+use crate::rt_error;
 use crate::utils::Direction;
 use crate::error::AppResult;
 use crate::command::AppCommand;
@@ -110,6 +111,8 @@ pub fn handle_event(
             if let app::Block::Browser(in_root) = app.selected_block {
                 let command = if app.navi_index.show() {
                     app.keymap.navi_get(c)?
+                } else if app.edit_mode.enabled {
+                    app.keymap.edit_get(c)?
                 } else {
                     app.keymap.get(c)?
                 };
@@ -173,6 +176,11 @@ pub fn handle_event(
                     if app.navi_index.show() {
                         app.navi_index.reset();
                         return Ok(())
+                    }
+
+                    if app.edit_mode.enabled {
+
+                        app.edit_mode.reset();
                     }
 
                     if !app.marked_files.is_empty() {
@@ -288,13 +296,11 @@ impl AppCommand {
             AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
             AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
             AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
-            AppCommand::EditMode           => {
-                // let files: Vec<_> = app.current_files.iter().collect();
-                // app.edit_mode.init(files.into_iter());
-            },
+            AppCommand::EditGotoTop        => edit::item_navigation(app, Goto::Index(0))?,
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
+            AppCommand::EditMark(single)      => edit::mark_operation(app, single)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
 
             AppCommand::Search  => app.selected_block.set_command_line(
@@ -331,6 +337,20 @@ impl AppCommand {
                 in_root
             )?,
 
+            AppCommand::EditMoveItem(next) => edit::item_navigation(
+                app,
+                if next {
+                    Goto::Down
+                } else {
+                    Goto::Up
+                }
+            )?,
+
+            AppCommand::EditGotoBottom => edit::item_navigation(
+                app,
+                Goto::Index(app.edit_mode.len() - 1)
+            )?,
+
             AppCommand::ListScroll(down) => move_cursor(
                 app,
                 if down {
@@ -340,6 +360,12 @@ impl AppCommand {
                 },
                 app.root()
             )?,
+
+            AppCommand::EditMode => if !app.root() {
+                app.edit_mode.init(app.current_files.iter());
+            } else {
+                rt_error!("Edit mode cannot enabled in the root directory")
+            },
 
             AppCommand::MoveCandidate(next) => if next {
                 app.next_candidate()?

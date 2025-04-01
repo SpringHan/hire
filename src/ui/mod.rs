@@ -122,20 +122,23 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
 
     // File browser layout
-    let constraints = match app.selected_block {
-        app::Block::Browser(true) => {
-            vec![
-                Constraint::Percentage(50),
-                Constraint::Percentage(50)
-            ]
-        },
-        _ => {
-            vec![
-                Constraint::Percentage(25),
-                Constraint::Percentage(30),
-                Constraint::Percentage(45)
-            ]
-        }
+    let constraints = if let app::Block::Browser(true) = app.selected_block {
+        vec![
+            Constraint::Percentage(50),
+            Constraint::Percentage(50)
+        ]
+    } else if app.edit_mode.enabled {
+        vec![
+            Constraint::Percentage(20),
+            Constraint::Percentage(55),
+            Constraint::Percentage(25)
+        ]
+    } else {
+        vec![
+            Constraint::Percentage(25),
+            Constraint::Percentage(30),
+            Constraint::Percentage(45)
+        ]
     };
 
     let browser_layout = Layout::default()

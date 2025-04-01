@@ -10,6 +10,7 @@ use super::get_document;
 #[derive(Default)]
 pub struct Keymap {
     navi_maps: HashMap<char, AppCommand>,
+    edit_maps: HashMap<char, AppCommand>,
     normal_maps: HashMap<char, AppCommand>
 }
 
@@ -24,6 +25,13 @@ impl Keymap {
     pub fn navi_get(&self, key: char) -> anyhow::Result<AppCommand> {
         Ok(
             option_get!(self.navi_maps.get(&key), "Invalid keybinding")
+                .to_owned()
+        )
+    }
+
+    pub fn edit_get(&self, key: char) -> anyhow::Result<AppCommand> {
+        Ok(
+            option_get!(self.edit_maps.get(&key), "Invalid keybinding")
                 .to_owned()
         )
     }
@@ -51,24 +59,8 @@ pub fn init_keymap(app: &mut App, path: String) -> AppResult<()> {
             .expect(err_msg);
 
         match AppCommand::from_str(bind) {
-            Ok(command) => {
-                match command {
-                    AppCommand::NaviIndexInput(_) => {
-                        app.keymap.navi_maps.insert(
-                            key.chars().next().expect(err_msg),
-                            command
-                        );
-                    },
-
-                    _ => {
-                        app.keymap.normal_maps.insert(
-                            key.chars().next().expect(err_msg),
-                            command
-                        );
-                    }
-                }
-            },
-            Err(err) => errors.add_error(err),
+            Ok(command) => insert_keybinding(app, key, command, err_msg),
+            Err(err) => errors.add_error(err)
         }
     }
 
@@ -77,4 +69,30 @@ pub fn init_keymap(app: &mut App, path: String) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+fn insert_keybinding(
+    app: &mut App,
+    key: &str,
+    command: AppCommand,
+    err_msg: &str
+)
+{
+    let key_char = key.chars().next().expect(err_msg);
+    
+    match command {
+        AppCommand::NaviIndexInput(_) => {
+            app.keymap.navi_maps.insert(key_char, command);
+        },
+
+        AppCommand::EditMoveItem(_) | AppCommand::EditGotoTop |
+        AppCommand::EditGotoBottom | AppCommand::EditMark(_) =>
+        {
+            app.keymap.edit_maps.insert(key_char, command);
+        },
+
+        _ => {
+            app.keymap.normal_maps.insert(key_char, command);
+        }
+    }
 }

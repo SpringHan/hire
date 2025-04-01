@@ -35,7 +35,11 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let (current_items, marked) = if app.edit_mode.enabled {
         (
-            render_editing_list(app.edit_mode.iter(), &app.term_colors),
+            render_editing_list(
+                &app.edit_mode,
+                &app.current_files,
+                &app.term_colors
+            ),
             false
         )
     } else {

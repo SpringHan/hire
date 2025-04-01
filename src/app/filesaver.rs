@@ -11,10 +11,6 @@ use ratatui::{
     style::{Stylize, Style}
 };
 
-pub struct FileData {
-    
-}
-
 /// The structure used to save file information.
 #[derive(Debug, Clone)]
 pub struct FileSaver {

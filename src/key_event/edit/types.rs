@@ -1,30 +1,30 @@
 // Types
 
-use std::rc::Rc;
-
-use crate::{app::{App, CursorPos, FileData}, error::{AppResult, ErrorType}};
+use crate::{app::{FileSaver, CursorPos}, error::{AppResult, ErrorType}};
 
 pub struct EditItem {
     pub(super) editing_name: String,
-    pub reference: Option<Rc<FileData>>,
+    /// This attribute is only for items that has no filesaver.
+    pub is_dir: bool,
 
-    pub(super) mark: bool,
+    // pub(super) mark: bool,
     pub(super) delete: bool,
     pub(super) cursor: CursorPos,
 }
 
 #[derive(Default)]
 pub struct EditMode {
-    pub(crate) enabled: bool,
     pub(super) insert: bool,
+    pub(crate) enabled: bool,
+    pub(super) marked: Vec<usize>,
 
     pub(super) items: Vec<EditItem>
 }
 
 impl EditItem {
-    pub fn marked(&self) -> bool {
-        self.mark
-    }
+    // pub fn marked(&self) -> bool {
+    //     self.mark
+    // }
 
     pub fn name(&self) -> &str {
         &self.editing_name
@@ -39,32 +39,56 @@ impl EditMode {
             self.items.clear();
         }
 
-        // for file in files {
-        //     self.items.push(EditItem {
-        //         editing_name: file.name.to_owned(),
-        //         reference: Some(file),
+        for file in files {
+            self.items.push(EditItem {
+                editing_name: file.name.to_owned(),
+                is_dir: false,
 
-        //         mark: false,
-        //         delete: false,
-        //         cursor: CursorPos::None
-        //     });
-        // }
+                // mark: false,
+                delete: false,
+                cursor: CursorPos::None
+            });
+        }
+
+        if !self.items.is_empty() {
+            self.enabled = true;
+        }
     }
 
     pub fn inserting(&self) -> bool {
         self.insert
     }
 
-    pub fn iter(&'a self) -> impl Iterator<Item = &'a EditItem> {
+    pub fn iter(&self) -> impl Iterator<Item = &EditItem> {
         self.items.iter()
     }
 
-    pub fn mark_item(&mut self, idx: usize) -> AppResult<()> {
-        if let Some(item) = self.items.get_mut(idx) {
-            item.mark = true;
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_marked(&self, idx: usize) -> bool {
+        self.marked.contains(&idx)
+    }
+
+    pub fn mark_unmark(&mut self, idx: usize) -> AppResult<()> {
+        if idx < self.items.len() {
+            let index = self.marked.iter().position(|index| *index == idx);
+            if let Some(position_idx) = index {
+                self.marked.remove(position_idx);
+            } else {
+                self.marked.push(idx);
+            }
+
             return Ok(())
         }
 
         Err(ErrorType::NoSelected.pack())
+    }
+
+    pub fn reset(&mut self) {
+        self.items.clear();
+        self.insert = false;
+        self.enabled = false;
     }
 }
