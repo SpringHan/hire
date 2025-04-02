@@ -22,12 +22,16 @@ pub struct EditMode {
 }
 
 impl EditItem {
-    // pub fn marked(&self) -> bool {
-    //     self.mark
-    // }
+    pub fn delete(&self) -> bool {
+        self.delete
+    }
 
     pub fn name(&self) -> &str {
         &self.editing_name
+    }
+
+    pub fn cursor(&self) -> CursorPos {
+        self.cursor
     }
 }
 
@@ -71,6 +75,10 @@ impl EditMode {
         self.marked.contains(&idx)
     }
 
+    pub fn has_marked(&self) -> bool {
+        !self.marked.is_empty()
+    }
+
     pub fn mark_unmark(&mut self, idx: usize) -> AppResult<()> {
         if idx < self.items.len() {
             let index = self.marked.iter().position(|index| *index == idx);
@@ -86,8 +94,19 @@ impl EditMode {
         Err(ErrorType::NoSelected.pack())
     }
 
+    pub fn escape_insert(&mut self) {
+        self.insert = false;
+
+        for item in self.items.iter_mut() {
+            if item.cursor != CursorPos::None {
+                item.cursor = CursorPos::None;
+            }
+        }
+    }
+
     pub fn reset(&mut self) {
         self.items.clear();
+        self.marked.clear();
         self.insert = false;
         self.enabled = false;
     }

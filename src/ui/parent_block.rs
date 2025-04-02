@@ -29,7 +29,7 @@ pub fn render_parent(app: &mut App, frame: &mut Frame, area: Rect) {
     );
 
     frame.render_stateful_widget(
-        List::new(parent_block, parent_items, marked)
+        List::new(parent_block, parent_items, marked, false)
             .index(
                 app.navi_index.show() && app.root(),
                 app.navi_index.index(),

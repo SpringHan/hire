@@ -4,7 +4,7 @@ mod types;
 
 use ratatui::{text::Text, widgets::ListState};
 
-use crate::{app::{App, CursorPos, FileContent}, error::AppResult, rt_error, utils::Direction};
+use crate::{app::{App, CursorPos, FileContent}, error::AppResult, option_get};
 
 use super::{cursor_movement::move_cursor_core, Goto};
 
@@ -31,6 +31,10 @@ impl EditMode {
                         }
                     },
                     CursorPos::End => {
+                        if item.editing_name.is_empty() {
+                            continue;
+                        }
+
                         if edge {
                             item.cursor = CursorPos::Index(0);
                         } else {
@@ -39,6 +43,7 @@ impl EditMode {
                             );
                         }
                     },
+
                     CursorPos::None => ()
                 }
             } else {
@@ -72,14 +77,20 @@ impl EditMode {
         }
 
         let mut really_insert = false;
-        for (idx, item) in self.items.iter_mut().enumerate() {
-            if self.marked.contains(&idx) {
-                if !really_insert {
-                    really_insert = true;
-                }
+        if !self.marked.is_empty() {
+            for (idx, item) in self.items.iter_mut().enumerate() {
+                if self.marked.contains(&idx) {
+                    if !really_insert {
+                        really_insert = true;
+                    }
 
-                item.cursor = pos;
+                    item.cursor = pos;
+                }
             }
+
+            self.marked.clear();
+            self.insert = really_insert;
+            return ()
         }
 
         if let Some(selected_item) = state.selected() {
@@ -93,9 +104,82 @@ impl EditMode {
             }
         }
 
-        if really_insert {
-            self.insert = true;
+        self.insert = really_insert;
+    }
+
+    /// Mark or unmark file(s) as `delete`.
+    pub fn mark_delete(&mut self, state: &mut ListState) -> AppResult<()> {
+        if self.items.is_empty() {
+            return Ok(())
         }
+
+        let err_msg = "Canno find the {i}th item";
+        if !self.marked.is_empty() {
+            for i in self.marked.iter() {
+                let item = option_get!(self.items.get_mut(*i), err_msg);
+                item.delete = !item.delete;
+            }
+
+            self.marked.clear();
+            return Ok(())
+        }
+
+        if let Some(selected_idx) = state.selected() {
+            let item = option_get!(self.items.get_mut(selected_idx), err_msg);
+            item.delete = !item.delete;
+        }
+
+        Ok(())
+    }
+
+    pub fn insert_char(&mut self, _char: char) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue;
+            }
+
+            if let CursorPos::Index(ref mut idx) = item.cursor {
+                item.editing_name.insert(*idx, _char);
+                *idx += 1;
+            } else {
+                item.editing_name.push(_char);
+            }
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue;
+            }
+
+            if item.editing_name.is_empty() {
+                continue;
+            }
+
+            if let CursorPos::Index(ref mut idx) = item.cursor {
+                if *idx != 0 {
+                    item.editing_name.remove(*idx);
+                    *idx -= 1;
+                }
+            } else {
+                item.editing_name.pop();
+            }
+        }
+    }
+
+    pub fn create_item(&mut self, state: &mut ListState, dir: bool) -> AppResult<()> {
+        self.items.push(EditItem {
+            editing_name: String::new(),
+            is_dir: dir,
+            delete: false,
+            cursor: CursorPos::End
+        });
+
+        self.insert = true;
+        state.select(Some(self.items.len() - 1));
+
+        Ok(())
     }
 }
 

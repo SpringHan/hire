@@ -86,7 +86,9 @@ fn insert_keybinding(
         },
 
         AppCommand::EditMoveItem(_) | AppCommand::EditGotoTop |
-        AppCommand::EditGotoBottom | AppCommand::EditMark(_) =>
+        AppCommand::EditGotoBottom | AppCommand::EditMark(_) |
+        AppCommand::EditDelete | AppCommand::EditInsert(_) |
+        AppCommand::EditNew(_) =>
         {
             app.keymap.edit_maps.insert(key_char, command);
         },

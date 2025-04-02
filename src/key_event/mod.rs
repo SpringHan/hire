@@ -109,6 +109,11 @@ pub fn handle_event(
 
             // Execute keybinding or insert character.
             if let app::Block::Browser(in_root) = app.selected_block {
+                if app.edit_mode.inserting() {
+                    app.edit_mode.insert_char(c);
+                    return Ok(())
+                }
+
                 let command = if app.navi_index.show() {
                     app.keymap.navi_get(c)?
                 } else if app.edit_mode.enabled {
@@ -155,8 +160,13 @@ pub fn handle_event(
             if app.navi_index.show() {
                 app.navi_index.backspace();
             }
+
+            if app.edit_mode.inserting() {
+                app.edit_mode.backspace();
+            }
         },
 
+        // TODO: Split this special keys function to independent functions.
         KeyCode::Esc => {
             match app.selected_block {
                 app::Block::CommandLine(_, _) => {
@@ -179,8 +189,18 @@ pub fn handle_event(
                     }
 
                     if app.edit_mode.enabled {
+                        if app.edit_mode.inserting() {
+                            app.edit_mode.escape_insert();
+                            return Ok(())
+                        }
+
+                        if app.edit_mode.has_marked() {
+                            edit::mark_operation(app, false)?;
+                            return Ok(())
+                        }
 
                         app.edit_mode.reset();
+                        return Ok(())
                     }
 
                     if !app.marked_files.is_empty() {
@@ -203,6 +223,11 @@ pub fn handle_event(
 
             if app.navi_index.show() {
                 jump_to_index(app)?;
+                return Ok(())
+            }
+
+            // Avoid unexpected exit when editing files.
+            if app.edit_mode.inserting() {
                 return Ok(())
             }
 
@@ -303,6 +328,19 @@ impl AppCommand {
             AppCommand::EditMark(single)      => edit::mark_operation(app, single)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
 
+            AppCommand::EditDelete => app.edit_mode.mark_delete(
+                &mut app.selected_item.current
+            )?,
+
+            AppCommand::EditInsert(end) => app.edit_mode.enter_insert(
+                &mut app.selected_item.current,
+                if end {
+                    CursorPos::End
+                } else {
+                    CursorPos::Index(0)
+                }
+            ),
+
             AppCommand::Search  => app.selected_block.set_command_line(
                 "/",
                 CursorPos::End
@@ -317,6 +355,11 @@ impl AppCommand {
                 ":create_file ",
                 CursorPos::End
             ),
+
+            AppCommand::EditNew(is_idr) => app.edit_mode.create_item(
+                &mut app.selected_item.current,
+                is_idr
+            )?,
 
             AppCommand::Refresh => app.goto_dir(
                 app.current_path(),

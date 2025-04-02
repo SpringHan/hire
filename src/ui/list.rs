@@ -14,7 +14,7 @@ pub struct Item<'a> {
     style: Style,
     left: Line<'a>,
     right: Option<Line<'a>>,
-    marked_style: Option<Style>,
+    sidebar_style: Option<Style>,
 }
 
 pub struct List<'a> {
@@ -25,8 +25,9 @@ pub struct List<'a> {
     navi_show: bool,
     navi_index: Option<usize>,
 
-    marked: bool,
+    sidebar_used: bool,
     index_color: Color,
+    display_cursor: bool,
 }
 
 impl<'a> Item<'a> {
@@ -42,13 +43,14 @@ impl<'a> Item<'a> {
         Self {
             right: _right,
             left: left.into(),
-            marked_style: None,
+
+            sidebar_style: None,
             style: Style::default(),
         }
     }
 
-    pub fn marked(mut self, marked: Option<Style>) -> Self {
-        self.marked_style = marked;
+    pub fn sidebar(mut self, style: Option<Style>) -> Self {
+        self.sidebar_style = style;
         self
     }
 }
@@ -70,14 +72,15 @@ impl Widget for Item<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         buf.set_style(area, self.style);
 
+        // Add sidebar if there is.
         let right = if let Some(mut line) = self.right {
-            if let Some(style) = self.marked_style {
+            if let Some(style) = self.sidebar_style {
                 line.push_span(Span::raw(" ").style(style));
             }
 
             Some(line)
         } else {
-            if let Some(style) = self.marked_style {
+            if let Some(style) = self.sidebar_style {
                 Some(Line::raw(" ").style(style))
             } else {
                 None
@@ -104,11 +107,17 @@ impl Widget for Item<'_> {
 }
 
 impl<'a> List<'a> {
-    pub fn new(block: Block<'a>, items: Vec<Item<'a>>, marked: bool) -> Self {
+    pub fn new(
+        block: Block<'a>,
+        items: Vec<Item<'a>>,
+        sidebar_used: bool,
+        display_cursor: bool
+    ) -> Self {
         Self {
             block,
             items,
-            marked,
+            sidebar_used,
+            display_cursor,
             navi_index: None,
             navi_show: false,
             index_color: Color::default()
@@ -178,7 +187,7 @@ impl StatefulWidget for List<'_> {
             .take(get_window_height() as usize)
         {
             if let Some(selected_idx) = state.selected() {
-                if current_idx == selected_idx {
+                if !self.display_cursor && current_idx == selected_idx {
                     item.style = item.style.reversed();
                     is_selected = true;
                 }
@@ -220,7 +229,7 @@ impl StatefulWidget for List<'_> {
             }
 
             // Set whitespace to make 
-            if self.navi_show && item.marked_style.is_none() && self.marked {
+            if self.navi_show && item.sidebar_style.is_none() && self.sidebar_used {
                 right.push_span(Span::raw(" "));
             }
 

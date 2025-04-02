@@ -34,13 +34,10 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     };
 
     let (current_items, marked) = if app.edit_mode.enabled {
-        (
-            render_editing_list(
-                &app.edit_mode,
-                &app.current_files,
-                &app.term_colors
-            ),
-            false
+        render_editing_list(
+            &app.edit_mode,
+            &app.current_files,
+            &app.term_colors
         )
     } else {
         render_list(
@@ -51,7 +48,12 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     };
 
     frame.render_stateful_widget(
-        List::new(current_block, current_items, marked)
+        List::new(
+            current_block,
+            current_items,
+            marked,
+            app.edit_mode.inserting()
+        )
             .index(
                 app.navi_index.show() && !app.root(),
                 app.navi_index.index(),

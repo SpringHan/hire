@@ -53,10 +53,22 @@ pub enum AppCommand {
     ShellCommand(Vec<String>, bool),
 
     // Edit Mode
+    EditDelete,
     EditGotoTop,
     EditGotoBottom,
 
+    /// When the value is true, create a directory,
+    /// otherwise create a file.
+    EditNew(bool),
+
+    /// When the boolean is true, only mark single file.
     EditMark(bool),
+
+    /// When the boolean value is true, insert at the end.
+    /// Otherwise insert at the beginning.
+    EditInsert(bool),
+
+    /// When the value is true, select next item, otherwise the previous one.
     EditMoveItem(bool),
 }
 
@@ -124,8 +136,10 @@ impl AppCommand {
                 Self::ShellCommand(command_vec, refresh)
             },
 
+            // TODO: Align these lines.
             // Edit Mode
             "edit_top" => Self::EditGotoTop,
+            "edit_delete" => Self::EditDelete,
             "edit_bottom" => Self::EditGotoBottom,
 
             "edit_move" => Self::EditMoveItem(
@@ -134,6 +148,14 @@ impl AppCommand {
 
             "edit_mark" => Self::EditMark(
                 *option_get!(cmd_arg, command_err) == "single"
+            ),
+
+            "edit_insert" => Self::EditInsert(
+                *option_get!(cmd_arg, command_err) == "end"
+            ),
+
+            "edit_new" => Self::EditNew(
+                *option_get!(cmd_arg, command_err) == "dir"
             ),
 
             _ => bail!("Unknow command for keybinding")

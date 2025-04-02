@@ -2,9 +2,12 @@
 
 use std::collections::HashMap;
 
-use ratatui::style::Styled;
+use ratatui::{style::{Color, Modifier, Style, Styled, Stylize}, text::{Line, Span}};
 
-use crate::{app::{FileSaver, MarkedFiles, TermColors}, key_event::{EditItem, EditMode}};
+use crate::{
+    app::{CursorPos, FileSaver, MarkedFiles, TermColors},
+    key_event::{EditItem, EditMode}
+};
 
 use super::list::Item;
 
@@ -53,29 +56,62 @@ pub fn render_editing_list<'a>(
     edit_ref: &'a EditMode,
     files: &Vec<FileSaver>,
     colors: &TermColors
-) -> Vec<Item<'a>>
+) -> (Vec<Item<'a>>, bool)
 {
+    let mut sidebar_used = false;
     let mut temp_items: Vec<Item> = Vec::new();
 
     for (idx, item) in edit_ref.iter().enumerate() {
-        temp_items.push(get_editing_item_color(
+        let (item, style) = get_editing_item_color(
             item,
             files.get(idx),
             colors,
             edit_ref.is_marked(idx)
-        ));
+        );
+
+        if style.is_some() && !sidebar_used {
+            sidebar_used = true;
+        }
+
+        temp_items.push(item.sidebar(style));
     }
 
-    temp_items
+    (temp_items, sidebar_used)
 }
 
 fn get_editing_item_color<'a>(
     item: &'a EditItem,
     file: Option<&FileSaver>,
     colors: &TermColors,
-    marked: bool
-) -> Item<'a> {
-    let mut temp_item = Item::new(item.name(), None);
+    marked: bool,
+) -> (Item<'a>, Option<Style>) {
+    let left_text = if item.cursor() != CursorPos::None {
+        if let CursorPos::Index(pos) = item.cursor() {
+            let mut temp = Line::default();
+
+            for (idx, _char) in item.name().chars().enumerate() {
+                if idx == pos {
+                    temp.push_span(
+                        Span::raw(_char.to_string())
+                            .fg(Color::Black)
+                            .bg(Color::White)
+                    );
+                } else {
+                    temp.push_span(Span::raw(_char.to_string()));
+                }
+            }
+
+            temp
+        } else {
+            let mut temp = Line::raw(item.name());
+            temp.push_span(Span::raw(" ").bg(Color::White));
+            temp
+        }
+    } else {
+        Line::raw(item.name())
+    };
+
+    let mut temp_item = Item::new(left_text, None);
 
     if let Some(_file) = file {
         let style = if _file.is_dir {
@@ -97,11 +133,16 @@ fn get_editing_item_color<'a>(
 
     // TODO: Add cursor & item type display
 
-    temp_item.marked(if marked {
+    let sidebar_style = if marked {
         Some(colors.marked_style)
+    } else if item.delete() {
+        Some(colors.orphan_style
+             .add_modifier(Modifier::REVERSED))
     } else {
         None
-    })
+    };
+
+    (temp_item, sidebar_style)
 }
 
 /// Return the item which has the style of normal file.
@@ -124,7 +165,7 @@ fn get_normal_item_color<'a>(
     };
 
     Item::new::<&str>(&file.name, None).set_style(style)
-        .marked(if marked {
+        .sidebar(if marked {
             Some(colors.marked_style)
         } else {
             None

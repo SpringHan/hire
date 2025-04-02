@@ -45,7 +45,7 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
     );
 
     frame.render_stateful_widget(
-        List::new(child_block, child_items, marked),
+        List::new(child_block, child_items, marked, false),
         area,
         &mut app.selected_item.child
     );
