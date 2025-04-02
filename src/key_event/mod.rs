@@ -188,6 +188,11 @@ pub fn handle_event(
                         return Ok(())
                     }
 
+                    if app.mark_expand {
+                        app.mark_expand = false;
+                        return Ok(())
+                    }
+
                     if app.edit_mode.enabled {
                         if app.edit_mode.inserting() {
                             app.edit_mode.escape_insert(
@@ -328,6 +333,7 @@ impl AppCommand {
             AppCommand::Paste              => paste_operation(app)?,
             AppCommand::Delete             => delete_operation(app),
             AppCommand::ShowNaviIndex      => app.navi_index.init(),
+            AppCommand::MarkExpand         => app.mark_expand = true,
             AppCommand::HideOrShow         => app.hide_or_show(None)?,
             AppCommand::FzfJump            => fzf_jump(app, terminal)?,
             AppCommand::CmdShell           => shell::cmdline_shell(app)?,
@@ -344,6 +350,11 @@ impl AppCommand {
             AppCommand::EditDelete => app.edit_mode.mark_delete(
                 &mut app.selected_item.current
             )?,
+
+            AppCommand::QuitEdit => {
+                app.edit_mode.reset();
+                app.mark_expand = false;
+            },
 
             AppCommand::EditInsert(end) => app.edit_mode.enter_insert(
                 &mut app.selected_item.current,

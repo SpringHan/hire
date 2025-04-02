@@ -5,11 +5,17 @@ mod types;
 use std::mem::swap;
 use std::ops::Range;
 
-use ratatui::{widgets::ListState, Terminal as RTerminal};
 use ratatui::backend::CrosstermBackend;
+use ratatui::{widgets::ListState, Terminal as RTerminal};
 
 use super::simple_operations::output_path;
-use crate::{app::{self, App}, error::AppResult, option_get, rt_error, utils::{get_window_height, Direction}};
+use crate::{
+    utils::{get_window_height, Direction},
+    app::{self, App, MarkedFiles},
+    error::AppResult,
+    option_get,
+    rt_error,
+};
 
 pub use types::*;
 
@@ -163,7 +169,6 @@ pub fn move_cursor(
     }
 
     // Move cursor
-    // TODO: Add codes for expand mark.
     let expand_range = move_cursor_core(
         goto,
         selected_item,
@@ -174,6 +179,21 @@ pub fn move_cursor(
         },
         app.mark_expand
     );
+
+    if let Some(range) = expand_range {
+        let entry = app.marked_files.entry(app.path.to_owned())
+            .or_insert(MarkedFiles::default());
+        let current_files = if in_root {
+            &app.parent_files
+        } else {
+            &app.current_files
+        };
+
+        for i in range {
+            let file = &current_files[i];
+            entry.files.insert(file.name.to_owned(), file.is_dir);
+        }
+    }
 
     // Update child block
     if in_root {
@@ -216,7 +236,7 @@ pub fn move_cursor_core(
                 if mark_expand {
                     expand_range = Some(Range {
                         start: origin_index - 1,
-                        end: origin_index
+                        end: origin_index + 1
                     });
                 }
             }
@@ -228,7 +248,7 @@ pub fn move_cursor_core(
 
                 if mark_expand {
                     expand_range = Some(Range {
-                        start: origin_index + 1,
+                        start: origin_index,
                         end: origin_index + 2
                     });
                 }
@@ -252,7 +272,7 @@ pub fn move_cursor_core(
             if mark_expand && after_scroll != origin_index {
                 expand_range = Some(Range {
                     start: 0,
-                    end: origin_index
+                    end: origin_index + 1
                 });
             }
         },
@@ -271,7 +291,7 @@ pub fn move_cursor_core(
 
             if mark_expand && after_scroll != origin_index {
                 expand_range = Some(Range {
-                    start: origin_index + 1,
+                    start: origin_index,
                     end: after_scroll + 1
                 });
             }
@@ -283,11 +303,11 @@ pub fn move_cursor_core(
             if mark_expand && idx != origin_index {
                 let (start, end): (usize, usize);
                 if idx > origin_index {
-                    start = origin_index + 1;
+                    start = origin_index;
                     end = idx + 1;
                 } else {
                     start = idx;
-                    end = origin_index;
+                    end = origin_index + 1;
                 }
 
                 expand_range = Some(Range { start, end });

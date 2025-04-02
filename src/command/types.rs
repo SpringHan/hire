@@ -20,6 +20,7 @@ pub enum AppCommand {
     CreateFile,
     GotoBottom,
     HideOrShow,
+    MarkExpand,
     ShowNaviIndex,
     SingleSymlink,
     PrintFullPath,
@@ -37,7 +38,7 @@ pub enum AppCommand {
 
     /// When boolean value is true, the cursor will be moved to the edge.
     AppendFsName(bool),
-
+    
     /// Move cursor to the candidate, jumping to the next when the boolean is true.
     MoveCandidate(bool),
 
@@ -53,6 +54,7 @@ pub enum AppCommand {
     ShellCommand(Vec<String>, bool),
 
     // Edit Mode
+    QuitEdit,
     EditDelete,
     EditGotoTop,
     EditGotoBottom,
@@ -97,6 +99,7 @@ impl AppCommand {
             "create_file"          => Self::CreateFile,
             "goto_bottom"          => Self::GotoBottom,
             "hide_or_show"         => Self::HideOrShow,
+            "mark_expand"          => Self::MarkExpand,
             "full_path"            => Self::PrintFullPath,
             "single_symlink"       => Self::SingleSymlink,
             "show_navi_index"      => Self::ShowNaviIndex,
@@ -141,8 +144,9 @@ impl AppCommand {
 
             // TODO: Align these lines.
             // Edit Mode
-            "edit_top" => Self::EditGotoTop,
+            "quit_edit"   => Self::QuitEdit,
             "edit_delete" => Self::EditDelete,
+            "edit_top"    => Self::EditGotoTop,
             "edit_bottom" => Self::EditGotoBottom,
 
             "edit_move" => Self::EditMoveItem(

@@ -234,7 +234,9 @@ pub fn item_navigation(
 
     if let Some(range) = expand_region {
         for i in range {
-            edit_ref.mark_unmark(i)?;
+            if !edit_ref.marked.contains(&i) {
+                edit_ref.marked.push(i);
+            }
         }
     }
 

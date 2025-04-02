@@ -295,6 +295,7 @@ fn generate_msg(app: &App) -> CmdContent {
 }
 
 fn restore_status(app: &mut App) -> AppResult<()> {
+    app.mark_expand = false;
     app.marked_files.clear();
     app.goto_dir(app.current_path(), None)?;
 

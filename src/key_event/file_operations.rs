@@ -108,6 +108,7 @@ fn delete_switch(
                     }
                     app.goto_dir(current_dir, None)?;
                     app.marked_files.clear();
+                    app.mark_expand = false;
 
                     return Ok(true)
                 }

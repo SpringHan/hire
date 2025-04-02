@@ -85,7 +85,7 @@ fn insert_keybinding(
             app.keymap.navi_maps.insert(key_char, command);
         },
 
-        AppCommand::ShowNaviIndex => {
+        AppCommand::ShowNaviIndex | AppCommand::MarkExpand => {
             app.keymap.edit_maps.insert(key_char, command.to_owned());
             app.keymap.normal_maps.insert(key_char, command);
         },
@@ -93,7 +93,8 @@ fn insert_keybinding(
         AppCommand::EditMoveItem(_) | AppCommand::EditGotoTop |
         AppCommand::EditGotoBottom | AppCommand::EditMark(_) |
         AppCommand::EditDelete | AppCommand::EditInsert(_) |
-        AppCommand::EditNew(_) | AppCommand::EditListScroll(_) =>
+        AppCommand::EditNew(_) | AppCommand::EditListScroll(_) |
+        AppCommand::QuitEdit =>
         {
             app.keymap.edit_maps.insert(key_char, command);
         },
