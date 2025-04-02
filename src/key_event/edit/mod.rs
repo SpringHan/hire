@@ -2,11 +2,13 @@
 
 mod types;
 
-use ratatui::{text::Text, widgets::ListState};
+use std::fs;
 
-use crate::{app::{App, CursorPos, FileContent}, error::AppResult, option_get};
+use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
-use super::{cursor_movement::move_cursor_core, Goto};
+use crate::{app::{App, CmdContent, CursorPos, FileContent}, error::{AppError, AppResult}, option_get};
+
+use super::{cursor_movement::move_cursor_core, Goto, SwitchCaseData};
 
 pub use types::*;
 
@@ -159,7 +161,7 @@ impl EditMode {
 
             if let CursorPos::Index(ref mut idx) = item.cursor {
                 if *idx != 0 {
-                    item.editing_name.remove(*idx);
+                    item.editing_name.remove(*idx - 1);
                     *idx -= 1;
                 }
             } else {
@@ -180,6 +182,34 @@ impl EditMode {
         state.select(Some(self.items.len() - 1));
 
         Ok(())
+    }
+
+    pub fn escape_insert(&mut self, state: &mut ListState, files_length: usize) {
+        self.insert = false;
+
+        if self.items.is_empty() {
+            return ()
+        }
+
+        let mut temp_items: Vec<EditItem> = Vec::new();
+        for (idx, item) in self.items.iter_mut().enumerate() {
+            if idx >= files_length && item.editing_name.is_empty() {
+                continue;
+            }
+
+            if item.cursor != CursorPos::None {
+                item.cursor = CursorPos::None;
+            }
+
+            temp_items.push(item.to_owned());
+        }
+
+        self.items = temp_items;
+        if let Some(selected_idx) = state.selected() {
+            if selected_idx >= self.items.len() {
+                state.select(Some(self.items.len() - 1));
+            }
+        }
     }
 }
 
@@ -239,4 +269,81 @@ pub fn mark_operation(app: &mut App, single: bool) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+pub fn save_edit(app: &mut App, key: char, _: SwitchCaseData) -> AppResult<bool> {
+    if key != 'y' {
+        return Ok(true)
+    }
+
+    let edit_ref = &mut app.edit_mode;
+    if edit_ref.items.is_empty() {
+        return Ok(true)
+    }
+
+    let mut have_hide_file = false;
+    let mut errors = AppError::new();
+    for (idx, item) in edit_ref.items.iter().enumerate() {
+        if idx < app.current_files.len() {
+            let file = app.current_files.get(idx).unwrap();
+            let file_path = app.path.join(&file.name);
+            if item.delete {
+                if file.is_dir {
+                    if let Err(err) = fs::remove_dir_all(file_path) {
+                        errors.add_error(err);
+                    }
+                } else {
+                    if let Err(err) = fs::remove_file(file_path) {
+                        errors.add_error(err);
+                    }
+                }
+
+                continue;
+            }
+
+            if item.editing_name != file.name {
+                if item.editing_name.starts_with(".") {
+                    have_hide_file = true;
+                }
+
+                let new_path = app.path.join(&item.editing_name);
+                if let Err(err) = fs::rename(file_path, new_path) {
+                    errors.add_error(err);
+                }
+            }
+
+            continue;
+        }
+
+        if item.editing_name.starts_with(".") {
+            have_hide_file = true;
+        }
+
+        let file_path = app.path.join(&item.editing_name);
+        if item.is_dir {
+            if let Err(err) = fs::create_dir(file_path) {
+                errors.add_error(err);
+            }
+        } else {
+            if let Err(err) = fs::File::create_new(file_path) {
+                errors.add_error(err);
+            }
+        }
+    }
+
+    edit_ref.reset();
+    app.goto_dir(app.current_path(), Some(!have_hide_file))?;
+
+    if !errors.is_empty() {
+        return Err(errors)
+    }
+
+    Ok(true)
+}
+
+pub fn generate_msg() -> CmdContent {
+    CmdContent::Text(
+        Text::raw("Are you sure to apply the edited files? (y to confirm)")
+            .fg(Color::Red)
+    )
 }

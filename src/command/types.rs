@@ -70,6 +70,9 @@ pub enum AppCommand {
 
     /// When the value is true, select next item, otherwise the previous one.
     EditMoveItem(bool),
+
+    /// When the value is true, scroll down, otherwise scroll up.
+    EditListScroll(bool),
 }
 
 impl AppCommand {
@@ -152,6 +155,10 @@ impl AppCommand {
 
             "edit_insert" => Self::EditInsert(
                 *option_get!(cmd_arg, command_err) == "end"
+            ),
+
+            "edit_list_scroll" => Self::EditListScroll(
+                *option_get!(cmd_arg, command_err) == "next"
             ),
 
             "edit_new" => Self::EditNew(

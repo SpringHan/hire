@@ -190,7 +190,10 @@ pub fn handle_event(
 
                     if app.edit_mode.enabled {
                         if app.edit_mode.inserting() {
-                            app.edit_mode.escape_insert();
+                            app.edit_mode.escape_insert(
+                                &mut app.selected_item.current,
+                                app.current_files.len()
+                            );
                             return Ok(())
                         }
 
@@ -226,9 +229,19 @@ pub fn handle_event(
                 return Ok(())
             }
 
-            // Avoid unexpected exit when editing files.
-            if app.edit_mode.inserting() {
-                return Ok(())
+            if app.edit_mode.enabled {
+                // Avoid unexpected exit when editing files.
+                if app.edit_mode.inserting() {
+                    return Ok(())
+                }
+
+                SwitchCase::new(
+                    app,
+                    edit::save_edit,
+                    false,
+                    edit::generate_msg(),
+                    SwitchCaseData::None
+                );
             }
 
             if app.output_file.is_some() && app.confirm_output {
@@ -402,6 +415,15 @@ impl AppCommand {
                     Goto::ScrollUp
                 },
                 app.root()
+            )?,
+
+            AppCommand::EditListScroll(down) => edit::item_navigation(
+                app,
+                if down {
+                    Goto::ScrollDown
+                } else {
+                    Goto::ScrollUp
+                }
             )?,
 
             AppCommand::EditMode => if !app.root() {

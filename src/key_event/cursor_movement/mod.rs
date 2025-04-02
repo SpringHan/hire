@@ -263,7 +263,7 @@ pub fn move_cursor_core(
 
             if after_scroll >= item_length {
                 selected_item.select(Some(item_length - 1));
-                *selected_item.offset_mut() = after_scroll.saturating_sub(wind_height);
+                *selected_item.offset_mut() = item_length.saturating_sub(wind_height);
             } else {
                 selected_item.select(Some(after_scroll));
                 *selected_item.offset_mut() = after_scroll;
@@ -299,17 +299,21 @@ pub fn move_cursor_core(
 }
 
 /// Jump to specific item with navigation index entered by user.
-pub fn jump_to_index(app: &mut App) -> AppResult<()> {
+pub fn jump_to_index(app: &mut App) -> AppResult<bool> {
     let current_state = if app.root() {
         &app.selected_item.parent
     } else {
         &app.selected_item.current
     };
 
-    let current_len = if app.root() {
-        app.parent_files.len()
+    let current_len = if app.edit_mode.enabled {
+        app.edit_mode.len()
     } else {
-        app.current_files.len()
+        if app.root() {
+            app.parent_files.len()
+        } else {
+            app.current_files.len()
+        }   
     };
 
     if current_state.selected().is_none() {
@@ -332,9 +336,13 @@ pub fn jump_to_index(app: &mut App) -> AppResult<()> {
         after_move = current_len - 1;
     }
 
-    move_cursor(app, Goto::Index(after_move), app.root())?;
+    if app.edit_mode.enabled {
+        super::edit::item_navigation(app, Goto::Index(after_move))?;
+    } else {
+        move_cursor(app, Goto::Index(after_move), app.root())?;
+    }
 
     app.navi_index.reset();
 
-    Ok(())
+    Ok(true)
 }

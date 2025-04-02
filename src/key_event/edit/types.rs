@@ -2,6 +2,7 @@
 
 use crate::{app::{FileSaver, CursorPos}, error::{AppResult, ErrorType}};
 
+#[derive(Clone)]
 pub struct EditItem {
     pub(super) editing_name: String,
     /// This attribute is only for items that has no filesaver.
@@ -92,16 +93,6 @@ impl EditMode {
         }
 
         Err(ErrorType::NoSelected.pack())
-    }
-
-    pub fn escape_insert(&mut self) {
-        self.insert = false;
-
-        for item in self.items.iter_mut() {
-            if item.cursor != CursorPos::None {
-                item.cursor = CursorPos::None;
-            }
-        }
     }
 
     pub fn reset(&mut self) {
