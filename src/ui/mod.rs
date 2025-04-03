@@ -45,11 +45,12 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .split(frame.area());
 
     // Title
+    let item_num = get_item_num_para(app);
     let title_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(75),
-            Constraint::Percentage(25)
+            Constraint::Percentage(100),
+            Constraint::Min(item_num.len() as u16)
         ])
         .split(chunks[0]);
     
@@ -92,11 +93,10 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
     // Item list statistic information
     let item_info_block = Block::default();
-    let item_num_info = Paragraph::new(
-        Line::from(
-            Span::styled(get_item_num_para(app), app.term_colors.file_style)
-        )
-    )
+    let item_num_info = Paragraph::new(Line::from(Span::styled(
+        item_num,
+        app.term_colors.file_style
+    )))
         .alignment(Alignment::Right)
         .block(item_info_block);
 
@@ -215,6 +215,7 @@ fn check_app_error(app: &mut App) {
     }
 }
 
+#[inline(always)]
 fn get_item_num_para(app: &App) -> String {
     let info = if app.path.to_string_lossy() == "/" {
         format!(
