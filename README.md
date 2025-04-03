@@ -89,6 +89,7 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
    - Insert text at beginning/end of filenames (`H`/`h` in Colemak, `I`/`i` in QWERTY)
 
 4. **Exiting**:
+   - `Enter` - Apply edited content to current path
    - `Q`/`Esc` - Quit edit mode
 
 ### Output File
@@ -120,17 +121,21 @@ Usage:
 An example of keymap configuration for navigation index:
 
 ```toml
-# An example for colemak keyboard layout.
-{ key = "a", run = "navi_input 1" },
-{ key = "r", run = "navi_input 2" },
-{ key = "s", run = "navi_input 3" },
-{ key = "t", run = "navi_input 4" },
-{ key = "d", run = "navi_input 5" },
-{ key = "h", run = "navi_input 6" },
-{ key = "n", run = "navi_input 7" },
-{ key = "e", run = "navi_input 8" },
-{ key = "i", run = "navi_input 9" },
-{ key = "o", run = "navi_input 0" },
+keymap = [
+    # Other bindings.....
+
+    # An example for colemak keyboard layout.
+    { key = "a", run = "navi_input 1" },
+    { key = "r", run = "navi_input 2" },
+    { key = "s", run = "navi_input 3" },
+    { key = "t", run = "navi_input 4" },
+    { key = "d", run = "navi_input 5" },
+    { key = "h", run = "navi_input 6" },
+    { key = "n", run = "navi_input 7" },
+    { key = "e", run = "navi_input 8" },
+    { key = "i", run = "navi_input 9" },
+    { key = "o", run = "navi_input 0" }
+]
 ```
 
 ## TODO
