@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Modifier, Style, Stylize},
     widgets::{Block, Paragraph, Widget},
     text::{Line, Span},
-    Frame
+    Frame,
 };
 
 use crate::app::{self, App, CmdContent, CursorPos};
@@ -41,16 +41,18 @@ impl<'a> Widget for StateLine<'a> {
             return ()
         }
 
+        let right_side = self.right_side.unwrap();
+
         let layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(100),
-                Constraint::Min(7)
+                Constraint::Min(right_side.width() as u16)
             ])
             .split(area);
 
         self.left_side.render(layout[0], buf);
-        self.right_side.unwrap().render(layout[1], buf);
+        right_side.render(layout[1], buf);
     }
 }
 
@@ -94,10 +96,25 @@ pub fn render_command_line<'a>(
                 lines.push(Line::raw("").alignment(Alignment::Left));
             }
 
-            if app.confirm_output && app.output_file.is_some() {
+            if app.mark_expand {
+                let mut style = app.term_colors.marked_style;
+                if style.bg.is_some() {
+                    style.bg = None;
+                }
+
+                lines.push(Line::styled(
+                    "EXPAND",
+                    style.add_modifier(Modifier::BOLD)
+                ).alignment(Alignment::Right));
+            } else if app.confirm_output && app.output_file.is_some() {
+                let mut style = app.term_colors.symlink_style;
+                if style.bg.is_some() {
+                    style.bg = None;
+                }
+
                 lines.push(Line::styled(
                     "OUTPUT",
-                    Style::default().cyan().add_modifier(Modifier::BOLD)
+                    style.add_modifier(Modifier::BOLD)
                 ).alignment(Alignment::Right));
             }
 

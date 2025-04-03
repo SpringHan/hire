@@ -134,7 +134,7 @@ fn get_editing_item_color<'a>(
     // TODO: Add cursor & item type display
 
     let sidebar_style = if marked {
-        Some(colors.marked_style)
+        Some(colors.marked_style.add_modifier(Modifier::REVERSED))
     } else if item.delete() {
         Some(colors.orphan_style
              .add_modifier(Modifier::REVERSED))
@@ -166,7 +166,7 @@ fn get_normal_item_color<'a>(
 
     Item::new::<&str>(&file.name, None).set_style(style)
         .sidebar(if marked {
-            Some(colors.marked_style)
+            Some(colors.marked_style.add_modifier(Modifier::REVERSED))
         } else {
             None
         })

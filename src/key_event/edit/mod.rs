@@ -6,7 +6,11 @@ use std::fs;
 
 use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
-use crate::{app::{App, CmdContent, CursorPos, FileContent}, error::{AppError, AppResult}, option_get};
+use crate::{
+    app::{App, CmdContent, CursorPos, FileContent},
+    error::{AppError, AppResult},
+    option_get,
+};
 
 use super::{cursor_movement::move_cursor_core, Goto, SwitchCaseData};
 

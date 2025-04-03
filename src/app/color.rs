@@ -69,12 +69,10 @@ impl TermColors {
         let colors: Vec<&str> = colors.split(":").collect();
         let dir_style = fetch_style(&colors, &color_map, "di");
         let file_style = fetch_style(&colors, &color_map, "rs");
+        let marked_style = fetch_style(&colors, &color_map, "pi");
         let orphan_style = fetch_style(&colors, &color_map, "do");
         let symlink_style = fetch_style(&colors, &color_map, "ln");
         let executable_style = fetch_style(&colors, &color_map, "ex");
-
-        let marked_style = fetch_style(&colors, &color_map, "pi")
-            .add_modifier(Modifier::REVERSED);
 
         TermColors {
             dir_style,
