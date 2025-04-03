@@ -109,31 +109,6 @@ impl EditMode {
         self.insert = really_insert;
     }
 
-    /// Mark or unmark file(s) as `delete`.
-    pub fn mark_delete(&mut self, state: &mut ListState) -> AppResult<()> {
-        if self.items.is_empty() {
-            return Ok(())
-        }
-
-        let err_msg = "Canno find the {i}th item";
-        if !self.marked.is_empty() {
-            for i in self.marked.iter() {
-                let item = option_get!(self.items.get_mut(*i), err_msg);
-                item.delete = !item.delete;
-            }
-
-            self.marked.clear();
-            return Ok(())
-        }
-
-        if let Some(selected_idx) = state.selected() {
-            let item = option_get!(self.items.get_mut(selected_idx), err_msg);
-            item.delete = !item.delete;
-        }
-
-        Ok(())
-    }
-
     pub fn insert_char(&mut self, _char: char) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -211,6 +186,35 @@ impl EditMode {
             }
         }
     }
+}
+
+/// Mark or unmark file(s) as `delete`.
+pub fn mark_delete(app: &mut App) -> AppResult<()> {
+    let edit_ref = &mut app.edit_mode;
+    let state = &mut app.selected_item.current;
+
+    if edit_ref.items.is_empty() {
+        return Ok(())
+    }
+
+    let err_msg = "Canno find the {i}th item";
+    if !edit_ref.marked.is_empty() {
+        for i in edit_ref.marked.iter() {
+            let item = option_get!(edit_ref.items.get_mut(*i), err_msg);
+            item.delete = !item.delete;
+        }
+
+        edit_ref.marked.clear();
+        return Ok(())
+    }
+
+    if let Some(selected_idx) = state.selected() {
+        let item = option_get!(edit_ref.items.get_mut(selected_idx), err_msg);
+        item.delete = !item.delete;
+        item_navigation(app, Goto::Down)?;
+    }
+
+    Ok(())
 }
 
 pub fn item_navigation(

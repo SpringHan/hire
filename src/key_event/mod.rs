@@ -70,8 +70,20 @@ pub fn handle_event(
                     KeyModifiers::CONTROL => {
                         match c {
                             'g' => app.command_completion.hide(),
-                            'b' | 'a' => app.cursor_left(c == 'a'),
-                            'f' | 'e' => app.cursor_right(c == 'e'),
+                            'b' | 'a' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(false, c == 'a')?;
+                                } else {
+                                    app.cursor_left(c == 'a');
+                                }
+                            },
+                            'f' | 'e' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(true, c == 'e')?;
+                                } else {
+                                    app.cursor_right(c == 'e');
+                                }
+                            },
 
                             'n' | 'p' => {
                                 if app.command_completion.show_frame() {
@@ -165,7 +177,7 @@ pub fn handle_event(
                 app.edit_mode.backspace();
             }
         },
-
+        
         // TODO: Split this special keys function to independent functions.
         KeyCode::Esc => {
             match app.selected_block {
@@ -334,6 +346,7 @@ impl AppCommand {
             AppCommand::Delete             => delete_operation(app),
             AppCommand::ShowNaviIndex      => app.navi_index.init(),
             AppCommand::MarkExpand         => app.mark_expand = true,
+            AppCommand::EditDelete         => edit::mark_delete(app)?,
             AppCommand::HideOrShow         => app.hide_or_show(None)?,
             AppCommand::FzfJump            => fzf_jump(app, terminal)?,
             AppCommand::CmdShell           => shell::cmdline_shell(app)?,
@@ -346,10 +359,6 @@ impl AppCommand {
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::EditMark(single)      => edit::mark_operation(app, single)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,
-
-            AppCommand::EditDelete => app.edit_mode.mark_delete(
-                &mut app.selected_item.current
-            )?,
 
             AppCommand::QuitEdit => {
                 app.edit_mode.reset();
