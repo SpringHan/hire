@@ -73,7 +73,7 @@ hire --help
 - [x] Storage of specific tabs
 - [x] Keymap config support
 - [x] Optimize the editing ability for command line
-- [ ] Edit multiple files with terminal editor
+- [x] Add Edit mode for more convenient file editing
 - [ ] Bottom hint for whether current shell process is run by hire
 - [ ] Refactor dir tree
 - [ ] Highlight for file preview
