@@ -41,7 +41,7 @@ impl SwitchCase {
         }
 
         app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);
-        app.option_key = app::OptionFor::Switch(SwitchCase(func, data));
+        app.switch_case = Some(SwitchCase(func, data));
     }
 }
 

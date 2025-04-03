@@ -33,7 +33,7 @@ use crate::rt_error;
 use crate::utils::Direction;
 use crate::error::AppResult;
 use crate::command::AppCommand;
-use crate::app::{self, App, CursorPos, OptionFor};
+use crate::app::{self, App, CursorPos};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
@@ -110,13 +110,10 @@ pub fn handle_event(
 
             // NOTE(for coding): All the function in the blocks below must be end with
             // code to set OPTION_KEY to None.
-            match app.option_key {
-                OptionFor::Switch(ref case) => {
-                    let case = case.to_owned();
-                    switch::switch_match(app, case, c)?;
-                    return Ok(())
-                },
-                OptionFor::None => ()
+            if let Some(ref case) = app.switch_case {
+                let case = case.to_owned();
+                switch::switch_match(app, case, c)?;
+                return Ok(())
             }
 
             // Execute keybinding or insert character.
@@ -190,8 +187,8 @@ pub fn handle_event(
                     app.quit_command_mode();
                 },
                 _ => {
-                    if let OptionFor::Switch(_) = app.option_key {
-                        app.option_key = OptionFor::None;
+                    if let Some(_) = app.switch_case {
+                        app.switch_case = None;
                         return Ok(())
                     }
 

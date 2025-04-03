@@ -5,8 +5,8 @@ use std::{io::Stderr, ops::AddAssign};
 use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
-    app::{Block, CmdContent, CursorPos, OptionFor},
     key_event::{CommandStr, ShellCommand},
+    app::{Block, CmdContent, CursorPos},
     error::{AppResult, ErrorType},
     utils::Direction,
     rt_error,
@@ -62,7 +62,7 @@ impl<'a> App<'a> {
             self.command_completion.reset();
         }
 
-        self.option_key = OptionFor::None;
+        self.switch_case = None;
     }
 
     // TODO: Code of this function can be optimized.

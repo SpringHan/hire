@@ -18,7 +18,7 @@ use ratatui::widgets::ListState;
 use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex};
+use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex, SwitchCase};
 
 pub use special_types::*;
 pub use color::TermColors;
@@ -43,7 +43,7 @@ pub struct App<'a> {
     // Block
     pub selected_block: Block,
 
-    pub option_key: OptionFor,       // Use the next key as option.
+    pub switch_case: Option<SwitchCase>,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
     /// When command_error is true, the content in command line will be displayed in red.
@@ -126,10 +126,10 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
+            switch_case: None,
             mark_expand: false,
             command_scroll: None,
             target_dir: HashMap::new(),
-            option_key: OptionFor::None,
             marked_files: HashMap::new(),
             edit_mode: EditMode::default(),
             navi_index: NaviIndex::default(),

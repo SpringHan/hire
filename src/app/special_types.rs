@@ -4,17 +4,10 @@ use std::collections::HashMap;
 
 use ratatui::{text::Text, widgets::ListState};
 
-use crate::key_event::SwitchCase;
-
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CursorPos {
     Index(usize),
     End,
-    None
-}
-
-pub enum OptionFor {
-    Switch(SwitchCase),
     None
 }
 
