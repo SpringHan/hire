@@ -27,32 +27,7 @@ impl<'a> App<'a> {
 
         thread::spawn(move || loop {
             if let Ok((name, exactly, files)) = calc_rx.recv() {
-                let name = if !exactly {
-                    name.to_lowercase()
-                } else {
-                    name
-                };
-
-                let mut i = 0;
-                let mut indexes: Vec<usize> = Vec::new();
-                for file in files.iter() {
-                    if exactly {
-                        if file.name == name {
-                            indexes.push(i);
-                            break;
-                        }
-
-                        i += 1;
-                        continue;
-                    }
-
-                    if file.name.to_lowercase().contains(&name) {
-                        indexes.push(i);
-                    }
-                    i += 1;
-                }
-
-                update_tx.send(indexes)
+                update_tx.send(search_core(name, &files, exactly))
                     .expect("Error occurred from channel when searching file!")
             }
         });
@@ -62,13 +37,34 @@ impl<'a> App<'a> {
         update_rx
     }
 
+    pub fn file_search_sync(
+        &mut self,
+        name: String,
+        exactly: bool
+    ) -> AppResult<()>
+    {
+        if !exactly {
+            self.command_history.push(format!("/{}", name.clone()));
+        }
+
+        let current_files = self.get_directory_mut().0;
+        let indexes = search_core(name, current_files, exactly);
+
+        if !indexes.is_empty() {
+            self.file_searcher.update_idx(indexes);
+            self.next_candidate()?;
+        }
+
+        Ok(())
+    }
+
     pub fn file_search(&mut self, name: String, exactly: bool) -> anyhow::Result<()> {
         // NOTE: The user cannot reach to `exactly` by inputing command.
         if !exactly {
             self.command_history.push(format!("/{}", name.clone()));
         }
 
-        let current_files = self.get_directory_mut().0.clone();
+        let current_files = self.get_directory_mut().0.to_owned();
         if let Some(ref sender) = self.file_searcher.calc_sender {
             if let Err(err) = sender.send((name, exactly, current_files)) {
                 return Err(err.into())
@@ -130,6 +126,36 @@ impl<'a> App<'a> {
     pub fn clean_search_idx(&mut self) {
         self.file_searcher.searched_idx.clear();
     }
+}
+
+/// Core function of file searcher.
+fn search_core(name: String, files: &Vec<FileSaver>, exactly: bool) -> Vec<usize> {
+    let name = if !exactly {
+        name.to_lowercase()
+    } else {
+        name
+    };
+
+    let mut i = 0;
+    let mut indexes: Vec<usize> = Vec::new();
+    for file in files.iter() {
+        if exactly {
+            if file.name == name {
+                indexes.push(i);
+                break;
+            }
+
+            i += 1;
+            continue;
+        }
+
+        if file.name.to_lowercase().contains(&name) {
+            indexes.push(i);
+        }
+        i += 1;
+    }
+
+    indexes
 }
 
 #[inline]

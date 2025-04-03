@@ -1,47 +1,81 @@
 keymap = [
     # Motion
-    { key = "k", run = "move up"     },
-    { key = "j", run = "move down"   },
-    { key = "h", run = "move left"   },
-    { key = "l", run = "move right"  },
-    { key = "G", run = "goto_bottom" },
+    { key = "k", run = "move up"          },  # Move selection cursor up
+    { key = "j", run = "move down"        },  # Move selection cursor down
+    { key = "h", run = "move left"        },  # Move to parent directory
+    { key = "l", run = "move right"       },  # Move into selected directory / Open file with `file_read_program` / Output selected file path to `output-file`
+    { key = "G", run = "goto_bottom"      },  # Jump to bottom of file list
+    { key = "v", run = "list_scroll next" },  # Scroll list view down
+    { key = "V", run = "list_scroll prev" },  # Scroll list view up
 
     # Operations with menu
-    { key = "t", run = "tab_operation"    },
-    { key = "g", run = "goto_operation"   },
-    { key = "p", run = "paste_operation"  },
-    { key = "d", run = "delete_operation" },
+    { key = "t", run = "tab_operation"    },  # Open tab operations menu
+    { key = "g", run = "goto_operation"   },  # Open goto operations menu
+    { key = "p", run = "paste_operation"  },  # Open paste operations menu
+    { key = "d", run = "delete_operation" },  # Open delete operations menu
 
     # Search
-    { key = "/", run = "search"              },
-    { key = "n", run = "move_candidate next" },
-    { key = "N", run = "move_candidate prev" },
+    { key = "/", run = "search"              },  # Start to search file in command line
+    { key = "n", run = "move_candidate next" },  # Move to next search match
+    { key = "N", run = "move_candidate prev" },  # Move to previous search match
 
     # Mark
-    { key = "m", run = "mark all"    },
-    { key = " ", run = "mark single" },
+    { key = "m", run = "mark all"    },  # Mark/unmark all files
+    { key = " ", run = "mark single" },  # Mark/unmark single file
+    { key = "M", run = "mark_expand" },  # Start mark expansion mode, then cursor motion will be with selection
 
     # File Create
-    { key = "+", run = "create_dir"  },
-    { key = "=", run = "create_file" },
+    { key = "+", run = "create_dir"  },  # Create new directory
+    { key = "=", run = "create_file" },  # Create new file
 
     # Shell
-    { key = "S", run = "spawn_shell"                },
-    { key = "!", run = "cmdline_shell"              },
-    { key = "L", run = "shell_command true lazygit" },
+    { key = "S", run = "spawn_shell"                },  # Spawn shell in current directory
+    { key = "!", run = "cmdline_shell"              },  # Open shell command prompt in command line
+    { key = "L", run = "shell_command true lazygit" },  # Run lazygit (with refresh)
 
     # File name modify
-    { key = "a", run = "append_filename name"      },
-    { key = "A", run = "append_filename extension" },
+    { key = "a", run = "append_filename name"      },  # Append to filename
+    { key = "A", run = "append_filename extension" },  # Append to file extension
 
     # Working directory
-    { key = "w", run = "work_directory goto" },
-    { key = "W", run = "work_directory set"  },
+    { key = "W", run = "work_directory set"  },  # Set current path as working directory
+    { key = "w", run = "work_directory goto" },  # Go to working directory
 
     # Others
-    { key = "R", run = "refresh"        },
-    { key = "f", run = "fzf_jump"       },
-    { key = "P", run = "full_path"      },
-    { key = "-", run = "hide_or_show"   },
-    { key = "s", run = "single_symlink" },
+    { key = "R", run = "refresh"               },  # Refresh file list
+    { key = "f", run = "fzf_jump"              },  # Fuzzy find and jump to file
+    { key = "P", run = "full_path"             },  # Print full path of current file
+    { key = "i", run = "edit_mode"             },  # Enter edit mode
+    { key = "-", run = "hide_or_show"          },  # Toggle hidden files visibility
+    { key = "\\", run = "change_output_status" },  # Toggle output status display
+    { key = "s", run = "single_symlink"        },  # Create symlink of currently selected file
+
+    # Navigation Index
+    { key = "1", run = "navi_input 1"    },  # Navigation index input 1
+    { key = "2", run = "navi_input 2"    },  # Navigation index input 2
+    { key = "3", run = "navi_input 3"    },  # Navigation index input 3
+    { key = "4", run = "navi_input 4"    },  # Navigation index input 4
+    { key = "5", run = "navi_input 5"    },  # Navigation index input 5
+    { key = "6", run = "navi_input 6"    },  # Navigation index input 6
+    { key = "7", run = "navi_input 7"    },  # Navigation index input 7
+    { key = "8", run = "navi_input 8"    },  # Navigation index input 8
+    { key = "9", run = "navi_input 9"    },  # Navigation index input 9
+    { key = "0", run = "navi_input 0"    },  # Navigation index input 0
+    { key = ".", run = "show_navi_index" },  # Enter & Show navigation index hints
+
+    # Edit Mode
+    { key = "Q", run = "quit_edit"             },  # Quit edit mode (You can also use Esc to escape, but you will need to press multiple times if there's marked items).
+    { key = "g", run = "edit_top"              },  # Move to top in edit mode
+    { key = "G", run = "edit_bottom"           },  # Move to bottom in edit mode
+    { key = "d", run = "edit_delete"           },  # Delete selected in edit mode
+    { key = "N", run = "edit_new dir"          },  # Create new directory in edit mode
+    { key = "n", run = "edit_new file"         },  # Create new file in edit mode
+    { key = "k", run = "edit_move prev"        },  # Move up in edit mode
+    { key = "j", run = "edit_move next"        },  # Move down in edit mode
+    { key = "m", run = "edit_mark all"         },  # Mark all in edit mode
+    { key = " ", run = "edit_mark single"      },  # Mark single in edit mode
+    { key = "i", run = "edit_insert end"       },  # Insert at end in edit mode
+    { key = "I", run = "edit_insert beg"       },  # Insert at beginning in edit mode
+    { key = "v", run = "edit_list_scroll next" },  # Scroll down in edit mode
+    { key = "V", run = "edit_list_scroll prev" },  # Scroll up in edit mode
 ]

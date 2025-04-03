@@ -25,7 +25,7 @@ macro_rules! option_get {
     ($e: expr, $msg: expr) => {
         match $e {
             Some(value) => value,
-            None => anyhow::bail!("{}", $msg),
+            None => return Err(anyhow::anyhow!("{}", $msg).into()),
         }
     };
 }
@@ -76,8 +76,7 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
     let configs = [
-        "default_shell", "gui_commands",
-        "file_read_program", "file_operation_editor"
+        "default_shell", "gui_commands", "file_read_program"
     ];
     let mut errors = AppError::new();
 
@@ -166,9 +165,10 @@ pub fn get_conf_file() -> io::Result<(String, String, String)> {
     Ok((
         format!("{}auto_config.toml", config_dir),
         format!("{}user_config.toml", config_dir),
+        format!("{}keymap.toml", config_dir)
         // Dev
         // format!("{}auto_config_dev.toml", config_dir),
         // format!("{}user_config_dev.toml", config_dir),
-        format!("{}keymap.toml", config_dir)
+        // format!("{}keymap_dev.toml", config_dir)
     ))
 }

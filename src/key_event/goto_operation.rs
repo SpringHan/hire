@@ -4,11 +4,12 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use toml_edit::{value, DocumentMut};
+use ratatui::{style::Stylize, text::{Line, Text}};
 
 use super::Goto;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::App;
+use crate::app::{App, CmdContent};
 use crate::config::{get_document, write_document};
 use crate::error::{AppResult, ErrorType, NotFoundType};
 
@@ -85,19 +86,28 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
     Ok(true)
 }
 
-fn generate_msg(app: &App, status: char) -> String {
-    let mut msg = String::from("[g] goto top  [+] add directory  [-] remove directory\n\n");
+fn generate_msg(app: &App, status: char) -> CmdContent {
+    let mut msg = Text::raw("[g] goto top  [+] add directory  [-] remove directory");
+    msg.push_line("");
+
     match status {
-        '+' => msg.insert_str(0, "Adding Directory!\n"),
-        '-' => msg.insert_str(0, "Deleting Directory!\n"),
+        '+' => {
+            msg.push_line(Line::raw("Adding Directory!").red());
+            msg.push_line("");
+        },
+        '-' => {
+            msg.push_line(Line::raw("Deleting Directory!\n").red());
+            msg.push_line("");
+        },
+
         _ => ()
     }
 
     for (key, path) in app.target_dir.iter() {
-        msg.push_str(&format!("[{}] {}\n", key, path));
+        msg.push_line(format!("[{}] {}\n", key, path));
     }
 
-    msg
+    CmdContent::Text(msg)
 }
 
 fn add_target_dir(app: &mut App, key: char, path: PathBuf) -> AppResult<()> {

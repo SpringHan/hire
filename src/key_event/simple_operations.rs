@@ -3,6 +3,7 @@
 use std::io::Write;
 use std::fs::OpenOptions;
 
+use crate::app::CmdContent;
 use crate::error::{AppResult, ErrorType};
 
 use super::App;
@@ -27,7 +28,7 @@ pub fn print_full_path(app: &mut App) {
         app,
         |_, _,_| Ok(true),
         true,
-        full_path,
+        CmdContent::String(full_path),
         SwitchCaseData::None
     )
 }

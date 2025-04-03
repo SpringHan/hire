@@ -5,21 +5,24 @@ mod filesaver;
 mod special_types;
 mod image_preview;
 
-use std::borrow::Cow;
 use std::{env, fs, io};
+
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
+use ratatui::text::Text;
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
+use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::FileSearcher;
+use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex, SwitchCase};
 
 pub use special_types::*;
+pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
-pub use color::{TermColors, reverse_style};
 
 pub struct App<'a> {
     // Core
@@ -34,22 +37,24 @@ pub struct App<'a> {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: FileContent,
 
+    /// Whether to show the index of file to allow user to jump to.
+    pub navi_index: NaviIndex,
+
     // Block
     pub selected_block: Block,
 
-    pub option_key: OptionFor,       // Use the next key as option.
-    pub marked_operation: FileOperation,
+    pub switch_case: Option<SwitchCase>,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
     /// When command_error is true, the content in command line will be displayed in red.
     pub command_error: bool,
     pub command_expand: bool,
-    /// Like `command_error`, the content will be in red, but will not reset current key_event.
-    pub command_warning: bool,
     pub command_scroll: Option<(u16, u16)>, // Used for expanded mode.
 
     pub command_idx: Option<usize>,
     pub command_history: Vec<String>,
+
+    pub command_completion: AppCompletion<'a>,
 
     // Search file
     pub file_searcher: FileSearcher,
@@ -66,6 +71,12 @@ pub struct App<'a> {
     // Image Preview
     pub image_preview: ImagePreview,
 
+    // Edit Mode
+    pub edit_mode: EditMode,
+
+    /// When this var is true, the navigation will be with selection.
+    pub mark_expand: bool,
+
     // App Config
     pub keymap: Keymap,
     pub config_path: String,
@@ -74,6 +85,8 @@ pub struct App<'a> {
     // AppErrors
     pub app_error: AppError,
 
+    // Output
+    pub confirm_output: bool,
     /// The file to store output of path from app.
     pub output_file: Option<PathBuf>,
 
@@ -113,19 +126,21 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
+            switch_case: None,
+            mark_expand: false,
             command_scroll: None,
             target_dir: HashMap::new(),
-            option_key: OptionFor::None,
             marked_files: HashMap::new(),
-            marked_operation: FileOperation::None,
+            edit_mode: EditMode::default(),
+            navi_index: NaviIndex::default(),
             image_preview: ImagePreview::default(),
             file_searcher: FileSearcher::default(),
 
             // Command
             command_idx: None,
             command_expand: false,
-            command_warning: false,
             command_history: Vec::new(),
+            command_completion: AppCompletion::default(),
 
             // Error handle
             command_error: false,
@@ -133,6 +148,7 @@ impl<'a> Default for App<'a> {
 
             // Output
             output_file: None,
+            confirm_output: false,
 
             // Config & others
             quit_now: false,
@@ -608,42 +624,50 @@ impl<'a> App<'a> {
 // File Content
 impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
-        use io::{Read, ErrorKind};
+        use io::ErrorKind;
 
-        let selected_file = self.get_file_saver();
-        if let Some(selected_file) = selected_file {
+        let selected = self.get_file_saver();
+        if let Some(selected_item) = selected {
+            let selected_file = selected_item.to_owned();
             let file_path = self.current_path()
                 .join(&selected_file.name);
-            let mut content = String::new();
+            let mut content = Text::default();
+
+            // To avoid the wrong display of file content caused by
+            // image decoding delay.
+            if !self.image_preview.useless {
+                self.image_preview.useless = true;
+            }
 
             match fs::File::open(file_path.to_owned()) {
                 Err(e) => {
                     match e.kind() {
                         ErrorKind::NotFound => (),
                         ErrorKind::PermissionDenied => {
-                            content = String::from("Permission Denied");
+                            content = Text::raw("Permission Denied");
                         },
                         _ => return Err(e.into())
                     }
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
-                        if let Err(e) = file.read_to_string(&mut content) {
-                            if e.kind() != io::ErrorKind::InvalidData {
-                                return Err(e.into())
-                            }
+                        if let Err(_) = read_to_text(&mut content, file) {
+                            // if e.kind() != io::ErrorKind::InvalidData {
+                            //     return Err(e.into())
+                            // }
 
                             // Try to display image file
                             if self.image_preview.with_image_feat() {
                                 self.image_preview.send_path(file_path)?;
+                                self.image_preview.useless = false;
 
                                 return Ok(())
                             }
 
-                            content = String::from("Non Text File");
+                            content = Text::raw("Non Text File");
                         }
                     } else {
-                        content = String::from("Non Normal File");
+                        content = Text::raw("Non Normal File");
                     }
                 },
             };
@@ -720,7 +744,7 @@ impl<'a> App<'a> {
     
     /// Append FILE to marked file list.
     pub fn append_marked_file<S: Into<String>>(&mut self, file: S, is_dir: bool) {
-        let path = self.current_path();
+        let path = self.path.to_owned();
 
         self.marked_files
             .entry(path)
@@ -732,7 +756,7 @@ impl<'a> App<'a> {
     pub fn append_marked_files<I>(&mut self, iter: I)
     where I: Iterator<Item = FileSaver>
     {
-        let path = self.current_path();
+        let path = self.path.to_owned();
 
         let temp_set = self.marked_files
             .entry(path)
@@ -743,7 +767,7 @@ impl<'a> App<'a> {
     }
 
     pub fn marked_file_contains<S: Into<String>>(&self, file: S) -> bool {
-        let path = self.current_path();
+        let path = self.path.to_owned();
         if let Some(marked_files) = self.marked_files.get(&path) {
             // In Linux, there could not be more than one files that have the same name.
             // (Include directories)
@@ -754,7 +778,7 @@ impl<'a> App<'a> {
     }
 
     pub fn remove_marked_file<S: Into<String>>(&mut self, file: S) {
-        let path = self.current_path();
+        let path = self.path.to_owned();
         if let Some(marked_files) = self.marked_files.get_mut(&path) {
             marked_files.files.remove(&file.into());
 

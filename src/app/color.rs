@@ -8,9 +8,10 @@ use ratatui::style::{Color, Style, Modifier};
 pub struct TermColors {
     pub dir_style: Style,
     pub file_style: Style,
+    pub marked_style: Style,
     pub orphan_style: Style,
     pub symlink_style: Style,
-    pub executable_style: Style
+    pub executable_style: Style,
 }
 
 macro_rules! hashmap {
@@ -35,7 +36,7 @@ impl TermColors {
             ("07", Style::new().add_modifier(Modifier::REVERSED)),
             ("31", Style::new().fg(Color::Red)),
             ("32", Style::new().fg(Color::Green)),
-            ("33", Style::new().fg(Color::Rgb(255, 165, 0))),
+            ("33", Style::new().fg(Color::LightYellow)),
             ("34", Style::new().fg(Color::Blue)),
             ("35", Style::new().fg(Color::Rgb(255, 121, 198))),
             ("36", Style::new().fg(Color::Cyan)),
@@ -66,9 +67,9 @@ impl TermColors {
 
         let colors = var("LS_COLORS").expect("Unable to get colors");
         let colors: Vec<&str> = colors.split(":").collect();
-
         let dir_style = fetch_style(&colors, &color_map, "di");
         let file_style = fetch_style(&colors, &color_map, "rs");
+        let marked_style = fetch_style(&colors, &color_map, "pi");
         let orphan_style = fetch_style(&colors, &color_map, "do");
         let symlink_style = fetch_style(&colors, &color_map, "ln");
         let executable_style = fetch_style(&colors, &color_map, "ex");
@@ -76,24 +77,12 @@ impl TermColors {
         TermColors {
             dir_style,
             file_style,
+            marked_style,
             orphan_style,
             symlink_style,
             executable_style
         }
     }
-}
-
-pub fn reverse_style(origin: Style) -> Style {
-    let mut origin = origin;
-    let temp_color = origin.bg;
-    origin.bg = origin.fg;
-    origin.fg = if temp_color.is_some() {
-        temp_color
-    } else {
-        Some(Color::Black)
-    };
-
-    origin
 }
 
 fn fetch_style(from: &Vec<&str>,

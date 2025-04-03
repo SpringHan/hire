@@ -18,7 +18,7 @@ pub fn cmdline_shell(app: &mut App) -> AppResult<()> {
     let shell_type = Config::get_value(&app.config, "default_shell");
 
     if let ConfigValue::String(shell_type) = shell_type {
-        app.set_command_line(
+        app.selected_block.set_command_line(
             format!(":!{} ", shell_type),
             CursorPos::End
         );

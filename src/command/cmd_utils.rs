@@ -5,19 +5,21 @@ use std::{io::Stderr, ops::AddAssign};
 use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
-    app::{Block, CursorPos, FileOperation, OptionFor},
-    key_event::{CommandStr, Goto, ShellCommand},
+    key_event::{CommandStr, ShellCommand},
+    app::{Block, CmdContent, CursorPos},
     error::{AppResult, ErrorType},
     utils::Direction,
     rt_error,
     App
 };
 
-impl<'a> App<'a> {
-    pub fn set_command_line<T: Into<String>>(&mut self, content: T, pos: CursorPos) {
-        self.selected_block = Block::CommandLine(content.into(), pos);
+impl Block {
+    pub fn set_command_line<S: Into<String>>(&mut self, content: S, pos: CursorPos) {
+        *self = Block::CommandLine(CmdContent::String(content.into()), pos);
     }
+}
 
+impl<'a> App<'a> {
     pub fn command_line_append(&mut self, content: char) {
         if let
             Block::CommandLine(
@@ -25,13 +27,18 @@ impl<'a> App<'a> {
                 ref mut cursor
             ) = self.selected_block
         {
+            let content_ref = origin.get_mut();
             if let CursorPos::Index(idx) = cursor {
-                origin.insert(*idx, content);
+                content_ref.insert(*idx, content);
                 idx.add_assign(1);
                 return ()
             }
 
-            origin.push(content);
+            content_ref.push(content);
+
+            if !self.command_completion.popup_info().0.is_empty() {
+                self.command_completion.reset();
+            }
         }
     }
     
@@ -51,91 +58,93 @@ impl<'a> App<'a> {
             self.command_error = false;
         }
 
-        if self.command_warning {
-            self.command_warning = false;
+        if !self.command_completion.popup_info().0.is_empty() {
+            self.command_completion.reset();
         }
 
-        self.option_key = OptionFor::None;
+        self.switch_case = None;
     }
-    
+
+    // TODO: Code of this function can be optimized.
     /// The function will change content in command line.
     /// In the meanwhile, adjusting current command index.
-    pub fn command_select(&mut self, direct: Goto) {
-        if let
-            Block::CommandLine(
-                ref mut current,
-                ref mut cursor
-            ) = self.selected_block
+    pub fn command_select(&mut self, next: bool) {
+        if let Block::CommandLine(
+            ref mut current,
+            ref mut cursor
+        ) = self.selected_block
         {
             if self.command_history.is_empty() {
                 return ()
             }
+
+            let content_ref = current.get_mut();
 
             if *cursor != CursorPos::End {
                 *cursor = CursorPos::End;
             }
 
             if let Some(index) = self.command_idx {
-                match direct {
-                    Goto::Up => {
-                        if index == 0 {
-                            return ()
-                        }
-                        self.command_idx = Some(index - 1);
-                        *current = self.command_history[index - 1].to_owned();
-                    },
-                    Goto::Down => {
-                        if index == self.command_history.len() - 1 {
-                            return ()
-                        }
-                        self.command_idx = Some(index + 1);
-                        *current = self.command_history[index + 1].to_owned()
-                    },
-                    _ => panic!("Unvalid value!")
+                if next {
+                    if index == self.command_history.len() - 1 {
+                        return ()
+                    }
+
+                    self.command_idx = Some(index + 1);
+                    *content_ref = self.command_history[index + 1].to_owned();
+                    return ()
                 }
+
+                if index == 0 {
+                    return ()
+                }
+
+                self.command_idx = Some(index - 1);
+                *content_ref = self.command_history[index - 1].to_owned();
                 return ()
             }
 
             // Initial selection.
-            let current_idx = match direct {
-                Goto::Up => {
-                    self.command_history
-                        .iter()
-                        .rev()
-                        .position(|x| x == current)
-                },
-                Goto::Down => {
-                    // The command search function can only be executed by UP key.
-                    return ()
-                },
-                _ => panic!("Unvalid value!")
+            let current_idx = if !next {
+                self.command_history
+                    .iter()
+                    .rev()
+                    .position(|x| x == content_ref)
+            } else {
+                return ()
             };
+
             if let Some(idx) = current_idx {
-                if direct == Goto::Up {
+                if !next {
                     // The real idx is: len - 1 - IDX
                     if idx == self.command_history.len() - 1 {
                         self.command_idx = Some(0);
                         return ()
                     }
+
                     let temp_idx = self.command_history.len() - 2 - idx;
                     self.command_idx = Some(temp_idx);
-                    *current = self.command_history[temp_idx].to_owned();
+                    *content_ref = self.command_history[temp_idx].to_owned();
+
+                    return ()
+                } 
+
+                if idx + 1 == self.command_history.len() {
+                    self.command_idx = Some(idx);
                 } else {
-                    if idx + 1 == self.command_history.len() {
-                        self.command_idx = Some(idx);
-                        return ()
-                    }
                     self.command_idx = Some(idx + 1);
-                    *current = self.command_history[idx + 1].to_owned();
+                    *content_ref = self.command_history[idx + 1].to_owned();
                 }
+
+                return ()
+            } 
+
+            if !next {
+                self.command_idx = Some(self.command_history.len() - 1);
+                *content_ref = self.command_history.last().unwrap().to_owned();
             } else {
-                if direct == Goto::Up {
-                    self.command_idx = Some(self.command_history.len() - 1);
-                    *current = self.command_history.last().unwrap().to_owned();
-                } else {
-                    self.command_idx = Some(0);
-                    *current = self.command_history.first().unwrap().to_owned();
-                }
+                self.command_idx = Some(0);
+                *content_ref = self.command_history.first().unwrap().to_owned();
             }
         }
     }
@@ -145,14 +154,16 @@ impl<'a> App<'a> {
         terminal: &mut Terminal<CrosstermBackend<Stderr>>
     ) -> AppResult<()> {
         if let Block::CommandLine(ref _command, _) = self.selected_block {
-            if _command.starts_with("/") {
-                self.file_search(_command[1..].to_owned(), false)?;
+            let content_ref = _command.get();
+
+            if content_ref.starts_with("/") {
+                self.file_search(content_ref[1..].to_owned(), false)?;
                 return Ok(self.quit_command_mode())
             }
 
             let argu_err = "Wrong number argument for current command";
 
-            let command = _command.to_owned();
+            let command = content_ref.to_owned();
             self.command_history.push(command.to_owned());
             let mut command_slices: Vec<&str> = command.split(" ").collect();
 
@@ -202,21 +213,17 @@ impl<'a> App<'a> {
                 },
 
                 ":create_symlink" => {
-                    if command_slices.len() != 4 {
+                    if command_slices.len() != 3 {
                         rt_error!("{argu_err}")
                     }
 
                     self.marked_files.clear();
-                    self.marked_operation = FileOperation::None;
 
                     command_slices.remove(0);
-                    let files = command_slices.join(" ");
-                    let files: Vec<&str> = files
-                        .split("->")
-                        .collect();
+                    let files = command_slices;
                     super::cmds::create_symlink(
                         self,
-                        [(files[0].trim(), files[1].trim())].into_iter()
+                        [(files[0], files[1])].into_iter()
                     )?
                 },
 

@@ -29,7 +29,6 @@ impl<'a> Config<'a> {
             "gui_commands" => ConfigValue::Vec(Vec::new()),
             "default_shell" => ConfigValue::String(Cow::Borrowed("bash")),
             "file_read_program" => ConfigValue::String(Cow::Borrowed("vim")),
-            "file_operation_editor" => ConfigValue::String(Cow::Borrowed("vim")),
             _ => panic!("Unknow error occurred at default_value fn in types.rs.")
         }
     }
@@ -57,7 +56,7 @@ impl<'a> Config<'a> {
         let err_msg = format!("The type of config property {} is error", self.name);
 
         match self.name.as_str() {
-            "default_shell" | "file_read_program" | "file_operation_editor" =>
+            "default_shell" | "file_read_program" =>
                 self.value = Self::get_str(value, err_msg)?,
 
             "gui_commands" => {

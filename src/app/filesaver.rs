@@ -1,8 +1,8 @@
 // FileSaver
 
 use std::io;
-use std::time::SystemTime;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use std::fs::{self, Permissions};
 
 use is_executable::is_executable;
