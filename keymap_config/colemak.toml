@@ -22,6 +22,7 @@ keymap = [
     # Mark
     { key = "m", run = "mark all"    },
     { key = " ", run = "mark single" },
+    { key = "M", run = "mark_expand" },
 
     # File Create
     { key = "+", run = "create_dir"  },
@@ -44,6 +45,7 @@ keymap = [
     { key = "R", run = "refresh"               },
     { key = "f", run = "fzf_jump"              },
     { key = "P", run = "full_path"             },
+    { key = "i", run = "edit_mode"             },
     { key = "-", run = "hide_or_show"          },
     { key = "s", run = "single_symlink"        },
     { key = "\\", run = "change_output_status" },
@@ -60,4 +62,20 @@ keymap = [
     { key = "9", run = "navi_input 9"    },
     { key = "0", run = "navi_input 0"    },
     { key = ".", run = "show_navi_index" },
+
+    # Edit Mode
+    { key = "Q", run = "quit_edit"             },
+    { key = "g", run = "edit_top"              },
+    { key = "G", run = "edit_bottom"           },
+    { key = "d", run = "edit_delete"           },
+    { key = "K", run = "edit_new dir"          },
+    { key = "k", run = "edit_new file"         },
+    { key = "u", run = "edit_move prev"        },
+    { key = "e", run = "edit_move next"        },
+    { key = "m", run = "edit_mark all"         },
+    { key = " ", run = "edit_mark single"      },
+    { key = "h", run = "edit_insert end"       },
+    { key = "H", run = "edit_insert beg"       },
+    { key = "v", run = "edit_list_scroll next" },
+    { key = "V", run = "edit_list_scroll prev" },
 ]
