@@ -32,9 +32,6 @@ gui_commands = ["lazygit", "vim"]
 
 # Program to use for reading files, such as vim, cat, bat, etc.
 file_read_program = "vim"
-
-# Editor to use for file operations
-file_operation_editor = "vim"
 ```
 
 ### keymap.toml

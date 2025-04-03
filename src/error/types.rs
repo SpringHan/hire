@@ -31,9 +31,6 @@ pub enum ErrorType {
     #[error("[AppError]: Invalid Command!")]
     UnvalidCommand,
 
-    #[error("[AppError]: File exists: {0:?}")]
-    FileExists(Vec<String>),
-
     #[error("[AppError]: No item to be selected and operated!")]
     NoSelected,
 

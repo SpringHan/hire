@@ -2,8 +2,8 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use super::SwitchCase;
 use super::file_operations::delete_file;
@@ -11,11 +11,20 @@ use super::file_operations::delete_file;
 use crate::{rt_error, App};
 use crate::app::{CmdContent, CursorPos, MarkedFiles};
 use crate::error::{
+    NotFoundType,
+    ErrorType,
     AppResult,
     AppError,
-    ErrorType,
-    NotFoundType
 };
+
+macro_rules! append_error {
+    ($errors:expr, $x:expr) => {
+        let (_, _errs) = $x;
+        if !_errs.is_empty() {
+            $errors.append_errors(_errs.iter());
+        }
+    };
+}
 
 pub fn paste_operation(app: &mut App) -> AppResult<()> {
     if app.marked_files.is_empty() {
@@ -33,10 +42,11 @@ pub fn paste_operation(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
+/// Paste files and return failed files & errors.
 pub fn paste_files<'a, I, P>(file_iter: I,
                              target_path: P,
                              overwrite: bool
-) -> AppResult<HashMap<PathBuf, Vec<String>>>
+) -> (HashMap<PathBuf, Vec<String>>, AppError)
 where
     I: Iterator<Item = (&'a PathBuf, &'a MarkedFiles)>,
     P: AsRef<Path>
@@ -44,12 +54,16 @@ where
     use copy_dir::copy_dir;
 
     let mut errors = AppError::new();
-    let mut exists_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let mut failed_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
     macro_rules! file_action {
-        ($func:expr, $file:expr, $from:expr $(, $to:expr )*) => {
+        ($func:expr, $path: expr, $file:expr, $from:expr $(, $to:expr )*) => {
             match $func($from, $( $to )*) {
                 Err(err) => {
+                    failed_files.entry($path.to_owned())
+                        .or_insert(Vec::new())
+                        .push($file.0.to_owned());
+
                     errors.add_error(err);
                     continue;
                 },
@@ -63,9 +77,8 @@ where
         let mut target_is_dir = false;
 
         for file in files.files.iter() {
-            let target_file = fs::metadata(
-                target_path.as_ref().join(file.0)
-            );
+            let mut final_path = target_path.as_ref().join(file.0);
+            let target_file = fs::metadata(&final_path);
             // Check whether the target file exists.
             match target_file {
                 Err(err) => {
@@ -78,14 +91,17 @@ where
                 },
                 Ok(metadata) => {
                     if !overwrite {
-                        exists_files
-                            .entry(path.to_owned())
-                            .or_insert(Vec::new())
-                            .push(file.0.to_owned());
-                        continue;
+                        final_path = target_path.as_ref().join(
+                            format!("{}.new", file.0)
+                        );
+                        // exists_files
+                        //     .entry(path.to_owned())
+                        //     .or_insert(Vec::new())
+                        //     .push(file.0.to_owned());
+                    } else {
+                        target_exists = true;
+                        target_is_dir = metadata.is_dir();
                     }
-                    target_exists = true;
-                    target_is_dir = metadata.is_dir();
                 }
             }
 
@@ -95,12 +111,14 @@ where
                 if target_is_dir {
                     file_action!(
                         fs::remove_dir_all,
+                        path,
                         file,
                         target_path.as_ref().join(&file.0)
                     );
                 } else {
                     file_action!(
                         fs::remove_file,
+                        path,
                         file,
                         target_path.as_ref().join(&file.0)
                     );
@@ -110,26 +128,24 @@ where
             if *file.1 {         // The original file is a dir.
                 file_action!(
                     copy_dir,
+                    path,
                     file,
                     path.join(&file.0),
-                    target_path.as_ref().join(&file.0)
+                    final_path
                 );
             } else {
                 file_action!(
                     fs::copy,
+                    path,
                     file,
                     path.join(&file.0),
-                    target_path.as_ref().join(&file.0)
+                    final_path
                 );
             }
         }
     }
 
-    if !errors.is_empty() {
-        return Err(errors)
-    }
-
-    Ok(exists_files)
+    (failed_files, errors)
 }
 
 pub fn make_single_symlink(app: &mut App) -> AppResult<()> {
@@ -165,51 +181,32 @@ fn paste_switch(
     _: super::SwitchCaseData
 ) -> AppResult<bool>
 {
+    let mut errors = AppError::new();
     let current_dir = app.current_path();
     let files = app.marked_files.to_owned();
 
     match key {
         'p' => {
-            let exists_files = paste_files(
+            let (failed_files, mut _errs) = paste_files(
                 files.iter(),
                 current_dir,
                 false
-            )?;
+            );
 
-            for (path, files) in files.into_iter() {
-                // Avoid removing files that failed to be moved to target path.
-                let path_in_exists = exists_files.get(&path);
-                let files: HashMap<String, bool> = if
-                    let Some(exists) = path_in_exists
-                {
-                    files.files
-                        .into_iter()
-                        .filter(|file|
-                                !exists.contains(&file.0))
-                        .collect()
-                } else {
-                    files.files
-                };
-
-                delete_file(
-                    app,
-                    path,
-                    files.into_iter(),
-                    false,
-                    false       // Not necesary
-                )?;
+            if !_errs.is_empty() {
+                errors.append_errors(_errs.iter());
             }
-
-            let mut files_for_error: Vec<String> = Vec::new();
-            for (_, files) in exists_files.into_iter() {
-                files_for_error.extend(files);
-            }
-
-            if !files_for_error.is_empty() {
-                restore_status(app)?;
-                return Err(ErrorType::FileExists(files_for_error).pack())
+            
+            if let Err(err) = remove_origin_files(
+                app,
+                files.into_iter(),
+                failed_files
+            )
+            {
+                errors.append_errors(err.iter());
             }
         },
+
         's' => {
             let mut final_files: Vec<(PathBuf, PathBuf)> = Vec::new();
             for (path, files) in files.into_iter() {
@@ -220,37 +217,44 @@ fn paste_switch(
 
             crate::command::create_symlink(app, final_files.into_iter())?;
         },
+
         'c' => {
-            paste_files(
+            append_error!(errors, paste_files(
                 files.iter(),
                 current_dir,
                 false
-            )?;
+            ));
         },
-        'o' => {
-            paste_files(
-                files.iter(),
-                current_dir,
-                true
-            )?;
-        },
-        'O' => {
-            paste_files(
-                files.iter(),
-                current_dir,
-                true
-            )?;
 
-            for (path, files) in files.into_iter() {
-                delete_file(
-                    app,
-                    path,
-                    files.files.into_iter(),
-                    false,
-                    false       // Not necesary
-                )?;
+        'o' => {
+            append_error!(errors, paste_files(
+                files.iter(),
+                current_dir,
+                true
+            ));
+        },
+
+        'O' => {
+            let (failed_files, _errs) = paste_files(
+                files.iter(),
+                current_dir,
+                true
+            );
+
+            if !_errs.is_empty() {
+                errors.append_errors(_errs.iter());
+            }
+
+            if let Err(err) = remove_origin_files(
+                app,
+                files.into_iter(),
+                failed_files
+            )
+            {
+                errors.append_errors(err.iter());
             }
         },
+
         'x' => (),
         _ => {
             return Err(
@@ -263,7 +267,49 @@ fn paste_switch(
 
     restore_status(app)?;
 
+    if !errors.is_empty() {
+        return Err(errors)
+    }
+
     Ok(true)
+}
+
+fn remove_origin_files<I>(
+    app: &mut App,
+    files: I,
+    failed_files: HashMap<PathBuf, Vec<String>>
+) -> AppResult<()>
+where I: Iterator<Item = (PathBuf, MarkedFiles)>
+{
+    for (path, files) in files {
+        // Avoid removing files that failed to be moved to target path.
+        let marked_ref = app.marked_files.get_mut(&path).unwrap();
+        let mut temp_files: HashMap<String, bool>;
+
+        if let Some(failed) = failed_files.get(&path) {
+            temp_files = HashMap::new();
+
+            for (name, is_dir) in files.files.into_iter() {
+                if !failed.contains(&name) {
+                    marked_ref.files.remove(&name);
+                    temp_files.entry(name).or_insert(is_dir);
+                }
+            }
+        } else {
+            temp_files = files.files;
+            marked_ref.files.clear();
+        };
+
+        delete_file(
+            app,
+            path,
+            temp_files.into_iter(),
+            false,
+            false       // Not necesary
+        )?;
+    }
+
+    Ok(())
 }
 
 fn generate_msg(app: &App) -> CmdContent {
