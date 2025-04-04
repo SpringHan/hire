@@ -131,8 +131,6 @@ fn get_editing_item_color<'a>(
         temp_item = temp_item.set_style(colors.dir_style);
     }
 
-    // TODO: Add cursor & item type display
-
     let sidebar_style = if marked {
         Some(colors.marked_style.add_modifier(Modifier::REVERSED))
     } else if item.delete() {

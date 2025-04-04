@@ -103,7 +103,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     // Expanded Commandline
     if app.command_expand {
         let command_block = Block::default();
-        // TODO: Add other command style.
         if let app::Block::CommandLine(ref msg, cursor) = app.selected_block {
             let command_errors = get_command_line_style(
                 app,
@@ -224,13 +223,13 @@ fn get_item_num_para(app: &App) -> String {
             app.parent_files.len()
         )
     } else {
-        if app.current_files.is_empty() {
+        let current_idx = app.selected_item.current.selected();
+        if app.current_files.is_empty() || current_idx.is_none() {
             String::new()
         } else {
             format!(
                 "{}/{}",
-                // TODO: Rewrite without unwrap.
-                app.selected_item.current_selected().unwrap() + 1,
+                current_idx.unwrap() + 1,
                 app.current_files.len()
             )
         }

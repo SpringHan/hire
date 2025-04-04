@@ -28,7 +28,6 @@ pub fn directory_movement(
     in_root: bool
 ) -> AppResult<()>
 {
-    // TODO: Separate the core code of n & i from directory_movement.
     match direction {
         Direction::Left => {
             if in_root {
@@ -43,7 +42,7 @@ pub fn directory_movement(
                 return Ok(())
             }
 
-            // TODO: Maybe there could be a better way.
+            // TODO(low priority): Maybe there could be a better way.
             swap(&mut app.child_files, &mut app.current_files);
             swap(&mut app.current_files, &mut app.parent_files);
 

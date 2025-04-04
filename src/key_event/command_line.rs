@@ -11,7 +11,6 @@ use crate::{
     option_get,
 };
 
-// TODO(remove it): It seems that bitflags is not needed.
 #[derive(PartialEq, Eq)]
 enum CompletionType {
     File,

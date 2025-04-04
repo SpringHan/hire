@@ -360,7 +360,6 @@ impl<'a> App<'a> {
 
     /// The PATH is used when the user is in root directory.
     pub fn init_current_files(&mut self) -> io::Result<()> {
-        // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
         let temp_path = self.current_path();
 
         let mut current_files: Vec<FileSaver> = self
@@ -385,7 +384,7 @@ impl<'a> App<'a> {
     {
         let temp_path = self.path.clone();
         let current_select = {
-            // TODO: Pay attention to here.
+            // NOTE: Pay attention to here (An incomplete NOTE, to be removed later).
             let file_saver = self.search_file(SearchFile::Current);
             if let Some(file_saver) = file_saver {
                 file_saver
@@ -692,7 +691,6 @@ impl<'a> App<'a> {
                 }
             }
             Err(err) => {
-                // BUG: Unwrap error when press '-' key in /boot/efi/
                 if err.kind() == io::ErrorKind::PermissionDenied {
                     let temp_file = self.get_file_saver_mut().unwrap();
                     temp_file.cannot_read = true;

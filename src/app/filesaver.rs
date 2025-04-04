@@ -155,7 +155,6 @@ impl FileSaver {
         }
     }
 
-    // TODO: Check the result
     pub fn size_span<'a>(&self) -> Span<'a> {
         Span::raw(file_size::fit_4(self.size))
     }

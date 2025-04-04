@@ -12,7 +12,7 @@ use crate::{
     key_event::{SwitchCase, SwitchCaseData},
     app::{path_is_hidden, App, CmdContent},
     option_get,
-    rt_error
+    rt_error,
 };
 
 use super::types::TabState;
@@ -91,12 +91,6 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         },
 
         'd' => {
-            // TODO: Useless code
-            // app.tab_list.list[app.tab_list.current] = (
-            //     app.path.to_owned(),
-            //     app.hide_files
-            // );
-
             let msg = generate_msg(
                 Some(app),
                 data.set_delete()

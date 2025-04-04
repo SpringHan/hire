@@ -175,7 +175,7 @@ pub fn handle_event(
             }
         },
         
-        // TODO: Split this special keys function to independent functions.
+        // TODO: Split these special keys function to independent functions.
         KeyCode::Esc => {
             match app.selected_block {
                 app::Block::CommandLine(_, _) => {
@@ -302,7 +302,6 @@ pub fn handle_event(
         KeyCode::Tab => {
             match key.modifiers {
                 KeyModifiers::ALT => {
-                    // TODO(to be removed): Pay attention to command_error.
                     if let app::Block::CommandLine(_, _) = app.selected_block {
                         // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
                         if app.command_expand {
