@@ -280,7 +280,9 @@ pub fn move_cursor_core(
             let wind_height = get_window_height() as usize;
             let after_scroll = origin_index.saturating_add(wind_height);
 
-            if after_scroll >= item_length {
+            if after_scroll >= item_length ||
+                after_scroll + wind_height > item_length
+            {
                 selected_item.select(Some(item_length - 1));
                 *selected_item.offset_mut() = item_length.saturating_sub(wind_height);
             } else {
