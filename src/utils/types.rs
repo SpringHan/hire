@@ -96,17 +96,6 @@ impl CmdContent {
             panic!("Unknown error when getting mutable ref of CmdContent!")
         }
     }
-
-    // pub fn append_string<S: AsRef<String>>(&mut self, _str: S) {
-    //     match *self {
-    //         CmdContent::String(ref mut messages) => {
-    //             messages.push_str(&format!("\n{}", _str.as_ref()));
-    //         },
-    //         CmdContent::Text(ref mut text) => {
-    //             text.push_line(Line::raw());
-    //         },
-    //     }
-    // }
 }
 
 impl Default for ItemIndex {

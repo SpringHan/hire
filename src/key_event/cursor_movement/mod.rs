@@ -9,12 +9,13 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::{widgets::ListState, Terminal as RTerminal};
 
 use super::simple_operations::output_path;
+
 use crate::{
-    utils::{get_window_height, Direction},
-    app::{self, App, MarkedFiles},
+    utils::{get_window_height, Direction, MarkedFiles, Block},
     error::AppResult,
     option_get,
     rt_error,
+    app::App,
 };
 
 pub use types::*;
@@ -28,7 +29,6 @@ pub fn directory_movement(
     in_root: bool
 ) -> AppResult<()>
 {
-    // TODO: Separate the core code of n & i from directory_movement.
     match direction {
         Direction::Left => {
             if in_root {
@@ -39,11 +39,11 @@ pub fn directory_movement(
             app.path = parent_dir;
 
             if app.path.to_str() == Some("/") {
-                app.selected_block = app::Block::Browser(true);
+                app.selected_block = Block::Browser(true);
                 return Ok(())
             }
 
-            // TODO: Maybe there could be a better way.
+            // TODO(low priority): Maybe there could be a better way.
             swap(&mut app.child_files, &mut app.current_files);
             swap(&mut app.current_files, &mut app.parent_files);
 
@@ -89,7 +89,7 @@ pub fn directory_movement(
                 }
 
                 app.path = app.path.join(&selected_file.name);
-                app.selected_block = app::Block::Browser(false);
+                app.selected_block = Block::Browser(false);
             } else {
                 let selected_file = app.get_file_saver();
                 if let None = selected_file {
@@ -281,7 +281,9 @@ pub fn move_cursor_core(
             let wind_height = get_window_height() as usize;
             let after_scroll = origin_index.saturating_add(wind_height);
 
-            if after_scroll >= item_length {
+            if after_scroll >= item_length ||
+                after_scroll + wind_height > item_length
+            {
                 selected_item.select(Some(item_length - 1));
                 *selected_item.offset_mut() = item_length.saturating_sub(wind_height);
             } else {

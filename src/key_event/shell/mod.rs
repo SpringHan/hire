@@ -8,8 +8,9 @@ pub use utils::*;
 
 use crate::{
     config::{Config, ConfigValue},
-    app::{App, CursorPos},
+    utils::CursorPos,
     error::AppResult,
+    app::App,
     rt_error
 };
 

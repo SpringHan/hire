@@ -30,10 +30,10 @@ use cursor_movement::{directory_movement, jump_to_index};
 use file_operations::{append_file_name, delete_operation, mark_operation};
 
 use crate::rt_error;
-use crate::utils::Direction;
+use crate::app::App;
 use crate::error::AppResult;
 use crate::command::AppCommand;
-use crate::app::{self, App, CursorPos};
+use crate::utils::{Block, CursorPos, Direction};
 
 type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
@@ -117,7 +117,7 @@ pub fn handle_event(
             }
 
             // Execute keybinding or insert character.
-            if let app::Block::Browser(in_root) = app.selected_block {
+            if let Block::Browser(in_root) = app.selected_block {
                 if app.edit_mode.inserting() {
                     app.edit_mode.insert_char(c);
                     return Ok(())
@@ -138,22 +138,21 @@ pub fn handle_event(
         },
 
         KeyCode::Backspace => {
-            if let
-                app::Block::CommandLine(
-                    ref mut origin,
-                    ref mut cursor
-                ) = app.selected_block
+            if let Block::CommandLine(
+                ref mut origin,
+                ref mut cursor
+            ) = app.selected_block
             {
                 let content_ref = origin.get_mut();
                 match cursor {
-                    app::CursorPos::Index(idx) => {
+                    CursorPos::Index(idx) => {
                         if *idx == 0 {
                             return Ok(())
                         }
                         content_ref.remove(*idx - 1);
                         idx.sub_assign(1);
                     },
-                    app::CursorPos::End => {
+                    CursorPos::End => {
                         content_ref.pop();
                     },
                     _ => ()
@@ -175,10 +174,10 @@ pub fn handle_event(
             }
         },
         
-        // TODO: Split this special keys function to independent functions.
+        // TODO: Split these special keys function to independent functions.
         KeyCode::Esc => {
             match app.selected_block {
-                app::Block::CommandLine(_, _) => {
+                Block::CommandLine(_, _) => {
                     if app.command_completion.show_frame() {
                         app.command_completion.hide();
                         return Ok(())
@@ -232,7 +231,7 @@ pub fn handle_event(
                 app.quit_command_mode();
                 return Ok(())
             } else {
-                if let app::Block::CommandLine(_, _) = app.selected_block {
+                if let Block::CommandLine(_, _) = app.selected_block {
                     app.command_parse(terminal)?;
                     return Ok(())
                 }
@@ -264,7 +263,7 @@ pub fn handle_event(
         },
 
         KeyCode::Up => {
-            if let app::Block::CommandLine(_, _) = app.selected_block {
+            if let Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
                     app.expand_scroll(Direction::Up);
                 } else {
@@ -274,7 +273,7 @@ pub fn handle_event(
         },
 
         KeyCode::Down => {
-            if let app::Block::CommandLine(_, _) = app.selected_block {
+            if let Block::CommandLine(_, _) = app.selected_block {
                 if app.command_expand {
                     app.expand_scroll(Direction::Down);
                 } else {
@@ -302,8 +301,7 @@ pub fn handle_event(
         KeyCode::Tab => {
             match key.modifiers {
                 KeyModifiers::ALT => {
-                    // TODO(to be removed): Pay attention to command_error.
-                    if let app::Block::CommandLine(_, _) = app.selected_block {
+                    if let Block::CommandLine(_, _) = app.selected_block {
                         // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
                         if app.command_expand {
                             app.command_expand = false;

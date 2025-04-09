@@ -6,11 +6,11 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     key_event::{CommandStr, ShellCommand},
-    app::{Block, CmdContent, CursorPos},
+    utils::{Block, CmdContent, CursorPos},
     error::{AppResult, ErrorType},
     utils::Direction,
     rt_error,
-    App
+    App,
 };
 
 impl Block {
@@ -65,7 +65,6 @@ impl<'a> App<'a> {
         self.switch_case = None;
     }
 
-    // TODO: Code of this function can be optimized.
     /// The function will change content in command line.
     /// In the meanwhile, adjusting current command index.
     pub fn command_select(&mut self, next: bool) {
@@ -84,6 +83,7 @@ impl<'a> App<'a> {
                 *cursor = CursorPos::End;
             }
 
+            // Select with current index when the user has already made this operation
             if let Some(index) = self.command_idx {
                 if next {
                     if index == self.command_history.len() - 1 {
@@ -92,27 +92,28 @@ impl<'a> App<'a> {
 
                     self.command_idx = Some(index + 1);
                     *content_ref = self.command_history[index + 1].to_owned();
-                    return ()
+                } else {
+                    if index == 0 {
+                        return ()
+                    }
+
+                    self.command_idx = Some(index - 1);
+                    *content_ref = self.command_history[index - 1].to_owned();
                 }
 
-                if index == 0 {
-                    return ()
-                }
+                return ()
+            }
 
-                self.command_idx = Some(index - 1);
-                *content_ref = self.command_history[index - 1].to_owned();
+            // There is no next item
+            if next {
                 return ()
             }
 
             // Initial selection.
-            let current_idx = if !next {
-                self.command_history
-                    .iter()
-                    .rev()
-                    .position(|x| x == content_ref)
-            } else {
-                return ()
-            };
+            let current_idx = self.command_history
+                .iter()
+                .rev()
+                .position(|x| x == content_ref);
 
             if let Some(idx) = current_idx {
                 if !next {
@@ -125,15 +126,13 @@ impl<'a> App<'a> {
                     let temp_idx = self.command_history.len() - 2 - idx;
                     self.command_idx = Some(temp_idx);
                     *content_ref = self.command_history[temp_idx].to_owned();
-
-                    return ()
-                } 
-
-                if idx + 1 == self.command_history.len() {
-                    self.command_idx = Some(idx);
                 } else {
-                    self.command_idx = Some(idx + 1);
-                    *content_ref = self.command_history[idx + 1].to_owned();
+                    if idx + 1 == self.command_history.len() {
+                        self.command_idx = Some(idx);
+                    } else {
+                        self.command_idx = Some(idx + 1);
+                        *content_ref = self.command_history[idx + 1].to_owned();
+                    }
                 }
 
                 return ()

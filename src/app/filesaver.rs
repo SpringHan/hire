@@ -7,12 +7,12 @@ use std::fs::{self, Permissions};
 
 use is_executable::is_executable;
 use ratatui::{
+    style::{Stylize, Style},
     text::Span,
-    style::{Stylize, Style}
 };
 
 /// The structure used to save file information.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FileSaver {
     pub name: String,
     pub is_file: bool,
@@ -155,7 +155,6 @@ impl FileSaver {
         }
     }
 
-    // TODO: Check the result
     pub fn size_span<'a>(&self) -> Span<'a> {
         Span::raw(file_size::fit_4(self.size))
     }

@@ -5,13 +5,13 @@ use std::{borrow::Cow, ops::{AddAssign, SubAssign}};
 use ratatui::widgets::ListState;
 
 use crate::{
-    app::{App, Block, CursorPos},
+    utils::{Block, CursorPos},
     error::AppResult,
     utils::str_split,
     option_get,
+    app::App,
 };
 
-// TODO(remove it): It seems that bitflags is not needed.
 #[derive(PartialEq, Eq)]
 enum CompletionType {
     File,

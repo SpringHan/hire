@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::fs::OpenOptions;
 
-use crate::app::CmdContent;
+use crate::utils::CmdContent;
 use crate::error::{AppResult, ErrorType};
 
 use super::App;

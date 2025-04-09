@@ -142,19 +142,22 @@ impl AppCommand {
                 Self::ShellCommand(command_vec, refresh)
             },
 
-            // TODO: Align these lines.
             // Edit Mode
             "quit_edit"   => Self::QuitEdit,
             "edit_delete" => Self::EditDelete,
             "edit_top"    => Self::EditGotoTop,
             "edit_bottom" => Self::EditGotoBottom,
 
-            "edit_move" => Self::EditMoveItem(
-                *option_get!(cmd_arg, command_err) == "next"
+            "edit_new" => Self::EditNew(
+                *option_get!(cmd_arg, command_err) == "dir"
             ),
 
             "edit_mark" => Self::EditMark(
                 *option_get!(cmd_arg, command_err) == "single"
+            ),
+
+            "edit_move" => Self::EditMoveItem(
+                *option_get!(cmd_arg, command_err) == "next"
             ),
 
             "edit_insert" => Self::EditInsert(
@@ -163,10 +166,6 @@ impl AppCommand {
 
             "edit_list_scroll" => Self::EditListScroll(
                 *option_get!(cmd_arg, command_err) == "next"
-            ),
-
-            "edit_new" => Self::EditNew(
-                *option_get!(cmd_arg, command_err) == "dir"
             ),
 
             _ => bail!("Unknow command for keybinding")

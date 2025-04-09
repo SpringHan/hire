@@ -2,11 +2,15 @@
 
 use std::collections::HashMap;
 
-use ratatui::{style::{Color, Modifier, Style, Styled, Stylize}, text::{Line, Span}};
+use ratatui::{
+    style::{Color, Modifier, Style, Styled, Stylize},
+    text::{Line, Span},
+};
 
 use crate::{
-    app::{CursorPos, FileSaver, MarkedFiles, TermColors},
-    key_event::{EditItem, EditMode}
+    key_event::{EditItem, EditMode},
+    utils::{CursorPos, MarkedFiles},
+    app::{FileSaver, TermColors},
 };
 
 use super::list::Item;
@@ -130,8 +134,6 @@ fn get_editing_item_color<'a>(
     } else if item.is_dir {
         temp_item = temp_item.set_style(colors.dir_style);
     }
-
-    // TODO: Add cursor & item type display
 
     let sidebar_style = if marked {
         Some(colors.marked_style.add_modifier(Modifier::REVERSED))

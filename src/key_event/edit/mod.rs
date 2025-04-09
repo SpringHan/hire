@@ -7,8 +7,9 @@ use std::fs;
 use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
 use crate::{
-    app::{App, CmdContent, CursorPos, FileContent},
+    utils::{CmdContent, CursorPos, FileContent},
     error::{AppError, AppResult},
+    app::App,
     option_get,
 };
 
@@ -293,11 +294,12 @@ pub fn save_edit(app: &mut App, key: char, _: SwitchCaseData) -> AppResult<bool>
 
     let mut have_hide_file = false;
     let mut errors = AppError::new();
+    let mut renamed_files: Vec<String> = Vec::new();
     for (idx, item) in edit_ref.items.iter().enumerate() {
         if idx < app.current_files.len() {
             let file = app.current_files.get(idx).unwrap();
             let file_path = app.path.join(&file.name);
-            if item.delete {
+            if item.delete && !renamed_files.contains(&file.name) {
                 if file.is_dir {
                     if let Err(err) = fs::remove_dir_all(file_path) {
                         errors.add_error(err);
@@ -317,6 +319,8 @@ pub fn save_edit(app: &mut App, key: char, _: SwitchCaseData) -> AppResult<bool>
                 }
 
                 let new_path = app.path.join(&item.editing_name);
+                renamed_files.push(item.editing_name.to_owned());
+
                 if let Err(err) = fs::rename(file_path, new_path) {
                     errors.add_error(err);
                 }

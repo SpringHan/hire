@@ -2,7 +2,6 @@
 
 mod color;
 mod filesaver;
-mod special_types;
 mod image_preview;
 
 use std::{env, fs, io};
@@ -15,12 +14,18 @@ use ratatui::text::Text;
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
-use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex, SwitchCase};
+use crate::utils::{
+    read_to_text,
+    MarkedFiles,
+    FileContent,
+    SearchFile,
+    ItemIndex,
+    Block,
+};
 
-pub use special_types::*;
 pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
 
@@ -167,7 +172,8 @@ impl<'a> App<'a> {
         self.path.to_string_lossy() == "/"
     }
 
-    /// Only get the path path of current file, without its file name.
+    /// When the user is in non-root dir, only return the path of current file.
+    /// When the user is in root dir, return the selected file in parent block.
     pub fn current_path(&self) -> PathBuf {
         if self.root() {
             let current_file = self.search_file(SearchFile::Parent).unwrap();
@@ -360,7 +366,6 @@ impl<'a> App<'a> {
 
     /// The PATH is used when the user is in root directory.
     pub fn init_current_files(&mut self) -> io::Result<()> {
-        // TODO: Rewrite the logic for changing CANNOT_READ. Make it happen in this function.
         let temp_path = self.current_path();
 
         let mut current_files: Vec<FileSaver> = self
@@ -385,7 +390,7 @@ impl<'a> App<'a> {
     {
         let temp_path = self.path.clone();
         let current_select = {
-            // TODO: Pay attention to here.
+            // NOTE: Pay attention to here (An incomplete NOTE, to be removed later).
             let file_saver = self.search_file(SearchFile::Current);
             if let Some(file_saver) = file_saver {
                 file_saver
@@ -692,7 +697,6 @@ impl<'a> App<'a> {
                 }
             }
             Err(err) => {
-                // BUG: Unwrap error when press '-' key in /boot/efi/
                 if err.kind() == io::ErrorKind::PermissionDenied {
                     let temp_file = self.get_file_saver_mut().unwrap();
                     temp_file.cannot_read = true;

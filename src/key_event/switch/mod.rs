@@ -2,7 +2,7 @@
 
 mod traits;
 
-use crate::{app::{self, App, CmdContent}, error::AppResult};
+use crate::{app::App, error::AppResult, utils::{Block, CmdContent, CursorPos}};
 
 pub use traits::SwitchStruct;
 
@@ -40,7 +40,7 @@ impl SwitchCase {
             app.expand_quit();
         }
 
-        app.selected_block = app::Block::CommandLine(msg, app::CursorPos::None);
+        app.selected_block = Block::CommandLine(msg, CursorPos::None);
         app.switch_case = Some(SwitchCase(func, data));
     }
 }

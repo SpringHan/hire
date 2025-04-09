@@ -27,8 +27,9 @@ use ratatui::crossterm::{
     execute
 };
 
+use app::App;
 use error::AppResult;
-use app::{App, FileContent};
+use utils::FileContent;
 use key_event::{
     ShellCommand,
     handle_event,
@@ -84,7 +85,7 @@ fn main() -> AppResult<()> {
                     if key.code == KeyCode::Char('q') &&
                         key.modifiers.is_empty()
                     {
-                        if let app::Block::Browser(_) = app.selected_block {
+                        if let utils::Block::Browser(_) = app.selected_block {
                             break;
                         }
                     }
