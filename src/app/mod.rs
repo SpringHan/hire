@@ -172,7 +172,8 @@ impl<'a> App<'a> {
         self.path.to_string_lossy() == "/"
     }
 
-    /// Only get the path path of current file, without its file name.
+    /// When the user is in non-root dir, only return the path of current file.
+    /// When the user is in root dir, return the selected file in parent block.
     pub fn current_path(&self) -> PathBuf {
         if self.root() {
             let current_file = self.search_file(SearchFile::Parent).unwrap();
