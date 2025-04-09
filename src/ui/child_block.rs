@@ -11,7 +11,7 @@ use ratatui::{
     Frame
 };
 
-use crate::{app::{App, FileContent}, utils::update_window_height};
+use crate::{app::App, utils::{update_window_height, FileContent}};
 
 use super::{list::List, utils::render_list};
 

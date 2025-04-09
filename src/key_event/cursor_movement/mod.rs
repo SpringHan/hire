@@ -9,12 +9,13 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::{widgets::ListState, Terminal as RTerminal};
 
 use super::simple_operations::output_path;
+
 use crate::{
-    utils::{get_window_height, Direction},
-    app::{self, App, MarkedFiles},
+    utils::{get_window_height, Direction, MarkedFiles, Block},
     error::AppResult,
     option_get,
     rt_error,
+    app::App,
 };
 
 pub use types::*;
@@ -38,7 +39,7 @@ pub fn directory_movement(
             app.path = parent_dir;
 
             if app.path.to_str() == Some("/") {
-                app.selected_block = app::Block::Browser(true);
+                app.selected_block = Block::Browser(true);
                 return Ok(())
             }
 
@@ -88,7 +89,7 @@ pub fn directory_movement(
                 }
 
                 app.path = app.path.join(&selected_file.name);
-                app.selected_block = app::Block::Browser(false);
+                app.selected_block = Block::Browser(false);
             } else {
                 let selected_file = app.get_file_saver();
                 if let None = selected_file {

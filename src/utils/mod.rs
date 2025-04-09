@@ -1,5 +1,7 @@
 // Utils for crate.
 
+mod types;
+
 use std::{borrow::Cow, fs::File, io::Read, sync::atomic::{AtomicU16, Ordering}};
 
 use anyhow::bail;
@@ -7,6 +9,8 @@ use clap::Parser;
 use ratatui::text::Text;
 use ansi_to_tui::IntoText;
 use lazy_static::lazy_static;
+
+pub use types::*;
 
 lazy_static! {
     /// The height of file list & content preview windows.

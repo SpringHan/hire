@@ -10,7 +10,8 @@ use crate::{
     config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
     key_event::{SwitchCase, SwitchCaseData},
-    app::{path_is_hidden, App, CmdContent},
+    app::{path_is_hidden, App},
+    utils::CmdContent,
     option_get,
     rt_error,
 };

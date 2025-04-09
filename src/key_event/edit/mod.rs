@@ -7,8 +7,9 @@ use std::fs;
 use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
 use crate::{
-    app::{App, CmdContent, CursorPos, FileContent},
+    utils::{CmdContent, CursorPos, FileContent},
     error::{AppError, AppResult},
+    app::App,
     option_get,
 };
 

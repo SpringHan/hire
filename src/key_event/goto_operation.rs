@@ -9,7 +9,8 @@ use ratatui::{style::Stylize, text::{Line, Text}};
 use super::Goto;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::{App, CmdContent};
+use crate::app::App;
+use crate::utils::CmdContent;
 use crate::config::{get_document, write_document};
 use crate::error::{AppResult, ErrorType, NotFoundType};
 

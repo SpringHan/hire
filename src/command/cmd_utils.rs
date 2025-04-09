@@ -6,11 +6,11 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use crate::{
     key_event::{CommandStr, ShellCommand},
-    app::{Block, CmdContent, CursorPos},
+    utils::{Block, CmdContent, CursorPos},
     error::{AppResult, ErrorType},
     utils::Direction,
     rt_error,
-    App
+    App,
 };
 
 impl Block {

@@ -4,7 +4,12 @@ use std::{sync::mpsc::{self, Receiver, Sender}, thread};
 
 use anyhow::bail;
 
-use crate::{app::{Block, FileSaver}, error::AppResult, key_event::Goto};
+use crate::{
+    error::AppResult,
+    key_event::Goto,
+    app::FileSaver,
+    utils::Block,
+};
 
 use super::App;
 

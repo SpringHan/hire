@@ -5,10 +5,11 @@ use std::{borrow::Cow, ops::{AddAssign, SubAssign}};
 use ratatui::widgets::ListState;
 
 use crate::{
-    app::{App, Block, CursorPos},
+    utils::{Block, CursorPos},
     error::AppResult,
     utils::str_split,
     option_get,
+    app::App,
 };
 
 #[derive(PartialEq, Eq)]

@@ -2,7 +2,6 @@
 
 mod color;
 mod filesaver;
-mod special_types;
 mod image_preview;
 
 use std::{env, fs, io};
@@ -15,12 +14,18 @@ use ratatui::text::Text;
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
 
-use crate::utils::read_to_text;
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex, SwitchCase};
+use crate::utils::{
+    read_to_text,
+    MarkedFiles,
+    FileContent,
+    SearchFile,
+    ItemIndex,
+    Block,
+};
 
-pub use special_types::*;
 pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
 

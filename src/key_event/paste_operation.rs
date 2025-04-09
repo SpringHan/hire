@@ -9,7 +9,7 @@ use super::SwitchCase;
 use super::file_operations::delete_file;
 
 use crate::{rt_error, App};
-use crate::app::{CmdContent, CursorPos, MarkedFiles};
+use crate::utils::{CmdContent, CursorPos, MarkedFiles};
 use crate::error::{
     NotFoundType,
     ErrorType,

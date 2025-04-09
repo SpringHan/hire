@@ -2,11 +2,15 @@
 
 use std::collections::HashMap;
 
-use ratatui::{style::{Color, Modifier, Style, Styled, Stylize}, text::{Line, Span}};
+use ratatui::{
+    style::{Color, Modifier, Style, Styled, Stylize},
+    text::{Line, Span},
+};
 
 use crate::{
-    app::{CursorPos, FileSaver, MarkedFiles, TermColors},
-    key_event::{EditItem, EditMode}
+    key_event::{EditItem, EditMode},
+    utils::{CursorPos, MarkedFiles},
+    app::{FileSaver, TermColors},
 };
 
 use super::list::Item;

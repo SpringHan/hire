@@ -9,8 +9,8 @@ use super::Goto;
 use super::cursor_movement;
 use super::{SwitchCase, SwitchCaseData};
 
-use crate::app::CmdContent;
-use crate::app::{App, CursorPos};
+use crate::app::App;
+use crate::utils::{CmdContent, CursorPos};
 use crate::error::{AppResult, AppError, ErrorType};
 
 // File name modify

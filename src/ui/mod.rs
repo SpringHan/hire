@@ -16,8 +16,7 @@ use ratatui::{
     Frame
 };
 
-use crate::{app::CmdContent, App};
-use crate::app::{self, CursorPos};
+use crate::{app::App, utils::{self as cutils, CursorPos, CmdContent}};
 
 use command_line::*;
 use parent_block::render_parent;
@@ -103,7 +102,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     // Expanded Commandline
     if app.command_expand {
         let command_block = Block::default();
-        if let app::Block::CommandLine(ref msg, cursor) = app.selected_block {
+        if let cutils::Block::CommandLine(ref msg, cursor) = app.selected_block {
             let command_errors = get_command_line_style(
                 app,
                 msg,
@@ -121,7 +120,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
 
     // File browser layout
-    let constraints = if let app::Block::Browser(true) = app.selected_block {
+    let constraints = if let cutils::Block::Browser(true) = app.selected_block {
         vec![
             Constraint::Percentage(50),
             Constraint::Percentage(50)
@@ -154,7 +153,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     
     // Child Block
     match app.selected_block {
-        app::Block::Browser(true) => {
+        cutils::Block::Browser(true) => {
             if app.file_content.is_some() {
                 render_file(frame, app, browser_layout[1])?;
                 render_command_line(app, frame, chunks[2]);
@@ -181,7 +180,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 }
 
 fn check_app_error(app: &mut App) {
-    use crate::app::Block as SBlock;
+    use cutils::Block as SBlock;
 
     if !app.app_error.is_empty() {
         let err_msg = app.app_error.to_string();

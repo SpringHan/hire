@@ -1,6 +1,6 @@
 // Types
 
-use crate::{app::{FileSaver, CursorPos}, error::{AppResult, ErrorType}};
+use crate::{app::FileSaver, utils::CursorPos, error::{AppResult, ErrorType}};
 
 #[derive(Clone)]
 pub struct EditItem {

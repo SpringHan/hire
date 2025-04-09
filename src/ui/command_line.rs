@@ -8,7 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{self, App, CmdContent, CursorPos};
+use crate::app::App;
+use crate::utils::{CmdContent, CursorPos};
 
 /// The widget to show states, such as file permission, size, etc.
 pub struct StateLine<'a> {
@@ -63,7 +64,7 @@ pub fn render_command_line<'a>(
     area: Rect
 )
 {
-    use app::Block as AppBlock;
+    use crate::utils::Block as AppBlock;
 
     match app.selected_block {
         AppBlock::Browser(_) => {
