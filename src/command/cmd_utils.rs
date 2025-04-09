@@ -1,8 +1,8 @@
 // Command Line
 
-use std::{io::Stderr, ops::AddAssign};
+use std::ops::AddAssign;
 
-use ratatui::{prelude::CrosstermBackend, Terminal};
+use ratatui::DefaultTerminal;
 
 use crate::{
     key_event::{CommandStr, ShellCommand},
@@ -150,8 +150,9 @@ impl<'a> App<'a> {
     
     pub fn command_parse(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<Stderr>>
-    ) -> AppResult<()> {
+        terminal: &mut DefaultTerminal
+    ) -> AppResult<()>
+    {
         if let Block::CommandLine(ref _command, _) = self.selected_block {
             let content_ref = _command.get();
 

@@ -13,12 +13,10 @@ mod file_operations;
 mod paste_operation;
 mod simple_operations;
 
-use std::io::Stderr;
 use std::ops::SubAssign;
 
 use command_line::completion;
-use ratatui::Terminal as RTerminal;
-use ratatui::backend::CrosstermBackend;
+use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use tab::tab_operation;
@@ -34,8 +32,6 @@ use crate::app::App;
 use crate::error::AppResult;
 use crate::command::AppCommand;
 use crate::utils::{Block, CursorPos, Direction};
-
-type Terminal = RTerminal<CrosstermBackend<Stderr>>;
 
 // Export
 pub use tab::TabList;
@@ -57,7 +53,7 @@ pub use goto_operation::read_config as goto_read_config;
 pub fn handle_event(
     key: KeyEvent,
     app: &mut App,
-    terminal: &mut Terminal
+    terminal: &mut DefaultTerminal
 ) -> AppResult<()>
 {
     match key.code {
@@ -330,7 +326,7 @@ impl AppCommand {
     pub fn execute(
         self,
         app: &mut App,
-        terminal: &mut Terminal,
+        terminal: &mut DefaultTerminal,
         in_root: bool
     ) -> AppResult<()>
     {

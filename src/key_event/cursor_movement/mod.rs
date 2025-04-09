@@ -5,8 +5,8 @@ mod types;
 use std::mem::swap;
 use std::ops::Range;
 
-use ratatui::backend::CrosstermBackend;
-use ratatui::{widgets::ListState, Terminal as RTerminal};
+use ratatui::DefaultTerminal;
+use ratatui::widgets::ListState;
 
 use super::simple_operations::output_path;
 
@@ -20,12 +20,10 @@ use crate::{
 
 pub use types::*;
 
-type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
-
 pub fn directory_movement(
     direction: Direction,
     app: &mut App,
-    terminal: &mut Terminal,
+    terminal: &mut DefaultTerminal,
     in_root: bool
 ) -> AppResult<()>
 {

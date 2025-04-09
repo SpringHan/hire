@@ -1,15 +1,15 @@
 // Interaction with other Terminal tools.
 
-use std::io::Stderr;
-
-use ratatui::{prelude::CrosstermBackend, Terminal as RTerminal};
+use ratatui::DefaultTerminal;
 
 use super::{shell::fetch_output, CommandStr, ShellCommand};
 use crate::{app::App, error::AppResult, option_get, rt_error};
 
-type Terminal = RTerminal<CrosstermBackend<Stderr>>;
-
-pub fn fzf_jump(app: &mut App, terminal: &mut Terminal) -> AppResult<()> {
+pub fn fzf_jump(
+    app: &mut App,
+    terminal: &mut DefaultTerminal
+) -> AppResult<()>
+{
     let mut target = fetch_output(
         terminal,
         &app.path,
