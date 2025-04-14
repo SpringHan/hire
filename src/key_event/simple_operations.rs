@@ -34,11 +34,6 @@ pub fn print_full_path(app: &mut App) {
 }
 
 pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
-    // NOTE: There's no possibility that the output_file is none.
-    let output_path = app.output_file
-        .to_owned()
-        .expect("Unknow error occurred at output_path in simple_operations.rs!");
-
     let output = if file_out {
         if let Some(file) = app.get_file_saver() {
             app.current_path().join(&file.name)
@@ -52,11 +47,13 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(output_path)?;
+        .open(&app.output_file)?;
 
     file.write(output.to_string_lossy().as_bytes())?;
 
-    app.quit_now = true;
+    if app.quit_after_output {
+        app.quit_now = true;
+    }
 
     Ok(())
 }

@@ -3,7 +3,7 @@ keymap = [
     { key = "k", run = "move up"          },  # Move selection cursor up
     { key = "j", run = "move down"        },  # Move selection cursor down
     { key = "h", run = "move left"        },  # Move to parent directory
-    { key = "l", run = "move right"       },  # Move into selected directory / Open file with `file_read_program` / Output selected file path to `output-file`
+    { key = "l", run = "move right"       },  # Move into selected directory / Open file with `file_read_program`
     { key = "G", run = "goto_bottom"      },  # Jump to bottom of file list
     { key = "v", run = "list_scroll next" },  # Scroll list view down
     { key = "V", run = "list_scroll prev" },  # Scroll list view up
@@ -42,13 +42,14 @@ keymap = [
     { key = "w", run = "work_directory goto" },  # Go to working directory
 
     # Others
-    { key = "R", run = "refresh"               },  # Refresh file list
-    { key = "f", run = "fzf_jump"              },  # Fuzzy find and jump to file
-    { key = "P", run = "full_path"             },  # Print full path of current file
-    { key = "i", run = "edit_mode"             },  # Enter edit mode
-    { key = "-", run = "hide_or_show"          },  # Toggle hidden files visibility
-    { key = "\\", run = "change_output_status" },  # Toggle output status display
-    { key = "s", run = "single_symlink"        },  # Create symlink of currently selected file
+    { key = "R", run = "refresh"            },  # Refresh file list
+    { key = "f", run = "fzf_jump"           },  # Fuzzy find and jump to file
+    { key = "P", run = "full_path"          },  # Print full path of current file
+    { key = "i", run = "edit_mode"          },  # Enter edit mode
+    { key = "'", run = "output_file"        },  # Output selected file path to `output-file`
+    { key = "-", run = "hide_or_show"       },  # Toggle hidden files visibility
+    { key = "s", run = "single_symlink"     },  # Create symlink of currently selected file
+    { key = "\\", run = "quit_after_output" },  # Switch between whether quit hire after an output operation
 
     # Navigation Index
     { key = "1", run = "navi_input 1"    },  # Navigation index input 1

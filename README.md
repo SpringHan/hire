@@ -146,7 +146,6 @@ keymap = [
 - [x] Optimize the editing ability for command line
 - [x] Add Edit mode for more convenient file editing
 - [ ] Refactor the project
-- [ ] Bottom hint for whether current shell process is run by hire
 - [ ] Highlight for file preview
 - [ ] Migrate to Rust 2024 Edition
 

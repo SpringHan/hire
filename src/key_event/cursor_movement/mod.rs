@@ -5,10 +5,8 @@ mod types;
 use std::mem::swap;
 use std::ops::Range;
 
-use ratatui::backend::CrosstermBackend;
-use ratatui::{widgets::ListState, Terminal as RTerminal};
-
-use super::simple_operations::output_path;
+use ratatui::DefaultTerminal;
+use ratatui::widgets::ListState;
 
 use crate::{
     utils::{get_window_height, Direction, MarkedFiles, Block},
@@ -20,12 +18,10 @@ use crate::{
 
 pub use types::*;
 
-type Terminal = RTerminal<CrosstermBackend<std::io::Stderr>>;
-
 pub fn directory_movement(
     direction: Direction,
     app: &mut App,
-    terminal: &mut Terminal,
+    terminal: &mut DefaultTerminal,
     in_root: bool
 ) -> AppResult<()>
 {
@@ -70,11 +66,6 @@ pub fn directory_movement(
                 // It seems impossible that the root directory is empty.
                 let selected_file = app.get_file_saver().unwrap();
                 if !selected_file.is_dir {
-                    if app.output_file.is_some() && app.confirm_output {
-                        output_path(app, true)?;
-                        return Ok(())
-                    }
-
                     super::shell::open_file_in_shell(
                         app,
                         terminal,
@@ -100,11 +91,6 @@ pub fn directory_movement(
 
                 // Open selected file
                 if !selected_file.is_dir {
-                    if app.output_file.is_some() && app.confirm_output {
-                        output_path(app, true)?;
-                        return Ok(())
-                    }
-
                     super::shell::open_file_in_shell(
                         app,
                         terminal,

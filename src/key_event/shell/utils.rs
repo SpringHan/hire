@@ -1,21 +1,17 @@
 // Shell Command.
 
-use std::io::stderr;
-use std::process::{Command, Stdio};
-use std::io::{self, Stderr};
+use std::io::{self, stdout};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-use ratatui::{
-    Terminal as RTerminal,
-    backend::CrosstermBackend,
-    crossterm::{
-        execute,
-        cursor::{Show, Hide},
-        event::{self, poll, Event, KeyEventKind},
-        terminal::{
-            EnterAlternateScreen, LeaveAlternateScreen,
-            enable_raw_mode, disable_raw_mode
-        }
+use ratatui::DefaultTerminal;
+use ratatui::crossterm::{
+    execute,
+    cursor::{Show, Hide},
+    event::{self, poll, Event, KeyEventKind},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen,
+        enable_raw_mode, disable_raw_mode
     }
 };
 
@@ -25,14 +21,12 @@ use crate::config::{Config, ConfigValue};
 
 use super::{CommandStr, ShellCommand};
 
-type Terminal = RTerminal<CrosstermBackend<Stderr>>;
-
-
 /// Start a shell process.
-pub fn shell_process(app: &mut App,
-                     terminal: &mut Terminal,
-                     command: ShellCommand,
-                     refresh: bool
+pub fn shell_process(
+    app: &mut App,
+    terminal: &mut DefaultTerminal,
+    command: ShellCommand,
+    refresh: bool
 ) -> AppResult<()>
 {
     let shell_program = if let ConfigValue::String(
@@ -89,7 +83,7 @@ pub fn shell_process(app: &mut App,
 
 
     disable_raw_mode()?;
-    execute!(stderr(), LeaveAlternateScreen, Show)?;
+    execute!(stdout(), LeaveAlternateScreen, Show)?;
 
     process.spawn()?.wait()?;
 
@@ -108,7 +102,7 @@ pub fn shell_process(app: &mut App,
     }
 
     enable_raw_mode()?;
-    execute!(stderr(), EnterAlternateScreen, Hide)?;
+    execute!(stdout(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
 
     if refresh {
@@ -124,7 +118,7 @@ pub fn shell_process(app: &mut App,
 
 /// Run `command` & get its output.
 pub fn fetch_output<P: AsRef<Path>>(
-    terminal: &mut Terminal,
+    terminal: &mut DefaultTerminal,
     current_path: P,
     command: ShellCommand
 ) -> anyhow::Result<String>
@@ -138,12 +132,12 @@ pub fn fetch_output<P: AsRef<Path>>(
 
 
         disable_raw_mode()?;
-        execute!(stderr(), LeaveAlternateScreen, Show)?;
+        execute!(stdout(), LeaveAlternateScreen, Show)?;
 
         let output = _command.spawn()?.wait_with_output()?;
 
         enable_raw_mode()?;
-        execute!(stderr(), EnterAlternateScreen, Hide)?;
+        execute!(stdout(), EnterAlternateScreen, Hide)?;
         terminal.clear()?;
 
         return Ok(String::from_utf8(output.stdout)?)
@@ -152,9 +146,10 @@ pub fn fetch_output<P: AsRef<Path>>(
     rt_error!("Cannot get the program that needs a output")
 }
 
-pub fn open_file_in_shell<P>(app: &mut App,
-                         terminal: &mut Terminal,
-                         file: P
+pub fn open_file_in_shell<P>(
+    app: &mut App,
+    terminal: &mut DefaultTerminal,
+    file: P
 ) -> AppResult<()>
 where P: AsRef<Path>
 {
