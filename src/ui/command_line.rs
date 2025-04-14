@@ -107,14 +107,14 @@ pub fn render_command_line<'a>(
                     "EXPAND",
                     style.add_modifier(Modifier::BOLD)
                 ).alignment(Alignment::Right));
-            } else if app.confirm_output && app.output_file.is_some() {
+            } else if app.quit_after_output {
                 let mut style = app.term_colors.symlink_style;
                 if style.bg.is_some() {
                     style.bg = None;
                 }
 
                 lines.push(Line::styled(
-                    "OUTPUT",
+                    "QUIT",
                     style.add_modifier(Modifier::BOLD)
                 ).alignment(Alignment::Right));
             }

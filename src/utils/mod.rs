@@ -36,9 +36,13 @@ pub struct Args {
     )]
     pub start_from: String,
 
-    /// The target file for output, require a absolute path
+    /// The target file for output, require a absolute path. The default: /tmp/hire.tmp
     #[arg(short, long, default_value_t = String::from("NULL"))]
     pub output_file: String,
+
+    /// Kill the hire process after an output operation.
+    #[arg(short, long, default_value_t = false)]
+    pub quit_after_output: bool,
 }
 
 #[derive(Clone, Copy)]

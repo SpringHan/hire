@@ -21,7 +21,6 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use tab::tab_operation;
 use interaction::fzf_jump;
-use simple_operations::output_path;
 use goto_operation::goto_operation;
 use paste_operation::paste_operation;
 use cursor_movement::{directory_movement, jump_to_index};
@@ -37,6 +36,7 @@ use crate::utils::{Block, CursorPos, Direction};
 pub use tab::TabList;
 pub use file_search::FileSearcher;
 pub use edit::{EditMode, EditItem};
+pub use simple_operations::output_path;
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
@@ -253,9 +253,7 @@ pub fn handle_event(
                 );
             }
 
-            if app.output_file.is_some() && app.confirm_output {
-                output_path(app, false)?;
-            }
+            output_path(app, false)?;
         },
 
         KeyCode::Up => {
@@ -331,20 +329,21 @@ impl AppCommand {
     ) -> AppResult<()>
     {
         match self {
-            AppCommand::Tab                => tab_operation(app)?,
-            AppCommand::Goto               => goto_operation(app),
-            AppCommand::Paste              => paste_operation(app)?,
-            AppCommand::Delete             => delete_operation(app),
-            AppCommand::ShowNaviIndex      => app.navi_index.init(),
-            AppCommand::MarkExpand         => app.mark_expand = true,
-            AppCommand::EditDelete         => edit::mark_delete(app)?,
-            AppCommand::HideOrShow         => app.hide_or_show(None)?,
-            AppCommand::FzfJump            => fzf_jump(app, terminal)?,
-            AppCommand::CmdShell           => shell::cmdline_shell(app)?,
-            AppCommand::PrintFullPath      => simple_operations::print_full_path(app),
-            AppCommand::ChangeOutputStatus => app.confirm_output = !app.confirm_output,
-            AppCommand::SingleSymlink      => paste_operation::make_single_symlink(app)?,
-            AppCommand::EditGotoTop        => edit::item_navigation(app, Goto::Index(0))?,
+            AppCommand::Tab             => tab_operation(app)?,
+            AppCommand::Goto            => goto_operation(app),
+            AppCommand::Paste           => paste_operation(app)?,
+            AppCommand::Delete          => delete_operation(app),
+            AppCommand::ShowNaviIndex   => app.navi_index.init(),
+            AppCommand::OutputFile      => output_path(app, true)?,
+            AppCommand::MarkExpand      => app.mark_expand = true,
+            AppCommand::EditDelete      => edit::mark_delete(app)?,
+            AppCommand::HideOrShow      => app.hide_or_show(None)?,
+            AppCommand::FzfJump         => fzf_jump(app, terminal)?,
+            AppCommand::CmdShell        => shell::cmdline_shell(app)?,
+            AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
+            AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
+            AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,
+            AppCommand::QuitAfterOutput => app.quit_after_output = !app.quit_after_output,
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
@@ -355,6 +354,11 @@ impl AppCommand {
                 app.edit_mode.reset();
                 app.mark_expand = false;
             },
+
+            AppCommand::CommandInsert => app.selected_block.set_command_line(
+                String::from(":"),
+                CursorPos::End
+            ),
 
             AppCommand::EditInsert(end) => app.edit_mode.enter_insert(
                 &mut app.selected_item.current,

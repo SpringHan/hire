@@ -91,9 +91,9 @@ pub struct App<'a> {
     pub app_error: AppError,
 
     // Output
-    pub confirm_output: bool,
+    pub quit_after_output: bool,
     /// The file to store output of path from app.
-    pub output_file: Option<PathBuf>,
+    pub output_file: String,
 
     // Computer & User name
     pub user_name: Cow<'static, str>,
@@ -152,8 +152,8 @@ impl<'a> Default for App<'a> {
             app_error: AppError::new(),
 
             // Output
-            output_file: None,
-            confirm_output: false,
+            quit_after_output: false,
+            output_file: String::from("/tmp/hire.tmp"),
 
             // Config & others
             quit_now: false,

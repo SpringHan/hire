@@ -37,7 +37,7 @@ fn main() -> AppResult<()> {
     let mut terminal = ratatui::init();
 
     // Check, whether to enable working directory mode.
-    check_passive_mode(&args, &mut app);
+    check_output(&args, &mut app);
     check_start_path(&args, &mut app)?;
     shell_in_workdir(&args, &mut app, &mut terminal)?;
 
@@ -146,13 +146,12 @@ fn shell_in_workdir(
 }
 
 /// Check whether to enter passive output mode.
-fn check_passive_mode(args: &utils::Args, app: &mut App) {
+fn check_output(args: &utils::Args, app: &mut App) {
     if &args.output_file != "NULL" {
-        app.confirm_output = true;
-        app.output_file = Some(std::path::PathBuf::from(
-            &args.output_file
-        ));
+        app.output_file = args.output_file.to_owned();
     }
+
+    app.quit_after_output = args.quit_after_output;
 }
 
 fn check_start_path(args: &utils::Args, app: &mut App) -> AppResult<()> {
