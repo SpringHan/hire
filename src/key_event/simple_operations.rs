@@ -45,6 +45,7 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
     };
 
     let mut file = OpenOptions::new()
+        .create(true)
         .write(true)
         .truncate(true)
         .open(&app.output_file)?;
