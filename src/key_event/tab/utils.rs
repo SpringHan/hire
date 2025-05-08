@@ -175,11 +175,9 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
             rt_error!("There's only one tab")
         }
         tab.list.remove(idx);
+        tab.current -= 1;
 
         // Focus the previous tab.
-        if idx != 0 {
-            tab.current -= 1;
-        }
         let target_tab = tab.list
             .get(tab.current)
             .expect("Failed to switch to nearby tabs!")
@@ -189,7 +187,7 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
         return Ok(true)
     }
 
-    if tab.current != 0 {
+    if idx < tab.current {
         tab.current -= 1;
     }
     tab.list.remove(idx);
