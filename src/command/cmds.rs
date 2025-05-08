@@ -72,26 +72,30 @@ where I: Iterator<Item = &'a str>
     let mut to_show_hidden_files = false;
 
     for file in files {
-        let file = file.trim_start();
+        let mut file = file.trim_start().to_owned();
+        if file_exists(path.join(&file))? {
+            file.push_str(".new");
+        }
+
         if is_dir {
-            match fs::create_dir(path.join(file)) {
+            match fs::create_dir(path.join(&file)) {
                 Err(err) => {
                     errors.add_error(err);
                 },
                 Ok(_) => new_files.push(FileSaver::new(
-                    file,
+                    file.to_owned(),
                     path.join(&file),
                     None
                 ))
             }
         } else {
             let file_create = fs::File::create(
-                path.join(file)
+                path.join(&file)
             );
             match file_create {
                 Ok(file_create) => {
                     new_files.push(FileSaver::new(
-                        file,
+                        file.to_owned(),
                         path.join(&file),
                         Some(file_create.metadata())
                     ));
