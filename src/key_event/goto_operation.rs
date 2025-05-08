@@ -118,7 +118,7 @@ fn add_target_dir(app: &mut App, key: char, path: PathBuf) -> AppResult<()> {
     toml_config["goto_dir"][String::from(key)] = value(&path);
     
     write_document(toml_config)?;
-    app.target_dir.entry(key).or_insert(path);
+    app.target_dir.entry(key).insert_entry(path);
 
     Ok(())
 }
