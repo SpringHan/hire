@@ -227,8 +227,11 @@ pub fn handle_event(
                 app.quit_command_mode();
                 return Ok(())
             } else {
-                if let Block::CommandLine(_, _) = app.selected_block {
-                    app.command_parse(terminal)?;
+                if let Block::CommandLine(_, ref _cursor) = app.selected_block {
+                    if *_cursor != CursorPos::None {
+                        app.command_parse(terminal)?;
+                    }
+
                     return Ok(())
                 }
             }
