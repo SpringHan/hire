@@ -7,10 +7,7 @@ use std::fs;
 use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
 use crate::{
-    utils::{CmdContent, CursorPos, FileContent},
-    error::{AppError, AppResult},
-    app::App,
-    option_get,
+    app::App, error::{AppError, AppResult}, option_get, utils::{delete_word, CmdContent, CursorPos, FileContent}
 };
 
 use super::{cursor_movement::move_cursor_core, Goto, SwitchCaseData};
@@ -129,13 +126,18 @@ impl EditMode {
         }
     }
 
-    pub fn backspace(&mut self) {
+    pub fn backspace(&mut self, by_word: bool) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
                 continue;
             }
 
             if item.editing_name.is_empty() {
+                continue;
+            }
+
+            if by_word {
+                delete_word(&mut item.editing_name, &mut item.cursor);
                 continue;
             }
 
