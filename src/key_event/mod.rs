@@ -30,7 +30,7 @@ use crate::rt_error;
 use crate::app::App;
 use crate::error::AppResult;
 use crate::command::AppCommand;
-use crate::utils::{Block, CursorPos, Direction};
+use crate::utils::{delete_word, Block, CmdContent, CursorPos, Direction};
 
 // Export
 pub use tab::TabList;
@@ -139,19 +139,29 @@ pub fn handle_event(
                 ref mut cursor
             ) = app.selected_block
             {
-                let content_ref = origin.get_mut();
-                match cursor {
-                    CursorPos::Index(idx) => {
-                        if *idx == 0 {
-                            return Ok(())
-                        }
-                        content_ref.remove(*idx - 1);
-                        idx.sub_assign(1);
-                    },
-                    CursorPos::End => {
-                        content_ref.pop();
-                    },
-                    _ => ()
+                if let CursorPos::None = cursor {
+                    return Ok(())
+                }
+
+                if key.modifiers == KeyModifiers::ALT {
+                    if let CmdContent::String(_str) = origin {
+                        delete_word(_str, cursor);
+                    }
+                } else {
+                    let content_ref = origin.get_mut();
+                    match cursor {
+                        CursorPos::Index(idx) => {
+                            if *idx == 0 {
+                                return Ok(())
+                            }
+                            content_ref.remove(*idx - 1);
+                            idx.sub_assign(1);
+                        },
+                        CursorPos::End => {
+                            content_ref.pop();
+                        },
+                        _ => ()
+                    }
                 }
 
                 if !app.command_completion.popup_info().0.is_empty() {
@@ -166,7 +176,7 @@ pub fn handle_event(
             }
 
             if app.edit_mode.inserting() {
-                app.edit_mode.backspace();
+                app.edit_mode.backspace(key.modifiers == KeyModifiers::ALT);
             }
         },
         

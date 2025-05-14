@@ -120,6 +120,66 @@ pub fn read_to_text(
     Ok(())
 }
 
+/// Delete word and update content & cursor position.
+pub fn delete_word(_str: &mut String, cursor: &mut CursorPos) {
+    if _str.len() == 0 {
+        return ()
+    }
+
+    let mut end_idx: usize;
+    let mut deleting_char = false;
+    let mut remain_str = String::new();
+
+    if let CursorPos::Index(idx) = cursor {
+        if *idx == 0 {
+            return ()
+        }
+        end_idx = *idx - 1;
+        remain_str = _str[*idx..].to_owned();
+    } else {
+        end_idx = _str.len() - 1;
+    }
+
+    // Get the end position of editing slice after deleting
+    for byte in _str
+        .bytes()
+        .rev()
+        .skip(_str.len() - end_idx - 1)
+    {
+
+        if (byte >= 32 && byte <= 47) ||
+            (byte >= 58 && byte <= 64) ||
+            (byte >= 91 && byte <= 96) ||
+            (byte >= 123 && byte <= 126)
+        {
+            if !deleting_char {
+                end_idx = end_idx.saturating_sub(1);
+            }
+
+            break;
+        }
+
+        end_idx = end_idx.saturating_sub(1);
+        if !deleting_char {
+            deleting_char = true;
+        }
+    }
+
+    // Update content & cursor position
+    if end_idx == 0 {
+        _str.clear();
+    } else {
+        *_str = _str[0..=end_idx].to_owned();
+    }
+    if !remain_str.is_empty() {
+        _str.push_str(&remain_str);
+    }
+
+    if let CursorPos::Index(idx) = cursor {
+        *idx = if end_idx == 0 { 0 } else { end_idx + 1 };
+    }
+}
+
 pub fn update_window_height(height: u16) {
     let current = WINDOW_HEIGHT.load(Ordering::Acquire);
     if current != height {
