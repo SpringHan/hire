@@ -86,7 +86,7 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
      - `Space` - Mark/unmark single file
 
 3. **Text Editing**:
-   - Insert text at beginning/end of filenames (`H`/`h` in Colemak, `I`/`i` in QWERTY)
+   - Insert text at beginning/end of filenames (`H`/`A` in Colemak, `I`/`A` in QWERTY)
 
 4. **Exiting**:
    - `Enter` - Apply edited content to current path

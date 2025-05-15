@@ -75,7 +75,7 @@ keymap = [
     { key = "e", run = "edit_move next"        },  # Move down in edit mode
     { key = "m", run = "edit_mark all"         },  # Mark all in edit mode
     { key = " ", run = "edit_mark single"      },  # Mark single in edit mode
-    { key = "h", run = "edit_insert end"       },  # Insert at end in edit mode
+    { key = "A", run = "edit_insert end"       },  # Insert at end in edit mode
     { key = "H", run = "edit_insert beg"       },  # Insert at beginning in edit mode
     { key = "v", run = "edit_list_scroll next" },  # Scroll down in edit mode
     { key = "V", run = "edit_list_scroll prev" },  # Scroll up in edit mode
