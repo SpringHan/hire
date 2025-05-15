@@ -138,6 +138,15 @@ keymap = [
 ]
 ```
 
+## Keybindings for command line
+
+- Cursor move left: `C-b`
+- Cursor move right: `C-f`
+- Cursor move to beginning: `C-a`
+- Cursor move to end: `C-e`
+- Delete word: `Alt-Backspace` (Also in edit mode)
+- Expand command line: `Alt-Tab`
+
 ## TODO
 
 - [x] Image preview support
