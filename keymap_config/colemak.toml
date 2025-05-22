@@ -14,6 +14,14 @@ keymap = [
     { key = "p", run = "paste_operation"  },  # Open paste operations menu
     { key = "d", run = "delete_operation" },  # Open delete operations menu
 
+    # Tab operations
+    { key = "[", run = "prev_tab"     }, # Switch prev tab
+    { key = "]", run = "next_tab"     }, # Switch next tab
+    { key = "1", run = "switch_tab 1" }, # Switch 1st tab
+    { key = "2", run = "switch_tab 2" }, # Switch 2nd tab
+    { key = "3", run = "switch_tab 3" }, # Switch 3rd tab
+    { key = "4", run = "switch_tab 4" }, # Switch 4th tab
+
     # Search
     { key = "/", run = "search"              },  # Start to search file in command line
     { key = "k", run = "move_candidate next" },  # Move to next search match

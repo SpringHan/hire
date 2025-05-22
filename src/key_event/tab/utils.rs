@@ -4,12 +4,12 @@ use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
 use anyhow::bail;
 use toml_edit::{value, Array};
-use ratatui::{style::Stylize, text::{Line, Text}};
+use ratatui::{style::{Modifier, Stylize}, text::{Line, Span, Text}};
 
 use crate::{
+    key_event::{move_cursor, Goto, SwitchCase, SwitchCaseData},
     config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
-    key_event::{SwitchCase, SwitchCaseData},
     app::{path_is_hidden, App},
     utils::CmdContent,
     option_get,
@@ -18,13 +18,14 @@ use crate::{
 
 use super::types::TabState;
 
-pub fn tab_operation(app: &mut App) -> AppResult<()> {
-    // Update tab status in current tab
-    app.tab_list.list[app.tab_list.current] = (
-        app.path.to_owned(),
-        app.hide_files
-    );
+pub fn quick_switch(app: &mut App, key: char) -> AppResult<()> {
+    let mut state = TabState::default();
+    state.single_index = true;
+    handle_tabs(app, key, &mut state)?;
+    Ok(())
+}
 
+pub fn tab_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         switch,
@@ -65,6 +66,8 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         'c'       => return Ok(remove_base(app, app.tab_list.current)?),
 
         'S' => {
+            update_current_tab(app);
+
             data.set_saving();
             SwitchCase::new(
                 app,
@@ -112,44 +115,29 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
     Ok(true)
 }
 
-fn next(app: &mut App) -> AppResult<bool> {
-    let tab = &mut app.tab_list;
-    if tab.list.len() == tab.current + 1 {
-        rt_error!("There's no other tabs")
+pub fn next(app: &mut App) -> AppResult<bool> {
+    if app.tab_list.list.len() == app.tab_list.current + 1 {
+        return Ok(true)
     }
 
-    tab.list[tab.current] = (
-        app.path.to_owned(),
-        app.hide_files
-    );
-    tab.current += 1;
+    update_current_tab(app);
 
-    let target_tab = tab.list
-        .get(tab.current)
-        .expect("Unable to get next tab!")
-        .to_owned();
-    app.goto_dir(target_tab.0, Some(target_tab.1))?;
+    let tab = &mut app.tab_list;
+    tab.current += 1;
+    select_new(app)?;
 
     Ok(true)
 }
 
-fn prev(app: &mut App) -> AppResult<bool> {
-    let tab = &mut app.tab_list;
-    if tab.current == 0 {
-        rt_error!("There's no other tabs")
+pub fn prev(app: &mut App) -> AppResult<bool> {
+    if app.tab_list.current == 0 {
+        return Ok(true)
     }
 
-    tab.list[tab.current] = (
-        app.path.to_owned(),
-        app.hide_files
-    );
+    update_current_tab(app);
+    let tab = &mut app.tab_list;
     tab.current -= 1;
-
-    let target_tab = tab.list
-        .get(tab.current)
-        .expect("Unable to get prev tab!")
-        .to_owned();
-    app.goto_dir(target_tab.0, Some(target_tab.1))?;
+    select_new(app)?;
 
     Ok(true)
 }
@@ -157,12 +145,11 @@ fn prev(app: &mut App) -> AppResult<bool> {
 // NOTE: As the new tab is created with current directory, there's no need to call goto function.
 #[inline]
 fn create(app: &mut App) {
+    update_current_tab(app);
+
     let tab = &mut app.tab_list;
-    tab.list[tab.current] = (
-        app.path.to_owned(),
-        app.hide_files
-    );
     tab.list.push((app.path.to_owned(), app.hide_files));
+    tab.selected_file.push(None);
     tab.current = tab.list.len() - 1;
 }
 
@@ -175,14 +162,11 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
             rt_error!("There's only one tab")
         }
         tab.list.remove(idx);
+        tab.selected_file.remove(idx);
         tab.current -= 1;
 
         // Focus the previous tab.
-        let target_tab = tab.list
-            .get(tab.current)
-            .expect("Failed to switch to nearby tabs!")
-            .to_owned();
-        app.goto_dir(target_tab.0, Some(target_tab.1))?;
+        select_new(app)?;
 
         return Ok(true)
     }
@@ -191,6 +175,7 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
         tab.current -= 1;
     }
     tab.list.remove(idx);
+    tab.selected_file.remove(idx);
 
     Ok(true)
 }
@@ -203,16 +188,17 @@ fn delete_other_tabs(app: &mut App) {
         return ()
     }
 
-    let tab = tab_list.list.get(tab_list.current)
-        .expect("Error code 1 at delete_other_tabs in tab.rs!")
-        .to_owned();
+    let tab = tab_list.list[tab_list.current].to_owned();
+    let selected_idx = tab_list.selected_file[tab_list.current];
 
     tab_list.list.clear();
+    tab_list.selected_file.clear();
+
     tab_list.list.push(tab);
+    tab_list.selected_file.push(selected_idx);
     tab_list.current = 0;
 }
 
-#[inline]
 fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool> {
     // Handle tabs index
     let tabs_len = if data.storage {
@@ -222,7 +208,7 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
     };
     let length_width = tabs_len.to_string().chars().count();
 
-    let idx = if tabs_len > 9 {
+    let idx = if !data.single_index && tabs_len > 9 {
         let idx = key.to_digit(10)
             .expect("Failed to parse char to usize!") as u8;
         data.selecting.push(idx);
@@ -255,6 +241,8 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
         return Ok(remove_base(app, idx - 1)?)
     }
 
+    update_current_tab(app);
+
     // Apply storage tabs
     if data.storage {
         return Ok(apply_storage_tabs(app, idx - 1)?)
@@ -269,7 +257,12 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
     if let Some(path) = tab.list.get(idx - 1).cloned() {
         tab.current = idx - 1;
         app.goto_dir(path.0, Some(path.1))?;
-        return Ok(true)
+
+        if let Some(idx) = app.tab_list.selected_file[app.tab_list.current] {
+            if idx != 0 {
+                move_cursor(app, Goto::Index(idx), app.root())?;
+            }
+        }
     }
 
     Ok(true)
@@ -294,6 +287,7 @@ fn apply_storage_tabs(app: &mut App, idx: usize) -> AppResult<bool> {
     }
 
     app.tab_list.current = 0;
+    app.tab_list.selected_file = vec![None; tabs.len()];
     app.tab_list.list = tabs;
 
     let first = app.tab_list.list[0].to_owned();
@@ -368,6 +362,38 @@ fn remove_storage_tabs(app: &mut App, idx: usize) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Update current tab info.
+fn update_current_tab(app: &mut App) {
+    let selected_idx = if app.root() {
+        app.selected_item.parent_selected()
+    } else {
+        app.selected_item.current_selected()
+    };
+
+    let tab = &mut app.tab_list;
+    tab.list[tab.current] = (
+        app.path.to_owned(),
+        app.hide_files
+    );
+    tab.selected_file[tab.current] = selected_idx;
+}
+
+fn select_new(app: &mut App) -> AppResult<()> {
+    let target_tab = app.tab_list.list
+        .get(app.tab_list.current)
+        .expect("Failed when switching tab!")
+        .to_owned();
+    app.goto_dir(target_tab.0, Some(target_tab.1))?;
+
+    if let Some(idx) = app.tab_list.selected_file[app.tab_list.current] {
+        if idx != 0 {
+            move_cursor(app, Goto::Index(idx), app.root())?;
+        }
+    }
+
+    Ok(())
+}
+
 fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<CmdContent> {
     let mut text = Text::raw("[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
 [d] delete tab with number  [s] open tabs from storage  [S] store opening tabs
@@ -386,7 +412,7 @@ fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<CmdContent> {
         if data.storage {
             storage_tab_string(&mut text, _app.tab_list.storage.iter())?;
         } else {
-            tab_string_list(&mut text, _app.tab_list.list.iter());
+            tab_string_list(&mut text, _app.tab_list.list.iter(), _app.tab_list.current);
         }
     }
 
@@ -417,13 +443,24 @@ where I: Iterator<Item = &'a Rc<[Cow<'a, str>]>>
 }
 
 #[inline]
-fn tab_string_list<'a, I>(text: &mut Text, iter: I)
+fn tab_string_list<'a, I>(text: &mut Text, iter: I, current: usize)
 where I: Iterator<Item = &'a (PathBuf, bool)>
 {
     let mut idx = 1;
 
     for e in iter {
-        text.push_line(format!("[{}]: {}\n", idx, e.0.to_string_lossy()));
+        let mut line = Line::default();
+        line.push_span(
+            Span::raw(format!("[{}]", idx))
+                .add_modifier(if current + 1 == idx {
+                    Modifier::REVERSED
+                } else {
+                    Modifier::empty()
+                })
+        );
+        line.push_span(format!(": {}", e.0.to_string_lossy()));
+        
+        text.push_line(line);
         idx += 1;
     }
 }
