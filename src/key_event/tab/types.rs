@@ -12,12 +12,18 @@ pub struct TabState {
     /// Whether the user attempts to save opening tabs.
     pub(super) save_tabs: bool,
 
+    /// Whether just receive a single character of tab index.
+    pub(super) single_index: bool,
+
     /// The cache of selecting number of tabs.
     pub(super) selecting: Vec<u8>,
 }
 
 pub struct TabList<'a> {
     pub(super) current: usize,
+
+    /// The selected file index in every tab.
+    pub(super) selected_file: Vec<Option<usize>>,
 
     /// Store current path & whether hiding files.
     pub(super) list: Vec<(PathBuf, bool)>,
@@ -32,6 +38,7 @@ impl Default for TabState {
             delete: false,
             storage: false,
             save_tabs: false,
+            single_index: false,
             selecting: Vec::new(),
         }
     }
@@ -80,9 +87,18 @@ impl<'a> TabList<'a> {
     pub fn new(path: PathBuf) -> Self {
         TabList {
             list: vec![(path, false)],
+            selected_file: vec![None],
             storage: Vec::new(),
-            current: 0
+            current: 0,
         }
+    }
+
+    pub fn current(&self) -> usize {
+        self.current
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.len()
     }
 }
 

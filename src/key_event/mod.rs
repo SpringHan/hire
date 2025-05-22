@@ -357,8 +357,11 @@ impl AppCommand {
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
             AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,
             AppCommand::QuitAfterOutput => app.quit_after_output = !app.quit_after_output,
+            AppCommand::NextTab         => {tab::next(app)?;},
+            AppCommand::PrevTab         => {tab::prev(app)?;},
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
+            AppCommand::SwitchTab(idx)        => tab::quick_switch(app, idx)?,
             AppCommand::AppendFsName(to_edge) => append_file_name(app, to_edge)?,
             AppCommand::EditMark(single)      => edit::mark_operation(app, single)?,
             AppCommand::Mark(single)          => mark_operation(app, single, in_root)?,

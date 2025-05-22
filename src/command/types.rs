@@ -13,6 +13,8 @@ pub enum AppCommand {
     Delete,
     Search,
     Refresh,
+    NextTab,
+    PrevTab,
     FzfJump,
     CmdShell,
     EditMode,
@@ -31,6 +33,9 @@ pub enum AppCommand {
     /// When the boolean is true, only mark single file.
     Mark(bool),
 
+    /// Switch tab with index.
+    SwitchTab(char),
+
     /// When the boolean is true, scroll down.
     ListScroll(bool),
 
@@ -47,6 +52,7 @@ pub enum AppCommand {
     /// When the boolean value is true, set the working directory;
     /// otherwise jump to the working directory.
     WorkDirectory(bool),
+
 
     /// The value of it is the direction for movement,
     ItemMove(Direction),
@@ -95,6 +101,8 @@ impl AppCommand {
             "search"            => Self::Search,
             "fzf_jump"          => Self::FzfJump,
             "refresh"           => Self::Refresh,
+            "next_tab"          => Self::NextTab,
+            "prev_tab"          => Self::PrevTab,
             "cmdline_shell"     => Self::CmdShell,
             "edit_mode"         => Self::EditMode,
             "create_dir"        => Self::CreateDir,
@@ -109,13 +117,13 @@ impl AppCommand {
             "command_insert"    => Self::CommandInsert,
             "quit_after_output" => Self::QuitAfterOutput,
 
-            "move" => Self::ItemMove(Direction::from_str(
-                option_get!(cmd_arg, command_err)
-            )?),
-
             "list_scroll" => Self::ListScroll(
                 *option_get!(cmd_arg, command_err) == "next"
             ),
+
+            "move" => Self::ItemMove(Direction::from_str(
+                option_get!(cmd_arg, command_err)
+            )?),
 
             "move_candidate" => Self::MoveCandidate(
                 *option_get!(cmd_arg, command_err) == "next"
@@ -144,6 +152,15 @@ impl AppCommand {
                     .collect::<Vec<_>>();
 
                 Self::ShellCommand(command_vec, refresh)
+            },
+
+            "switch_tab" => {
+                let _str = *option_get!(cmd_arg, command_err);
+                if _str.len() < 1 {
+                    bail!("{}", command_err)
+                } else {
+                    Self::SwitchTab(_str.chars().next().unwrap())
+                }
             },
 
             // Edit Mode

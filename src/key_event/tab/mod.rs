@@ -10,7 +10,7 @@ use toml_edit::DocumentMut;
 use crate::{app::App, option_get};
 
 pub use types::TabList;
-pub use utils::tab_operation;
+pub use utils::{tab_operation, quick_switch, prev, next};
 
 pub fn read_config(app: &mut App, document: &DocumentMut) -> anyhow::Result<()> {
     if let Some(item) = document.get("storage_tabs") {
