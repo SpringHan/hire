@@ -92,6 +92,14 @@ impl<'a> TabList<'a> {
             current: 0,
         }
     }
+
+    pub fn current(&self) -> usize {
+        self.current
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
 }
 
 #[cfg(test)]

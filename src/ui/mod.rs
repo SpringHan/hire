@@ -44,12 +44,12 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .split(frame.area());
 
     // Title
-    let item_num = get_item_num_para(app);
+    let (title_right, right_length) = get_title_right_info(app);
     let title_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(100),
-            Constraint::Min(item_num.len() as u16)
+            Constraint::Min(right_length as u16)
         ])
         .split(chunks[0]);
     
@@ -92,10 +92,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
 
     // Item list statistic information
     let item_info_block = Block::default();
-    let item_num_info = Paragraph::new(Line::from(Span::styled(
-        item_num,
-        app.term_colors.file_style
-    )))
+    let item_num_info = title_right
         .alignment(Alignment::Right)
         .block(item_info_block);
 
@@ -214,8 +211,8 @@ fn check_app_error(app: &mut App) {
 }
 
 #[inline(always)]
-fn get_item_num_para(app: &App) -> String {
-    let info = if app.path.to_string_lossy() == "/" {
+fn get_title_right_info(app: &App) -> (Paragraph<'static>, usize) {
+    let item_index = if app.path.to_string_lossy() == "/" {
         format!(
             "{}/{}",
             app.selected_item.parent_selected().unwrap() + 1,
@@ -234,7 +231,22 @@ fn get_item_num_para(app: &App) -> String {
         }
     };
 
-    info
+    let tab_index = format!(
+        "|{}{} ",
+        app.tab_list.current() + 1,
+        if app.tab_list.current() == app.tab_list.len() - 1 {
+            "|"
+        } else {
+            ">"
+        }
+    );
+
+    let length = item_index.len() + tab_index.len();
+    let mut line = Line::default();
+    line.push_span(Span::raw(tab_index).bold());
+    line.push_span(Span::raw(item_index));
+
+    (Paragraph::new(line), length)
 }
 
 fn short_display_path(app: &App) -> String {
