@@ -21,11 +21,15 @@ use super::types::TabState;
 pub fn quick_switch(app: &mut App, key: char) -> AppResult<()> {
     let mut state = TabState::default();
     state.single_index = true;
+
+    update_current_tab(app);
     handle_tabs(app, key, &mut state)?;
     Ok(())
 }
 
 pub fn tab_operation(app: &mut App) -> AppResult<()> {
+    update_current_tab(app);
+
     SwitchCase::new(
         app,
         switch,
@@ -66,8 +70,6 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         'c'       => return Ok(remove_base(app, app.tab_list.current)?),
 
         'S' => {
-            update_current_tab(app);
-
             data.set_saving();
             SwitchCase::new(
                 app,
@@ -145,8 +147,6 @@ pub fn prev(app: &mut App) -> AppResult<bool> {
 // NOTE: As the new tab is created with current directory, there's no need to call goto function.
 #[inline]
 fn create(app: &mut App) {
-    update_current_tab(app);
-
     let tab = &mut app.tab_list;
     tab.list.push((app.path.to_owned(), app.hide_files));
     tab.selected_file.push(None);
@@ -240,8 +240,6 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
 
         return Ok(remove_base(app, idx - 1)?)
     }
-
-    update_current_tab(app);
 
     // Apply storage tabs
     if data.storage {
