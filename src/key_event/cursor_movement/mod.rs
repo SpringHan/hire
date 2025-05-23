@@ -45,13 +45,12 @@ pub fn directory_movement(
 
             let selected_item = &mut app.selected_item;
 
-            selected_item.child_select(selected_item.current_selected());
-            selected_item.current_select(selected_item.parent_selected());
+            swap(&mut selected_item.child, &mut selected_item.current);
+            swap(&mut selected_item.current, &mut selected_item.parent);
+
             selected_item.parent_select(None);
             app.init_parent_files()?;
-            // Normally, calling this function would initialize child_index.
-            // So, use TRUE to keep it.
-            app.refresh_select_item();
+            app.refresh_parent_item();
 
             if app.file_content.is_some() {
                 app.file_content.reset();

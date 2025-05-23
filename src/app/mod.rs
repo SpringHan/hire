@@ -248,6 +248,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Select the first item if it exists, otherwise select None.
     pub fn refresh_child_item(&mut self) {
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
