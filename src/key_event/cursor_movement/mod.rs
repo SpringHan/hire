@@ -135,7 +135,7 @@ pub fn directory_movement(
 
 pub fn move_cursor(
     app: &mut App,
-    goto: Goto,
+    mut goto: Goto,
     in_root: bool
 ) -> AppResult<()>
 {
@@ -151,6 +151,19 @@ pub fn move_cursor(
 
     if selected_item.selected().is_none() {
         return Ok(())
+    }
+
+    // Check range
+    if let Goto::Index(ref mut idx) = goto {
+        let file_length = if in_root {
+            app.parent_files.len()
+        } else {
+            app.current_files.len()
+        };
+
+        if *idx >= file_length {
+            *idx = file_length - 1;
+        }
     }
 
     // Move cursor

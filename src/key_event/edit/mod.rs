@@ -226,9 +226,21 @@ pub fn mark_delete(app: &mut App) -> AppResult<()> {
 
 pub fn item_navigation(
     app: &mut App,
-    direction: Goto,
+    mut direction: Goto,
 ) -> AppResult<()>
 {
+    if let Goto::Index(ref mut idx) = direction {
+        let file_length = if app.root() {
+            app.parent_files.len()
+        } else {
+            app.current_files.len()
+        };
+
+        if *idx >= file_length {
+            *idx = file_length - 1;
+        }
+    }
+
     let edit_ref = &mut app.edit_mode;
     let state = &mut app.selected_item.current;
 
