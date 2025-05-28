@@ -163,7 +163,7 @@ fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
         }
         tab.list.remove(idx);
         tab.selected_file.remove(idx);
-        tab.current -= 1;
+        tab.current = tab.current.saturating_sub(1);
 
         // Focus the previous tab.
         select_new(app)?;
