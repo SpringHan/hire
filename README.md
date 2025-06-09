@@ -156,7 +156,7 @@ keymap = [
 - [x] Add Edit mode for more convenient file editing
 - [ ] Refactor the project
 - [ ] Highlight for file preview
-- [ ] Migrate to Rust 2024 Edition
+- [x] Migrate to Rust 2024 Edition
 
 ## LICENSE
 MIT

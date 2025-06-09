@@ -165,9 +165,11 @@ where P: AsRef<Path>
         _ => {
             refresh = true;
 
-            if let ConfigValue::String(
-                ref _str
-            ) = Config::get_value(&app.config, "file_read_program") {
+            if let ConfigValue::String(_str) = Config::get_value(
+                &app.config,
+                "file_read_program"
+            )
+            {
                 _str.as_ref().to_owned()
             } else {
                 panic!("Unknown error occurred at open_file_in_shell fn in utils.rs!")

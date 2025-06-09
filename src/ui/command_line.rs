@@ -127,7 +127,7 @@ pub fn render_command_line<'a>(
 
         AppBlock::CommandLine(ref input, cursor) => {
             let block = Block::default();
-            let para = if let CmdContent::Text(ref text) = input {
+            let para = if let CmdContent::Text(text) = input {
                 Paragraph::new(text.to_owned())
             } else {
                 Paragraph::new(Line::from(
