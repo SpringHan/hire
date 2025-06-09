@@ -79,13 +79,16 @@ pub fn shell_process(
         }
     }
 
-    process.current_dir(&app.path);
 
+    // Preparation for running process
+    process.current_dir(&app.path);
 
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, Show)?;
 
     process.spawn()?.wait()?;
+
+    enable_raw_mode()?;
 
     // Wait for user press
     if wait_for_press {
@@ -101,7 +104,6 @@ pub fn shell_process(
         }
     }
 
-    enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
 
