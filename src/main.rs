@@ -67,8 +67,10 @@ fn main() -> AppResult<()> {
                     if key.code == KeyCode::Char('q') &&
                         key.modifiers.is_empty()
                     {
-                        if let utils::Block::Browser(_) = app.selected_block {
-                            break;
+                        match check_quit_condition(&mut app) {
+                            QuitCheckRes::Quit => break,
+                            QuitCheckRes::Reset => continue,
+                            QuitCheckRes::Continue => (),
                         }
                     }
 
@@ -167,4 +169,58 @@ fn check_start_path(args: &utils::Args, app: &mut App) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+
+// Check before quit
+
+enum QuitCheckRes {
+    Quit,
+
+    /// Stop running following code & start a new loop.
+    Reset,
+
+    /// Continue to run `handle_event` for 'q'.
+    Continue
+}
+
+/// Conditions to check before quiting.
+fn check_quit_condition(app: &mut App) -> QuitCheckRes {
+    if let utils::Block::CommandLine(_, _) = app.selected_block {
+        return QuitCheckRes::Continue
+    }
+
+    use ratatui::style::Stylize;
+    use crate::key_event::{SwitchCase, SwitchCaseData};
+
+    if app.tab_list.len() > 1 {
+        SwitchCase::new(
+            app,
+            really_quit,
+            false,
+            crate::utils::CmdContent::Text(
+                Text::raw(
+                    "There're other tabs opened, are you sure to quit? (y for yes)",
+                ).red()
+            ),
+            SwitchCaseData::None
+        );
+        return QuitCheckRes::Reset
+    }
+
+    QuitCheckRes::Quit
+}
+
+/// Really quit hire?
+fn really_quit(
+    app: &mut App,
+    key: char,
+    _: crate::key_event::SwitchCaseData
+) -> AppResult<bool>
+{
+    if key == 'y' {
+        app.quit_now = true;
+    }
+
+    Ok(true)
 }
