@@ -26,6 +26,7 @@ use paste_operation::paste_operation;
 use cursor_movement::{directory_movement, jump_to_index};
 use file_operations::{append_file_name, delete_operation, mark_operation};
 
+use crate::key_event::simple_operations::jump_to_temp_file;
 use crate::rt_error;
 use crate::app::App;
 use crate::error::AppResult;
@@ -342,13 +343,16 @@ impl AppCommand {
     ) -> AppResult<()>
     {
         match self {
+            AppCommand::NextTab         => {tab::next(app)?;},
+            AppCommand::PrevTab         => {tab::prev(app)?;},
             AppCommand::Tab             => tab_operation(app)?,
             AppCommand::Goto            => goto_operation(app),
             AppCommand::Paste           => paste_operation(app)?,
             AppCommand::Delete          => delete_operation(app),
             AppCommand::ShowNaviIndex   => app.navi_index.init(),
-            AppCommand::OutputFile      => output_path(app, true)?,
             AppCommand::MarkExpand      => app.mark_expand = true,
+            AppCommand::OutputFile      => output_path(app, true)?,
+            AppCommand::GotoFile        => jump_to_temp_file(app)?,
             AppCommand::EditDelete      => edit::mark_delete(app)?,
             AppCommand::HideOrShow      => app.hide_or_show(None)?,
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
@@ -357,8 +361,7 @@ impl AppCommand {
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
             AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,
             AppCommand::QuitAfterOutput => app.quit_after_output = !app.quit_after_output,
-            AppCommand::NextTab         => {tab::next(app)?;},
-            AppCommand::PrevTab         => {tab::prev(app)?;},
+
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
             AppCommand::SwitchTab(idx)        => tab::quick_switch(app, idx)?,

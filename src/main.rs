@@ -150,7 +150,7 @@ fn shell_in_workdir(
 /// Check whether to enter passive output mode.
 fn check_output(args: &utils::Args, app: &mut App) {
     if &args.output_file != "NULL" {
-        app.output_file = args.output_file.to_owned();
+        app.temp_file = args.output_file.to_owned();
     }
 
     app.quit_after_output = args.quit_after_output;

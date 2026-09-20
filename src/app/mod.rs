@@ -92,8 +92,8 @@ pub struct App<'a> {
 
     // Output
     pub quit_after_output: bool,
-    /// The file to store output of path from app.
-    pub output_file: String,
+    /// The temporary file for communicating between hire and other programs.
+    pub temp_file: String,
 
     // Computer & User name
     pub user_name: Cow<'static, str>,
@@ -153,7 +153,7 @@ impl<'a> Default for App<'a> {
 
             // Output
             quit_after_output: false,
-            output_file: String::from("/tmp/hire.tmp"),
+            temp_file: String::from("/tmp/hire.tmp"),
 
             // Config & others
             quit_now: false,
@@ -712,6 +712,7 @@ impl<'a> App<'a> {
 
 // Other Action
 impl<'a> App<'a> {
+    /// Jump to `dir` directory.
     pub fn goto_dir<P: AsRef<Path>>(&mut self,
                                     dir: P,
                                     hide_files: Option<bool>

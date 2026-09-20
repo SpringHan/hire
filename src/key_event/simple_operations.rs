@@ -1,8 +1,9 @@
 // Simple operations.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::fs::OpenOptions;
 
+use crate::rt_error;
 use crate::utils::CmdContent;
 use crate::error::{AppResult, ErrorType};
 
@@ -48,7 +49,7 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
         .create(true)
         .write(true)
         .truncate(true)
-        .open(&app.output_file)?;
+        .open(&app.temp_file)?;
 
     file.write(output.to_string_lossy().as_bytes())?;
 
@@ -56,5 +57,32 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
         app.quit_now = true;
     }
 
+    Ok(())
+}
+
+pub fn jump_to_temp_file(app: &mut App) -> AppResult<()> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&app.temp_file);
+
+    if let Err(err) = file {
+        if let std::io::ErrorKind::NotFound = err.kind() {
+            rt_error!("The temp file is not exists!")
+        } else {
+            return Err(err.into())
+        }
+    }
+
+    let mut file = file.unwrap();
+    let mut target_path = String::new();
+    file.read_to_string(&mut target_path)?;
+    file.set_len(0)?;
+
+    if target_path.trim().is_empty() {
+        return Ok(())
+    }
+
+    app.goto_dir(target_path.trim(), None)?;
     Ok(())
 }
