@@ -51,7 +51,7 @@ keymap = [
 
     # Others
     { key = "R",  run = "refresh"           },  # Refresh file list
-    { key = "F",  run = "fzf_jump"          },  # Fuzzy find and jump to file
+    { key = "j",  run = "fzf_jump"          },  # Fuzzy find and jump to file
     { key = "D",  run = "vim_diff"          },  # Exec 'vim-diff' to marked & selected files
     { key = "f",  run = "rg_search"         },  # Jump to target file with 'rg'
     { key = "P",  run = "full_path"         },  # Print full path of current file
