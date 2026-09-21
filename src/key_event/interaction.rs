@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use ratatui::DefaultTerminal;
 
 use super::{shell::fetch_output, CommandStr, ShellCommand};
-use crate::{app::App, error::AppResult, option_get, rt_error};
+use crate::{app::App, error::{AppResult, ErrorType}, key_event::shell_process, option_get, rt_error};
 
 pub fn fzf_jump(
     app: &mut App,
@@ -87,6 +87,60 @@ pub fn rg_jump(
 
     app.goto_dir(target_path.parent().unwrap(), None)?;
     app.file_search_sync(target_file, true)?;
+
+    Ok(())
+}
+
+pub fn vim_diff(
+    app: &mut App,
+    terminal: &mut DefaultTerminal
+) -> AppResult<()>
+{
+    if app.marked_files.is_empty() {
+        return Err(ErrorType::NoSelected.pack())
+    }
+
+    // Get marked file name.
+    let mut marked_file = String::new();
+
+    'outer: for (path, files) in app.marked_files.iter() {
+        for (file, _) in files.files.iter() {
+            marked_file = path
+                .join(file)
+                .into_os_string()
+                .into_string()
+                .expect("Failed to get marked file!");
+            break 'outer;
+        }
+    }
+
+    // Get selected file name.
+    let file_saver = app.get_file_saver();
+    if let None = file_saver {
+        return Err(ErrorType::NoSelected.pack())
+    }
+
+    let selected_file = app.path
+        .join(&file_saver.unwrap().name)
+        .into_os_string()
+        .into_string()
+        .expect("Failed to get selected file!");
+
+    app.marked_files.clear();
+    shell_process(
+        app,
+        terminal,
+        ShellCommand::Command(
+            None,
+            CommandStr::from_strs(vec![
+                "vim",
+                "-d",
+                &selected_file,
+                &marked_file
+            ])
+        ),
+        false
+    )?;
 
     Ok(())
 }

@@ -357,6 +357,7 @@ impl AppCommand {
             AppCommand::HideOrShow      => app.hide_or_show(None)?,
             AppCommand::RgSearch        => rg_jump(app, terminal)?,
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
+            AppCommand::VimDiff         => vim_diff(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
