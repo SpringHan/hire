@@ -5,7 +5,7 @@ use std::{borrow::Cow, ops::{AddAssign, SubAssign}};
 use ratatui::widgets::ListState;
 
 use crate::{
-    utils::{Block, CursorPos},
+    utils::{Block, CmdContent, CursorPos},
     error::AppResult,
     utils::str_split,
     option_get,
@@ -58,6 +58,12 @@ impl<'a> AppCompletion<'a> {
 }
 
 pub fn completion(app: &mut App) -> AppResult<()> {
+    // When the cursor is placed right after a space, complete the name of
+    // the item selected in the file browser before the cursor.
+    if complete_selected_item(app) {
+        return Ok(())
+    }
+
     if !app.command_completion.candidates.is_empty() {
         app.command_completion.show_frame = true;
         return Ok(())
@@ -291,6 +297,90 @@ impl<'a> App<'a> {
     }
 }
 
+/// Complete the name of the item selected in the file browser into the
+/// command line when the cursor is placed right after a space.
+///
+/// Return true if the name has been inserted.
+fn complete_selected_item(app: &mut App) -> bool {
+    if !command_line_after_space(&app.selected_block) {
+        return false
+    }
+
+    let selected_name = match app.get_file_saver() {
+        Some(file) => file.name.to_owned(),
+        None => return false,
+    };
+
+    // The previous completion is meaningless after inserting a new name.
+    app.command_completion.reset();
+
+    insert_before_cursor(&mut app.selected_block, &selected_name)
+}
+
+/// Check whether the cursor of the command line is placed right after a space.
+///
+/// The cursor represented by `CursorPos::Index` points at the character that
+/// should be kept on the right side of the insertion point, so the character
+/// before the insertion point is located at `idx - 1`.
+fn command_line_after_space(app_block: &Block) -> bool {
+    let (content, cursor) = if let Block::CommandLine(
+        CmdContent::String(ref content),
+        cursor
+    ) = *app_block {
+        (content, cursor)
+    } else {
+        return false
+    };
+
+    match cursor {
+        CursorPos::Index(idx) => {
+            // `idx` is an index into `content`, which may equal its length
+            // when the cursor is at the end of the content.
+            idx <= content.len() &&
+                idx > 0 &&
+                content.as_bytes()[idx - 1] == b' '
+        },
+        CursorPos::End => content.as_bytes().last() == Some(&b' '),
+        CursorPos::None => false,
+    }
+}
+
+/// Insert `text` right before the cursor and move the cursor to the end of
+/// the inserted text.
+///
+/// Return true if the insertion is done.
+fn insert_before_cursor(app_block: &mut Block, text: &str) -> bool {
+    if let Block::CommandLine(
+        CmdContent::String(ref mut content),
+        ref mut cursor
+    ) = *app_block {
+        match cursor {
+            CursorPos::Index(idx) => {
+                if *idx > content.len() {
+                    return false
+                }
+
+                content.insert_str(*idx, text);
+
+                // When the cursor reaches the end of the content, use `End`
+                // instead of an index which is out of the content.
+                let new_idx = *idx + text.len();
+                *cursor = if new_idx == content.len() {
+                    CursorPos::End
+                } else {
+                    CursorPos::Index(new_idx)
+                };
+            },
+            CursorPos::End => content.push_str(text),
+            CursorPos::None => return false,
+        }
+
+        return true
+    }
+
+    false
+}
+
 /// Return true if the completion candidates is updated.
 fn update_completion(
     app: &mut App,
@@ -342,4 +432,181 @@ fn update_completion(
     completion.selected_item.select(Some(0));
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::FileSaver;
+
+    fn command_block(content: &str, cursor: CursorPos) -> Block {
+        Block::CommandLine(
+            CmdContent::String(content.to_owned()),
+            cursor
+        )
+    }
+
+    fn command_content(app_block: &Block) -> &str {
+        if let Block::CommandLine(CmdContent::String(ref content), _) = *app_block {
+            content
+        } else {
+            panic!("The block is not an editable command line!")
+        }
+    }
+
+    fn command_cursor(app_block: &Block) -> CursorPos {
+        if let Block::CommandLine(_, cursor) = *app_block {
+            cursor
+        } else {
+            panic!("The block is not a command line!")
+        }
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    fn app_with_files(selected: usize, files: &[&str]) -> App<'static> {
+        let mut app = App::default();
+        app.current_files = files
+            .iter()
+            .map(|name| {
+                let mut file = FileSaver::default();
+                file.name = String::from(*name);
+                file
+            })
+            .collect();
+        app.selected_item.current_select(Some(selected));
+        app
+    }
+
+    #[test]
+    fn test_command_line_after_space() {
+        // The cursor is at the end and right after a space.
+        assert!(command_line_after_space(
+            &command_block(":create_file ", CursorPos::End)
+        ));
+
+        // The cursor is on the character right after a space.
+        assert!(command_line_after_space(
+            &command_block(":create_file test", CursorPos::Index(13))
+        ));
+
+        // The cursor is on a character which is not right after a space.
+        assert!(!command_line_after_space(
+            &command_block(":create_file test", CursorPos::Index(14))
+        ));
+
+        // The cursor is at the beginning of the command line.
+        assert!(!command_line_after_space(
+            &command_block(":create_file ", CursorPos::Index(0))
+        ));
+
+        // The cursor is at the end without a space before it.
+        assert!(!command_line_after_space(
+            &command_block(":create_file", CursorPos::End)
+        ));
+
+        // The command line is not editable.
+        assert!(!command_line_after_space(
+            &Block::CommandLine(
+                CmdContent::String(String::from(":create_file ")),
+                CursorPos::None
+            )
+        ));
+
+        // The block is not a command line.
+        assert!(!command_line_after_space(&Block::Browser(false)));
+    }
+
+    #[test]
+    fn test_insert_before_cursor() {
+        // Insert before the character under the cursor.
+        let mut block = command_block(
+            ":create_file test",
+            CursorPos::Index(13)
+        );
+        assert!(insert_before_cursor(&mut block, "name"));
+        assert_eq!(command_content(&block), ":create_file nametest");
+        assert!(matches!(
+            command_cursor(&block),
+            CursorPos::Index(17)
+        ));
+
+        // Insert at the end of the command line.
+        let mut block = command_block(":create_file ", CursorPos::End);
+        assert!(insert_before_cursor(&mut block, "test"));
+        assert_eq!(command_content(&block), ":create_file test");
+        assert!(matches!(command_cursor(&block), CursorPos::End));
+
+        // The cursor is set to `End` when the inserted text reaches the end
+        // of the command line, even if the cursor was an index.
+        let mut block = command_block(":create_file ", CursorPos::Index(13));
+        assert!(insert_before_cursor(&mut block, "test"));
+        assert_eq!(command_content(&block), ":create_file test");
+        assert!(matches!(command_cursor(&block), CursorPos::End));
+
+        // Refuse to insert into a non-editable command line.
+        let mut block = Block::CommandLine(
+            CmdContent::String(String::from(":create_file ")),
+            CursorPos::None
+        );
+        assert!(!insert_before_cursor(&mut block, "test"));
+        assert_eq!(command_content(&block), ":create_file ");
+
+        // Refuse to insert into another kind of block.
+        assert!(!insert_before_cursor(&mut Block::Browser(false), "test"));
+    }
+
+    #[test]
+    fn test_complete_selected_item() {
+        // The name of the selected item is inserted when the cursor is right
+        // after a space.
+        let mut app = app_with_files(1, &["aaa.txt", "target.txt"]);
+        app.selected_block = command_block(":!cat ", CursorPos::End);
+
+        completion(&mut app).unwrap();
+        assert_eq!(
+            command_content(&app.selected_block),
+            ":!cat target.txt"
+        );
+        assert!(matches!(
+            command_cursor(&app.selected_block),
+            CursorPos::End
+        ));
+        assert!(app.command_completion.candidates.is_empty());
+
+        // The name is inserted before the cursor when the cursor is in the
+        // middle of the command line.
+        app.selected_block = command_block(":!cat  --help", CursorPos::Index(6));
+        completion(&mut app).unwrap();
+        assert_eq!(
+            command_content(&app.selected_block),
+            ":!cat target.txt --help"
+        );
+        assert!(matches!(
+            command_cursor(&app.selected_block),
+            CursorPos::Index(16)
+        ));
+    }
+
+    #[test]
+    fn test_original_completion_kept() {
+        // The builtin completion still works when there's no space before the
+        // cursor.
+        let mut app = app_with_files(1, &["aaa.txt", "target.txt"]);
+        app.selected_block = command_block(":ren", CursorPos::End);
+
+        completion(&mut app).unwrap();
+        assert_eq!(command_content(&app.selected_block), ":rename");
+        assert_eq!(app.command_completion.candidates.len(), 1);
+
+        // The file completion still works for a partial word.
+        let mut app = app_with_files(1, &["aaa.txt", "target.txt"]);
+        app.selected_block = command_block(":!cat ta", CursorPos::End);
+
+        completion(&mut app).unwrap();
+        assert_eq!(
+            command_content(&app.selected_block),
+            ":!cat target.txt"
+        );
+        assert_eq!(app.command_completion.candidates.len(), 1);
+    }
 }
