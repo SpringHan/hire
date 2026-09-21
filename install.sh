@@ -33,3 +33,9 @@ echo "--- Copied executable file to target path ---"
 mkdir -p "$HOME/.config/springhan/hire/"
 cp "keymap_config/$keymap" "$HOME/.config/springhan/hire/keymap.toml"
 echo "--- Copied keymap config file to config path ---"
+
+# Copy scrpits
+chmod +x ./scripts/hire-rg.sh
+mkdir -p "$HOME/.config/springhan/hire/scripts/"
+cp "scrpits/*" "$HOME/.config/springhan/hire/scripts/"
+echo "--- Copied scrpits to config path ---"

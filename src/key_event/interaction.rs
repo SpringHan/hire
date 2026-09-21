@@ -1,5 +1,7 @@
 // Interaction with other Terminal tools.
 
+use std::path::PathBuf;
+
 use ratatui::DefaultTerminal;
 
 use super::{shell::fetch_output, CommandStr, ShellCommand};
@@ -47,6 +49,44 @@ pub fn fzf_jump(
     if let Some(name) = file_name {
         app.file_search_sync(name, true)?;
     }
+
+    Ok(())
+}
+
+pub fn rg_jump(
+    app: &mut App,
+    terminal: &mut DefaultTerminal
+) -> AppResult<()>
+{
+    let home_dir = std::env::home_dir().unwrap();
+    let script_path = format!(
+        "{}/.config/springhan/hire/scripts/hire-rg.sh",
+        home_dir.to_string_lossy()
+    );
+
+    let target = fetch_output(
+        terminal,
+        &app.path,
+        ShellCommand::Command(
+            None,
+            CommandStr::from_strs(vec![&script_path])
+        )
+    )?;
+
+    if target.is_empty() {
+        return Ok(())
+    }
+
+    let target_path = PathBuf::from(target.trim());
+    let target_file = target_path
+        .file_name()
+        .unwrap()
+        .to_os_string()
+        .into_string()
+        .unwrap();
+
+    app.goto_dir(target_path.parent().unwrap(), None)?;
+    app.file_search_sync(target_file, true)?;
 
     Ok(())
 }

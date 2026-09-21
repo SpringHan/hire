@@ -19,8 +19,8 @@ use command_line::completion;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use interaction::*;
 use tab::tab_operation;
-use interaction::fzf_jump;
 use goto_operation::goto_operation;
 use paste_operation::paste_operation;
 use cursor_movement::{directory_movement, jump_to_index};
@@ -355,6 +355,7 @@ impl AppCommand {
             AppCommand::GotoFile        => jump_to_temp_file(app)?,
             AppCommand::EditDelete      => edit::mark_delete(app)?,
             AppCommand::HideOrShow      => app.hide_or_show(None)?,
+            AppCommand::RgSearch        => rg_jump(app, terminal)?,
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),

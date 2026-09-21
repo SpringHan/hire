@@ -51,7 +51,8 @@ keymap = [
 
     # Others
     { key = "R",  run = "refresh"           },  # Refresh file list
-    { key = "f",  run = "fzf_jump"          },  # Fuzzy find and jump to file
+    { key = "F",  run = "fzf_jump"          },  # Fuzzy find and jump to file
+    { key = "f",  run = "rg_search"         },  # Jump to target file with 'rg'
     { key = "P",  run = "full_path"         },  # Print full path of current file
     { key = "i",  run = "edit_mode"         },  # Enter edit mode
     { key = "\"", run = "goto_file"         },  # Goto path stored in `temp-file`
