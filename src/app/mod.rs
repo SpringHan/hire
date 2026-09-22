@@ -2,6 +2,7 @@
 
 mod color;
 mod filesaver;
+mod macro_utils;
 mod image_preview;
 
 use std::{env, fs, io};
@@ -26,6 +27,7 @@ use crate::utils::{
     Block,
 };
 
+pub use macro_utils::*;
 pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
 
@@ -63,6 +65,9 @@ pub struct App<'a> {
 
     // Search file
     pub file_searcher: FileSearcher,
+
+    // Macro
+    pub macro_attri: Macro,
 
     // ColorScheme
     pub term_colors: TermColors,
@@ -158,6 +163,7 @@ impl<'a> Default for App<'a> {
             // Config & others
             quit_now: false,
             config: Vec::new(),
+            macro_attri: Macro::new(),
             keymap: Keymap::default(),
             config_path: String::new(),
             user_name: Cow::from(host_info.1),

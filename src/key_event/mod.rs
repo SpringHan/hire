@@ -4,6 +4,7 @@ mod tab;
 mod edit;
 mod shell;
 mod switch;
+mod macro_page;
 mod interaction;
 mod file_search;
 mod command_line;
@@ -38,6 +39,7 @@ pub use tab::TabList;
 pub use file_search::FileSearcher;
 pub use edit::{EditMode, EditItem};
 pub use simple_operations::output_path;
+pub use macro_page::execute_macro;
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
@@ -359,6 +361,7 @@ impl AppCommand {
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
             AppCommand::VimDiff         => vim_diff(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
+            AppCommand::MacroPage       => macro_page::macro_operation(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
             AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,

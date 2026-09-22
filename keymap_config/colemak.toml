@@ -9,6 +9,7 @@ keymap = [
     { key = "V", run = "list_scroll prev" },  # Scroll list view up
 
     # Operations with menu
+    { key = "Q", run = "macro_page"       },  # Open macro operations menu
     { key = "t", run = "tab_operation"    },  # Open tab operations menu
     { key = "g", run = "goto_operation"   },  # Open goto operations menu
     { key = "p", run = "paste_operation"  },  # Open paste operations menu

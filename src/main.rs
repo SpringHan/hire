@@ -13,11 +13,12 @@ use ratatui::text::Text;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, KeyCode, KeyEventKind};
 
-use app::App;
 use error::AppResult;
 use utils::FileContent;
+use app::{App, MacroStatus};
 use key_event::{
     ShellCommand,
+    execute_macro,
     handle_event,
     shell_process,
     fetch_working_directory,
@@ -46,6 +47,8 @@ fn main() -> AppResult<()> {
             break;
         }
 
+        macro_check_before_key(&mut app, &mut terminal);
+
         terminal.draw(|frame| {
             if initial {
                 initial = false;
@@ -67,6 +70,11 @@ fn main() -> AppResult<()> {
                     if key.code == KeyCode::Char('q') &&
                         key.modifiers.is_empty()
                     {
+                        if app.macro_attri.status == MacroStatus::Recording {
+                            app.macro_attri.status = MacroStatus::None;
+                            continue;
+                        }
+
                         match check_quit_condition(&mut app) {
                             QuitCheckRes::Quit => break,
                             QuitCheckRes::Reset => continue,
@@ -74,6 +82,7 @@ fn main() -> AppResult<()> {
                         }
                     }
 
+                    macro_check_with_key(&mut app, key);
                     let result = handle_event(key, &mut app, &mut terminal);
                     if let Err(err) = result {
                         app.app_error.append_errors(err.iter());
@@ -171,6 +180,25 @@ fn check_start_path(args: &utils::Args, app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
+// Macro Details
+/// Macro Check before key event monitoring.
+fn macro_check_before_key(app: &mut App, terminal: &mut DefaultTerminal) {
+    if app.macro_attri.status == MacroStatus::Executing {
+        let result = execute_macro(app, terminal);
+        app.macro_attri.status = MacroStatus::None;
+
+        if let Err(err) = result {
+            app.app_error.append_errors(err.iter());
+        }
+    }
+}
+
+/// Macro check when key event monitor is working.
+fn macro_check_with_key(app: &mut App, key: event::KeyEvent) {
+    if app.macro_attri.status == MacroStatus::Recording {
+        app.macro_attri.record_key(key);
+    }
+}
 
 // Check before quit
 

@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, MacroStatus};
 use crate::utils::{CmdContent, CursorPos};
 
 /// The widget to show states, such as file permission, size, etc.
@@ -97,26 +97,10 @@ pub fn render_command_line<'a>(
                 lines.push(Line::raw("").alignment(Alignment::Left));
             }
 
-            if app.mark_expand {
-                let mut style = app.term_colors.marked_style;
-                if style.bg.is_some() {
-                    style.bg = None;
-                }
-
-                lines.push(Line::styled(
-                    "EXPAND",
-                    style.add_modifier(Modifier::BOLD)
-                ).alignment(Alignment::Right));
-            } else if app.quit_after_output {
-                let mut style = app.term_colors.symlink_style;
-                if style.bg.is_some() {
-                    style.bg = None;
-                }
-
-                lines.push(Line::styled(
-                    "QUIT",
-                    style.add_modifier(Modifier::BOLD)
-                ).alignment(Alignment::Right));
+            // Status labels shown on the right side of the state line.
+            let labels = state_labels(app);
+            if !labels.is_empty() {
+                lines.push(Line::from(labels).alignment(Alignment::Right));
             }
 
             frame.render_widget(
@@ -143,6 +127,61 @@ pub fn render_command_line<'a>(
             frame.render_widget(para, area);
         }
     }
+}
+
+/// Build the status labels which are shown at the right side of the state line.
+///
+/// The labels are always ordered as `EXPAND -- RECORDING -- QUIT`, and every
+/// label is only included when its condition is satisfied.
+fn state_labels(app: &App) -> Vec<Span<'static>> {
+    let mut labels: Vec<Span> = Vec::new();
+
+    if app.mark_expand {
+        let mut style = app.term_colors.marked_style;
+        if style.bg.is_some() {
+            style.bg = None;
+        }
+
+        labels.push(
+            Span::styled("EXPAND", style.add_modifier(Modifier::BOLD))
+        );
+    }
+
+    if app.macro_attri.status == MacroStatus::Recording {
+        labels.push(
+            Span::styled(
+                "-- RECORDING --",
+                Style::default().red().add_modifier(Modifier::BOLD)
+            )
+        );
+    }
+
+    if app.quit_after_output {
+        let mut style = app.term_colors.symlink_style;
+        if style.bg.is_some() {
+            style.bg = None;
+        }
+
+        labels.push(
+            Span::styled("QUIT", style.add_modifier(Modifier::BOLD))
+        );
+    }
+
+    if labels.len() < 2 {
+        return labels
+    }
+
+    // Separate the labels with a space.
+    let mut separated: Vec<Span> = Vec::new();
+    for (idx, label) in labels.into_iter().enumerate() {
+        if idx != 0 {
+            separated.push(Span::raw(" "));
+        }
+
+        separated.push(label);
+    }
+
+    separated
 }
 
 /// Create Paragraph structure with different color.
