@@ -106,7 +106,7 @@ fn delete_switch(
                             in_root
                         )?;
                     }
-                    app.goto_dir(current_dir, None)?;
+                    app.goto_dir(current_dir, Some(app.hide_files))?;
                     app.marked_files.clear();
                     app.mark_expand = false;
 
