@@ -83,6 +83,7 @@ pub fn jump_to_temp_file(app: &mut App) -> AppResult<()> {
         return Ok(())
     }
 
+    app.record_path_history();
     app.goto_dir(target_path.trim(), None)?;
     Ok(())
 }

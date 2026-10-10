@@ -7,6 +7,7 @@ mod switch;
 mod macro_page;
 mod interaction;
 mod file_search;
+mod path_history;
 mod command_line;
 mod goto_operation;
 mod cursor_movement;
@@ -25,6 +26,7 @@ use tab::tab_operation;
 use goto_operation::goto_operation;
 use paste_operation::paste_operation;
 use cursor_movement::{directory_movement, jump_to_index};
+use path_history::{goto_prev_path, path_history_operation};
 use file_operations::{append_file_name, delete_operation, mark_operation};
 
 use crate::key_event::simple_operations::jump_to_temp_file;
@@ -355,12 +357,14 @@ impl AppCommand {
             AppCommand::MarkExpand      => app.mark_expand = true,
             AppCommand::OutputFile      => output_path(app, true)?,
             AppCommand::GotoFile        => jump_to_temp_file(app)?,
+            AppCommand::PrevPath        => goto_prev_path(app)?,
             AppCommand::EditDelete      => edit::mark_delete(app)?,
             AppCommand::HideOrShow      => app.hide_or_show(None)?,
             AppCommand::RgSearch        => rg_jump(app, terminal)?,
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
             AppCommand::VimDiff         => vim_diff(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
+            AppCommand::PathHistory     => path_history_operation(app),
             AppCommand::MacroPage       => macro_page::macro_operation(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
@@ -482,7 +486,13 @@ impl AppCommand {
                     app.path.to_owned()
                 )?
             } else {
-                app.goto_dir(fetch_working_directory()?, None)?
+                let working_dir = fetch_working_directory()?;
+
+                // Do nothing when the user is already in the working directory.
+                if app.path != working_dir {
+                    app.record_path_history();
+                    app.goto_dir(working_dir, None)?;
+                }
             },
 
             AppCommand::GotoBottom => {

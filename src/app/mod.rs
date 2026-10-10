@@ -75,6 +75,10 @@ pub struct App<'a> {
     // Target directories
     pub target_dir: HashMap<char, String>,
 
+    /// The paths jumped from, the oldest one is stored at the first place.
+    /// The length of it will never be more than 30.
+    pub path_history: Vec<PathBuf>,
+
     // Tab
     pub tab_list: crate::key_event::TabList<'a>,
 
@@ -139,6 +143,7 @@ impl<'a> Default for App<'a> {
             switch_case: None,
             mark_expand: false,
             command_scroll: None,
+            path_history: Vec::new(),
             target_dir: HashMap::new(),
             marked_files: HashMap::new(),
             edit_mode: EditMode::default(),

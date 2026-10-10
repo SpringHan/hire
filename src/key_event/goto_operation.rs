@@ -76,6 +76,7 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
                 '\0' => {
                     let target_path = app.target_dir.get(&k).cloned();
                     if let Some(path) = target_path {
+                        app.record_path_history();
                         app.goto_dir(path, None)?;
                     }
                 },

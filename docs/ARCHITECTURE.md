@@ -16,30 +16,33 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
 
 Hire is an event-driven application built around one mutable state object, `App`.
 
-```
-                  ┌───────────────────────────────────────────────┐
-                  │                   main.rs                     │
-                  │  CLI args → App::default() → init_config()    │
-                  │                                               │
-                  │  loop {                                       │
-                  │      execute pending macro                    │
-                  │      ui::ui(frame, &mut app)   // draw        │
-                  │      poll/read terminal key event             │
-                  │      handle_event(key, &mut app, terminal)    │
-                  │      drain search / image channels            │
-                  │  }                                            │
-                  └───────────────────────┬───────────────────────┘
-                                          │
-             key event                    │                    render
-                 │                        ▼                        │
-     ┌───────────┴───────────┐   ┌─────────────────┐   ┌─────────┴──────────┐
-     │  key_event::handle_   │   │   app::App      │   │   ui::ui           │
-     │  event                │──▶│  (all state)    │◀──│  (reads state)     │
-     │  → AppCommand         │   │                 │   │                    │
-     │  → AppCommand::execute│──▶│  Block: Browser │   │  parent/current/   │
-     └───────────────────────┘   │   or CommandLine│   │  child/file/cmdline│
-                                 └─────────────────┘   └────────────────────┘
-```
+### Prcoess
+1. CLI args → App::default() → init_config()
+2. loop:
+   a. execute pending macro
+   b. ui::ui(frame, &mut app)
+   c. poll/read terminal key event
+   d. handle_event(key, &mut app, terminal)
+   e. drain search / image channels
+
+### Modules
+
+- `main.rs` — Entrance, start the main loop
+- `key_event::handle_event` — Handle key input
+  - Input：key event
+  - Outupt：AppCommand
+  - Function call：AppCommand::execute
+- `app::App` — Global state Container
+  - Block::Browser | Block::CommandLine
+- `ui::ui` — Only read state of App and render ui
+  - Render areas：parent / current / child / file / cmdline
+
+### Data stream
+
+key event → key_event::handle_event → AppCommand → AppCommand::execute → App
+                                                                          ↑
+ui::ui Read state of App ←───────────────────────────────────────────────┘
+
 
 Key architectural traits:
 
@@ -143,9 +146,9 @@ Responsibilities:
   (`parent_files`, `current_files`, `child_files`) and their `ItemIndex`
   selection states; `file_content`; the active `selected_block`; marked files;
   command-line/command-history state; completion state; the file searcher;
-  macro attributes; `TermColors`; bookmarks (`target_dir`); tabs; image
-  preview; edit mode; keymap; loaded config; error queue; output settings;
-  host/user names.
+  macro attributes; `TermColors`; bookmarks (`target_dir`); path history
+  (`path_history`); tabs; image preview; edit mode; keymap; loaded config;
+  error queue; output settings; host/user names.
 - File-list lifecycle: `init_all_files`, `init_parent_files`,
   `init_current_files`, `init_child_files`, `read_files`, `refresh_parent_item`,
   `refresh_current_item`, `refresh_child_item`, `refresh_select_item`,
@@ -187,9 +190,9 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (set/append/quit/parse, history, expand). |
 
 **`command/types.rs`** — `AppCommand` enumerates every user-triggerable action
-(tab/goto/paste/delete/search/refresh, edit mode, navi index, shell commands,
-`shell_command` from the keymap, etc.). `from_str` parses the `run = "…"` value
-of a keymap entry.
+(tab/goto/paste/delete/search/refresh, path history (`PrevPath` / `PathHistory`),
+edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
+`from_str` parses the `run = "…"` value of a keymap entry.
 
 **`command/cmd_utils.rs`** — extends `App` and `Block`:
 
@@ -257,6 +260,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/goto_operation.rs` | Bookmark ("goto") menu; persists bookmarks to `auto_config.toml`. |
 | `key_event/interaction.rs` | External tools: `fzf_jump`, `rg_jump`, `vim_diff`. |
 | `key_event/macro_page.rs` | Macro menu: record/execute, and execute-per-marked-file. |
+| `key_event/path_history.rs` | Path history menu: `goto_prev_path`, `path_history_operation` / `path_history_switch`. |
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | `cmdline_shell`: prefill the command line with `:!<shell>`. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` and `$.` substitution. |
@@ -322,6 +326,12 @@ and `vim_diff` (diff the selected and marked files).
 recorded keys once — or once per target after selecting it —
 `collect_marked_targets` / `select_target` implement that per-file loop, and
 `generate_msg` builds the page text.
+
+**`key_event/path_history.rs`** — keeps the paths the user jumped from in
+`App::path_history` (at most 30, newest last, duplicates moved to the end).
+`goto_prev_path` jumps back to the last stored path and pushes the path it left;
+`path_history_operation` / `path_history_switch` show those paths numbered `01`
+to `30` and jump to the one whose number the user types.
 
 **`key_event/paste_operation.rs`** — `paste_operation` / `paste_switch` present
 the paste menu (move, copy, force copy/move, symlink, clear marks);

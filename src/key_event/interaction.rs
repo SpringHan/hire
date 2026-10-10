@@ -44,6 +44,7 @@ pub fn fzf_jump(
         }
     }
 
+    app.record_path_history();
     app.goto_dir(full_path, None)?;
 
     if let Some(name) = file_name {
@@ -85,6 +86,7 @@ pub fn rg_jump(
         .into_string()
         .unwrap();
 
+    app.record_path_history();
     app.goto_dir(target_path.parent().unwrap(), None)?;
     app.file_search_sync(target_file, true)?;
 

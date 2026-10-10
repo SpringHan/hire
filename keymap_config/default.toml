@@ -3,6 +3,7 @@ keymap = [
     { key = "k", run = "move up"          },  # Move selection cursor up
     { key = "j", run = "move down"        },  # Move selection cursor down
     { key = "h", run = "move left"        },  # Move to parent directory
+    { key = "b", run = "prev_path"        },  # Go back to previous path
     { key = "l", run = "move right"       },  # Move into selected directory / Open file with `file_read_program`
     { key = "G", run = "goto_bottom"      },  # Jump to bottom of file list
     { key = "v", run = "list_scroll next" },  # Scroll list view down
@@ -10,6 +11,7 @@ keymap = [
 
     # Operations with menu
     { key = "Q", run = "macro_page"       },  # Open macro operations menu
+    { key = "H", run = "path_history"     },  # Open path history menu
     { key = "t", run = "tab_operation"    },  # Open tab operations menu
     { key = "g", run = "goto_operation"   },  # Open goto operations menu
     { key = "p", run = "paste_operation"  },  # Open paste operations menu

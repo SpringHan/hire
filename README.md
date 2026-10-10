@@ -138,6 +138,24 @@ keymap = [
 ]
 ```
 
+### Path History
+
+Every jump made with `goto_operation`, `fzf_jump` (and `rg_search`), or `goto_file` records the path you left. At most 30 paths are kept, the newest one is stored at the last place.
+
+- `prev_path` - jump back to the last recorded path
+- `path_history` - open the path history page, which shows every recorded path numbered from `01` to `30`; press the number keys of a path to jump to it
+
+An example of keymap configuration for path history:
+
+```toml
+keymap = [
+    # Other bindings.....
+
+    { key = "b", run = "prev_path"    },  # Jump back to the previous path
+    { key = "H", run = "path_history" },  # Open the path history page
+]
+```
+
 ## Keybindings for command line
 
 - Cursor move left: `C-b`
