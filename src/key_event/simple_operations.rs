@@ -5,9 +5,11 @@ use std::fs::OpenOptions;
 
 use crate::rt_error;
 use crate::utils::CmdContent;
+use crate::config::{Config, ConfigValue};
 use crate::error::{AppResult, ErrorType};
 
 use super::App;
+use super::shell::execute_command;
 use super::switch::{SwitchCase, SwitchCaseData};
 
 pub fn print_full_path(app: &mut App) {
@@ -44,6 +46,22 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
     } else {
         app.current_path()
     };
+
+    // Open the path with the GUI command when it has been configured.
+    if let ConfigValue::String(gui_cmd) = Config::get_value(
+        &app.config,
+        "gui_file_open_cmd"
+    ) {
+        if !gui_cmd.is_empty() {
+            execute_command(gui_cmd.as_ref(), &output)?;
+
+            if app.quit_after_output {
+                app.quit_now = true;
+            }
+
+            return Ok(())
+        }
+    }
 
     let mut file = OpenOptions::new()
         .create(true)

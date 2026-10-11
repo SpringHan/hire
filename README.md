@@ -32,6 +32,10 @@ gui_commands = ["lazygit", "vim"]
 
 # Program to use for reading files, such as vim, cat, bat, etc.
 file_read_program = "vim"
+
+# Command of a GUI program to open the output file/directory, such as xdg-open/emacs.
+# When it's empty, the path will be written into the output file instead.
+gui_file_open_cmd = "emacsclient -n"
 ```
 
 ### keymap.toml

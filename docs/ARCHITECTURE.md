@@ -220,9 +220,9 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 **`config/mod.rs`** — config lives in `~/.config/springhan/hire/`. Three files
 are used: `auto_config.toml` (written by the app: bookmarks, stored tabs),
 `user_config.toml` (hand-written: `default_shell`, `gui_commands`,
-`file_read_program`) and `keymap.toml`. `get_document`/`write_document` wrap
-`toml_edit`. The `option_get!` macro unwraps an `Option` into an early error
-return.
+`file_read_program`, `gui_file_open_cmd`) and `keymap.toml`.
+`get_document`/`write_document` wrap `toml_edit`. The `option_get!` macro
+unwraps an `Option` into an early error return.
 
 **`config/types.rs`** — `Config` holds a name plus a `ConfigValue`
 (`String`/`Vec`) and can be built from defaults and populated from a TOML
@@ -264,8 +264,8 @@ early-returns an `anyhow`-backed error.
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | `cmdline_shell`: prefill the command line with `:!<shell>`. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` and `$.` substitution. |
-| `key_event/shell/utils.rs` | Run shells/commands, capture output, open files, working-dir cache. |
-| `key_event/simple_operations.rs` | Print full path, write output file, jump to stored path. |
+| `key_event/shell/utils.rs` | Run shells/commands (with or without output), open files, working-dir cache. |
+| `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
@@ -344,13 +344,16 @@ overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 (`Shell` or `Command(shell, args)`). `utils.rs` implements `shell_process`
 (temporarily leaves the alternate screen, runs the process, restores the TUI,
 optionally refreshes the file list), `fetch_output` (capture stdout),
-`open_file_in_shell` (image viewer or configured file reader), and the
+`execute_command` (run a command with the target path appended and ignore its
+output), `open_file_in_shell` (image viewer or configured file reader), and the
 working-directory cache used by `--working-directory`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
-file's full path in a read-only page), `output_path` (write the selected path or
-the current directory to the temp/output file, honoring `quit_after_output`) and
-`jump_to_temp_file` (jump to the path stored in that file).
+file's full path in a read-only page), `output_path` (run the configured
+`gui_file_open_cmd` with the selected path or the current directory appended
+when it's set, otherwise write that path to the temp/output file; both honor
+`quit_after_output`) and `jump_to_temp_file` (jump to the path stored in that
+file).
 
 **`key_event/switch/`** — the generic menu framework. `SwitchCase::new` installs
 a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;

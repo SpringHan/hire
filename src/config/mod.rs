@@ -76,7 +76,8 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
     let configs = [
-        "default_shell", "gui_commands", "file_read_program"
+        "default_shell", "gui_commands", "file_read_program",
+        "gui_file_open_cmd"
     ];
     let mut errors = AppError::new();
 

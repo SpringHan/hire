@@ -148,6 +148,31 @@ pub fn fetch_output<P: AsRef<Path>>(
     rt_error!("Cannot get the program that needs a output")
 }
 
+/// Run a shell command without taking the output of it.
+///
+/// The command is split into the program and its arguments by whitespace,
+/// and `target` is appended as the last argument of it.
+pub fn execute_command<P: AsRef<Path>>(
+    command: &str,
+    target: P
+) -> AppResult<()>
+{
+    let mut command_slice = command.split_whitespace();
+
+    let program = match command_slice.next() {
+        Some(program) => program,
+        None => rt_error!("Cannot execute an empty command"),
+    };
+
+    Command::new(program)
+        .args(command_slice)
+        .arg(target.as_ref())
+        .spawn()?
+        .wait()?;
+
+    Ok(())
+}
+
 pub fn open_file_in_shell<P>(
     app: &mut App,
     terminal: &mut DefaultTerminal,
