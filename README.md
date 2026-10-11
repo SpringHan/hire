@@ -164,6 +164,8 @@ keymap = [
 - Cursor move to end: `C-e`
 - Delete word: `Alt-Backspace` (Also in edit mode)
 - Expand command line: `Alt-Tab`
+- Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
+- Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
 
 ## TODO
 

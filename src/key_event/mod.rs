@@ -87,10 +87,20 @@ pub fn handle_event(
                             },
 
                             'n' | 'p' => {
-                                if app.command_completion.show_frame() {
-                                    command_line::switch_to(app, c == 'n')?;
+                                let next = c == 'n';
+
+                                if app.command_expand {
+                                    app.expand_scroll(
+                                        if next {
+                                            Direction::Down
+                                        } else {
+                                            Direction::Up
+                                        }
+                                    );
+                                } else if app.command_completion.show_frame() {
+                                    command_line::switch_to(app, next)?;
                                 } else {
-                                    app.command_select(c == 'n');
+                                    app.command_select(next);
                                 }
                             },
 
@@ -275,22 +285,26 @@ pub fn handle_event(
         },
 
         KeyCode::Up => {
-            if let Block::CommandLine(_, _) = app.selected_block {
-                if app.command_expand {
-                    app.expand_scroll(Direction::Up);
-                } else {
-                    app.command_select(false);
-                }
+            match app.selected_block {
+                Block::CommandLine(_, _) => {
+                    // NOTE: The expanded command line is paged with Ctrl-p/Ctrl-n.
+                    if !app.command_expand {
+                        app.command_select(false);
+                    }
+                },
+                Block::Browser(_) => enter_command_history(app, false),
             }
         },
 
         KeyCode::Down => {
-            if let Block::CommandLine(_, _) = app.selected_block {
-                if app.command_expand {
-                    app.expand_scroll(Direction::Down);
-                } else {
-                    app.command_select(true);
-                }
+            match app.selected_block {
+                Block::CommandLine(_, _) => {
+                    // NOTE: The expanded command line is paged with Ctrl-p/Ctrl-n.
+                    if !app.command_expand {
+                        app.command_select(true);
+                    }
+                },
+                Block::Browser(_) => enter_command_history(app, true),
             }
         },
 
@@ -336,6 +350,27 @@ pub fn handle_event(
     }
 
     Ok(())
+}
+
+/// Enter command line mode with a command from the command history.
+///
+/// The boolean value is used to imply the direction of selecting history:
+/// when it's false (`Up`), the history is entered from the newest command,
+/// otherwise (`Down`) it's entered from the oldest one.
+fn enter_command_history(app: &mut App, next: bool) {
+    if !app.command_history.is_empty() {
+        let idx = if next {
+            0
+        } else {
+            app.command_history.len() - 1
+        };
+
+        app.selected_block.set_command_line(
+            app.command_history[idx].to_owned(),
+            CursorPos::End
+        );
+        app.command_idx = Some(idx);
+    }
 }
 
 impl AppCommand {
