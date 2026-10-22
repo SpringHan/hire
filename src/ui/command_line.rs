@@ -93,6 +93,8 @@ pub fn render_command_line<'a>(
                     lines.push(Line::from(vec![
                         selected_file.permission_span(),
                         Span::raw(" "),
+                        selected_file.owner_span(),
+                        Span::raw(" "),
                         selected_file.modified_span(),
                         Span::raw(" "),
                         selected_file.size_span(),
@@ -138,8 +140,9 @@ pub fn render_command_line<'a>(
 
 /// Build the status labels which are shown at the right side of the state line.
 ///
-/// The labels are always ordered as `WD -- EXPAND -- RECORDING -- QUIT`, and
-/// every label is only included when its condition is satisfied.
+/// The working directory path is shown first when it has been set, followed by
+/// the labels `WD EXPAND -- RECORDING -- QUIT`; every label is only included when
+/// its condition is satisfied.
 fn state_labels(app: &App) -> Vec<Span<'static>> {
     let mut labels: Vec<Span> = Vec::new();
 
@@ -294,6 +297,6 @@ mod test {
         app.working_directory = Some(PathBuf::from("/home/user/dev/hire"));
         let labels = state_labels(&app);
         assert_eq!(labels.len(), 1);
-        assert!(labels[0].content.starts_with("WD:"));
+        assert!(labels[0].content.ends_with("hire"));
     }
 }

@@ -119,7 +119,7 @@ Hire remembers a working directory, which is shared between runs:
 - `W` (`work_directory set`) - set the current directory as the working directory
 - `w` (`work_directory goto`) - jump to the working directory
 
-Whenever a working directory has been set, the state line shows a `WD:<path>` label on the right (long paths are abbreviated).
+Whenever a working directory has been set, its path is shown on the right side of the state line (long paths are abbreviated).
 
 ### Navigation Index
 

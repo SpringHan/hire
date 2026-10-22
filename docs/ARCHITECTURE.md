@@ -162,10 +162,11 @@ Responsibilities:
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
   `get_host_info`.
 
-**`app/filesaver.rs`** — `FileSaver` stores `name`, `is_file`, `is_dir`,
+**`app/filesaver.rs`** — `FileSaver` stores `name`, `owner`, `is_file`, `is_dir`,
 `executable`, `cannot_read`, `dangling_symlink`, `symlink_file` plus private
 `size`, `permissions` and `modified_time`. It exposes `permission_span`,
-`modified_span`, `size_span`, `symlink_span`, `read_only`, `set_modified`.
+`owner_span`, `modified_span`, `size_span`, `symlink_span`, `read_only`,
+`set_modified`.
 `sort()` orders directories before files, each group alphabetically.
 
 **`app/color.rs`** — parses the `LS_COLORS` environment variable into
@@ -349,7 +350,7 @@ optionally refreshes the file list), `fetch_output` (capture stdout),
 output), `open_file_in_shell` (image viewer or configured file reader), and the
 working-directory cache (`fetch_working_directory`, `set_working_directory`,
 `load_working_directory`) used by `--working-directory` and the state-line
-`WD:` indicator.
+working-directory indicator.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
 file's full path in a read-only page), `output_path` (run the configured
@@ -402,8 +403,9 @@ and delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
 state line.
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
-line (permission/size/link info on the left and the status labels
-`WD -- EXPAND -- RECORDING -- QUIT` on the right) or the editable command line;
+line (permission/owner/size/link info on the left and, on the right, the
+working directory path when set plus the status labels
+`WD EXPAND -- RECORDING -- QUIT`) or the editable command line;
 `state_labels` builds the status label row; `get_command_line_span_list`
 produces the character spans with the block cursor highlighted; `StateLine` is
 the small two-part widget used for the state line.

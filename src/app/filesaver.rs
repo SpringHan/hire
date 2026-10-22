@@ -3,18 +3,28 @@
 use std::io;
 use std::path::PathBuf;
 use std::time::SystemTime;
+use std::collections::HashMap;
 use std::fs::{self, Permissions};
+use std::os::unix::fs::MetadataExt;
 
 use is_executable::is_executable;
+use lazy_static::lazy_static;
 use ratatui::{
     style::{Stylize, Style},
     text::Span,
 };
 
+lazy_static! {
+    /// The cache of uid -> user name, read from `/etc/passwd` once.
+    static ref USER_NAMES: HashMap<u32, String> = read_user_names();
+}
+
 /// The structure used to save file information.
 #[derive(Clone)]
 pub struct FileSaver {
     pub name: String,
+    /// The name of the user that owns this file.
+    pub owner: String,
     pub is_file: bool,
     pub is_dir: bool,
     pub executable: bool,
@@ -31,6 +41,7 @@ impl Default for FileSaver {
     fn default() -> Self {
         FileSaver {
             name: String::new(),
+            owner: String::new(),
             is_file: true,
             is_dir: false,
             cannot_read: false,
@@ -88,6 +99,7 @@ impl FileSaver {
 
                 FileSaver {
                     name: file_name.into(),
+                    owner: owner_name(metadata.uid()),
                     size: metadata.len(),
                     is_file: metadata.is_file(),
                     is_dir: metadata.is_dir(),
@@ -126,6 +138,11 @@ impl FileSaver {
         } else {
             Span::raw("MUTABLE").light_green().bold()
         }
+    }
+
+    /// Get owner span of file.
+    pub fn owner_span<'a>(&self) -> Span<'a> {
+        Span::raw(self.owner.to_owned())
     }
 
     pub fn read_only(&self) -> bool {
@@ -171,6 +188,52 @@ impl FileSaver {
 
 }
 
+/// Get the name of the user that owns a file.
+///
+/// The numeric uid is returned when the user cannot be found in `/etc/passwd`.
+fn owner_name(uid: u32) -> String {
+    match USER_NAMES.get(&uid) {
+        Some(name) => name.to_owned(),
+        None => uid.to_string(),
+    }
+}
+
+/// Read the uid -> user name mapping from `/etc/passwd`.
+fn read_user_names() -> HashMap<u32, String> {
+    match fs::read_to_string("/etc/passwd") {
+        Ok(content) => parse_passwd(&content),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Parse the content of `/etc/passwd` into a uid -> user name mapping.
+fn parse_passwd(content: &str) -> HashMap<u32, String> {
+    let mut names = HashMap::new();
+
+    for line in content.lines() {
+        let mut fields = line.split(':');
+
+        let name = match fields.next() {
+            Some(name) => name,
+            None => continue,
+        };
+
+        // Skip the password field.
+        if fields.next().is_none() {
+            continue
+        }
+
+        let uid = match fields.next().and_then(|uid| uid.parse::<u32>().ok()) {
+            Some(uid) => uid,
+            None => continue,
+        };
+
+        names.insert(uid, name.to_owned());
+    }
+
+    names
+}
+
 pub fn sort(files: &mut Vec<FileSaver>) {
     if files.is_empty() {
         return ()
@@ -190,4 +253,23 @@ pub fn sort(files: &mut Vec<FileSaver>) {
     directories.extend(normal_files);
 
     *files = directories;
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_parse_passwd() {
+        let names = parse_passwd(
+            "root:x:0:0:root:/root:/bin/bash\n\
+             spring:x:1000:1000::/home/spring:/bin/bash\n\
+             invalid line\n\
+             nobody:x:not-a-uid:65534::/nonexistent:/usr/sbin/nologin\n"
+        );
+
+        assert_eq!(names.get(&0).map(String::as_str), Some("root"));
+        assert_eq!(names.get(&1000).map(String::as_str), Some("spring"));
+        assert_eq!(names.len(), 2);
+    }
 }
