@@ -35,6 +35,9 @@ fn main() -> AppResult<()> {
     // Init config information.
     config::init_config(&mut app)?;
 
+    // Load the working directory set by the user.
+    app.load_working_directory();
+
     let mut terminal = ratatui::init();
 
     // Check, whether to enable working directory mode.

@@ -1,5 +1,7 @@
 // Command line
 
+use std::path::PathBuf;
+
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -10,6 +12,11 @@ use ratatui::{
 
 use crate::app::{App, MacroStatus};
 use crate::utils::{CmdContent, CursorPos};
+
+use super::utils::shorten_path;
+
+/// The max length of the path shown by the working directory label.
+const WORKING_DIR_MAX_LEN: usize = 28;
 
 /// The widget to show states, such as file permission, size, etc.
 pub struct StateLine<'a> {
@@ -131,10 +138,32 @@ pub fn render_command_line<'a>(
 
 /// Build the status labels which are shown at the right side of the state line.
 ///
-/// The labels are always ordered as `EXPAND -- RECORDING -- QUIT`, and every
-/// label is only included when its condition is satisfied.
+/// The labels are always ordered as `WD -- EXPAND -- RECORDING -- QUIT`, and
+/// every label is only included when its condition is satisfied.
 fn state_labels(app: &App) -> Vec<Span<'static>> {
     let mut labels: Vec<Span> = Vec::new();
+
+    if let Some(working_dir) = app.working_directory.as_ref() {
+        let mut style = app.term_colors.dir_style;
+        if style.bg.is_some() {
+            style.bg = None;
+        }
+
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        labels.push(
+            Span::styled(
+                format!(
+                    "{}",
+                    shorten_path(
+                        working_dir,
+                        home.as_deref(),
+                        WORKING_DIR_MAX_LEN
+                    )
+                ),
+                style.add_modifier(Modifier::BOLD)
+            )
+        );
+    }
 
     if app.mark_expand {
         let mut style = app.term_colors.marked_style;
@@ -251,4 +280,20 @@ fn get_command_line_span_list<'a>(
     }
 
     span_list
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_working_dir_label() {
+        let mut app = App::default();
+        assert!(state_labels(&app).is_empty());
+
+        app.working_directory = Some(PathBuf::from("/home/user/dev/hire"));
+        let labels = state_labels(&app);
+        assert_eq!(labels.len(), 1);
+        assert!(labels[0].content.starts_with("WD:"));
+    }
 }

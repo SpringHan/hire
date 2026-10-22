@@ -147,8 +147,9 @@ Responsibilities:
   selection states; `file_content`; the active `selected_block`; marked files;
   command-line/command-history state; completion state; the file searcher;
   macro attributes; `TermColors`; bookmarks (`target_dir`); path history
-  (`path_history`); tabs; image preview; edit mode; keymap; loaded config;
-  error queue; output settings; host/user names.
+  (`path_history`); working directory (`working_directory`); tabs; image
+  preview; edit mode; keymap; loaded config; error queue; output settings;
+  host/user names.
 - File-list lifecycle: `init_all_files`, `init_parent_files`,
   `init_current_files`, `init_child_files`, `read_files`, `refresh_parent_item`,
   `refresh_current_item`, `refresh_child_item`, `refresh_select_item`,
@@ -346,7 +347,9 @@ overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 optionally refreshes the file list), `fetch_output` (capture stdout),
 `execute_command` (run a command with the target path appended and ignore its
 output), `open_file_in_shell` (image viewer or configured file reader), and the
-working-directory cache used by `--working-directory`.
+working-directory cache (`fetch_working_directory`, `set_working_directory`,
+`load_working_directory`) used by `--working-directory` and the state-line
+`WD:` indicator.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
 file's full path in a read-only page), `output_path` (run the configured
@@ -395,11 +398,12 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 **`ui/utils.rs`** — `render_list` converts `FileSaver`s into styled items
 (directory/file/executable/symlink/orphan colours plus the marked sidebar);
 `render_editing_list` does the same for `EditItem`s, including the edit cursor
-and delete/marked sidebars.
+and delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
+state line.
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
 line (permission/size/link info on the left and the status labels
-`EXPAND -- RECORDING -- QUIT` on the right) or the editable command line;
+`WD -- EXPAND -- RECORDING -- QUIT` on the right) or the editable command line;
 `state_labels` builds the status label row; `get_command_line_span_list`
 produces the character spans with the block cursor highlighted; `StateLine` is
 the small two-part widget used for the state line.

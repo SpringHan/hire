@@ -229,14 +229,31 @@ pub fn fetch_working_directory() -> AppResult<PathBuf> {
     let mut working_dir = String::new();
     working_dir_file.read_to_string(&mut working_dir)?;
 
-    if working_dir.ends_with("/") {
-        working_dir = working_dir.strip_suffix("/").unwrap().to_owned();
-    }
-
-    Ok(PathBuf::from(working_dir))
+    Ok(normalize_working_dir(&working_dir).unwrap_or_default())
 }
 
-pub fn set_working_directory<P>(path: P) -> AppResult<()>
+/// Normalize the raw content read from the working-directory cache file.
+///
+/// `None` is returned when the content is empty. The root directory `/` is
+/// kept as it is, and other trailing slashes are removed.
+fn normalize_working_dir(content: &str) -> Option<PathBuf> {
+    let mut working_dir = content.trim().to_owned();
+
+    if working_dir.is_empty() {
+        return None
+    }
+
+    while working_dir.len() > 1 && working_dir.ends_with('/') {
+        working_dir.pop();
+    }
+
+    Some(PathBuf::from(working_dir))
+}
+
+pub fn set_working_directory<P>(
+    app: &mut App,
+    path: P
+) -> AppResult<()>
 where P: AsRef<Path>
 {
     use std::io::Write;
@@ -250,8 +267,22 @@ where P: AsRef<Path>
         .open(working_dir_file)?;
 
     working_dir_file.write(path.as_ref().to_string_lossy().as_bytes())?;
+    app.working_directory = Some(path.as_ref().to_owned());
 
     Ok(())
+}
+
+impl App<'_> {
+    /// Load the working directory that has been set into `App`.
+    ///
+    /// Errors, such as a missing cache file, are ignored so that the app
+    /// merely treats the working directory as unset.
+    pub fn load_working_directory(&mut self) {
+        self.working_directory = match fetch_working_directory() {
+            Ok(path) if !path.as_os_str().is_empty() => Some(path),
+            _ => None,
+        };
+    }
 }
 
 fn working_dir_cache_path() -> AppResult<String> {
@@ -266,5 +297,24 @@ fn working_dir_cache_path() -> AppResult<String> {
         Err(err) => {
             rt_error!("Cannot get current user as: {err}")
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_normalize_working_dir() {
+        assert_eq!(
+            normalize_working_dir("  /home/user/project/ \n"),
+            Some(PathBuf::from("/home/user/project"))
+        );
+        assert_eq!(
+            normalize_working_dir("/"),
+            Some(PathBuf::from("/"))
+        );
+        assert_eq!(normalize_working_dir(""), None);
+        assert_eq!(normalize_working_dir("   \n"), None);
     }
 }

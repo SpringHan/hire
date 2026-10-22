@@ -112,6 +112,15 @@ This feature should be used with `--output-file` argument:
 hire --output-file /tmp/hire_output.txt
 ```
 
+### Working Directory
+
+Hire remembers a working directory, which is shared between runs:
+
+- `W` (`work_directory set`) - set the current directory as the working directory
+- `w` (`work_directory goto`) - jump to the working directory
+
+Whenever a working directory has been set, the state line shows a `WD:<path>` label on the right (long paths are abbreviated).
+
 ### Navigation Index
 
 Navigation Index allows quick jumping to specific items by entering their index number. 

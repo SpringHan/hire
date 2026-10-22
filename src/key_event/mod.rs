@@ -517,11 +517,17 @@ impl AppCommand {
             },
 
             AppCommand::WorkDirectory(set) => if set {
-                shell::set_working_directory(
-                    app.path.to_owned()
-                )?
+                let path = app.path.to_owned();
+                shell::set_working_directory(app, path)?
             } else {
-                let working_dir = fetch_working_directory()?;
+                let working_dir = match fetch_working_directory() {
+                    Ok(working_dir) => working_dir,
+                    Err(err) => {
+                        app.working_directory = None;
+                        return Err(err)
+                    },
+                };
+                app.working_directory = Some(working_dir.to_owned());
 
                 // Do nothing when the user is already in the working directory.
                 if app.path != working_dir {

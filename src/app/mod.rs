@@ -79,6 +79,10 @@ pub struct App<'a> {
     /// The length of it will never be more than 30.
     pub path_history: Vec<PathBuf>,
 
+    // Working directory
+    /// The working directory stored in the cache file, if any.
+    pub working_directory: Option<PathBuf>,
+
     // Tab
     pub tab_list: crate::key_event::TabList<'a>,
 
@@ -144,6 +148,7 @@ impl<'a> Default for App<'a> {
             mark_expand: false,
             command_scroll: None,
             path_history: Vec::new(),
+            working_directory: None,
             target_dir: HashMap::new(),
             marked_files: HashMap::new(),
             edit_mode: EditMode::default(),

@@ -24,7 +24,7 @@ pub struct Config<'a> {
 
 // Config Implements
 impl<'a> Config<'a> {
-    fn default_value(prop: &str) -> ConfigValue {
+    fn default_value(prop: &str) -> ConfigValue<'_> {
         match prop {
             "gui_commands" => ConfigValue::Vec(Vec::new()),
             "default_shell" => ConfigValue::String(Cow::Borrowed("bash")),

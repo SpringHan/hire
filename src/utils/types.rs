@@ -72,7 +72,7 @@ impl CmdContent {
         }
     }
 
-    pub fn into_text(&self) -> Text {
+    pub fn into_text(&self) -> Text<'_> {
         match *self {
             CmdContent::Text(ref text) => text.to_owned(),
             CmdContent::String(ref _str) => Text::raw(_str.to_owned()),

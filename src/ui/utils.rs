@@ -1,6 +1,7 @@
 // Utils
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use ratatui::{
     style::{Color, Modifier, Style, Styled, Stylize},
@@ -172,4 +173,94 @@ fn get_normal_item_color<'a>(
         } else {
             None
         })
+}
+
+/// Shorten a path so that it can be displayed in a single line.
+///
+/// The home directory is displayed as `~`; when the path is too long, every
+/// directory component before the last one is abbreviated to its first
+/// character, and a leading `…` is used if it's still longer than `max_len`.
+pub fn shorten_path(
+    path: &Path,
+    home: Option<&Path>,
+    max_len: usize
+) -> String {
+    let display = match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => {
+            if rest.as_os_str().is_empty() {
+                String::from("~")
+            } else {
+                format!("~/{}", rest.to_string_lossy())
+            }
+        },
+        None => path.to_string_lossy().into_owned(),
+    };
+
+    if display.chars().count() <= max_len {
+        return display
+    }
+
+    // Abbreviate every directory component except the last one, which is the
+    // name of the directory itself.
+    let components: Vec<&str> = display.split('/').collect();
+    let last = components.len().saturating_sub(1);
+    let mut shorted: Vec<String> = Vec::with_capacity(components.len());
+
+    for (idx, component) in components.iter().enumerate() {
+        if idx < last && component.chars().count() > 1 {
+            shorted.push(component.chars().next().unwrap().to_string());
+        } else {
+            shorted.push((*component).to_owned());
+        }
+    }
+
+    let shorted = shorted.join("/");
+    if shorted.chars().count() <= max_len {
+        return shorted
+    }
+
+    // Keep the tail of the path when it's still too long.
+    let mut tail: Vec<char> = shorted.chars()
+        .rev()
+        .take(max_len.saturating_sub(1))
+        .collect();
+    tail.reverse();
+
+    format!("…{}", tail.into_iter().collect::<String>())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_shorten_path() {
+        let home = Path::new("/home/user");
+
+        assert_eq!(
+            shorten_path(Path::new("/home/user/dev/hire"), Some(home), 32),
+            "~/dev/hire"
+        );
+        assert_eq!(shorten_path(home, Some(home), 32), "~");
+        assert_eq!(shorten_path(Path::new("/"), Some(home), 32), "/");
+        assert_eq!(
+            shorten_path(
+                Path::new("/home/user/a/bb/cc/dd/ee/ff"),
+                Some(home),
+                15
+            ),
+            "~/a/b/c/d/e/ff"
+        );
+
+        // Only the last component is kept complete, so the ellipsis mode is
+        // used when the abbreviated path is still too long.
+        let long = shorten_path(
+            Path::new("/aaa/bbb/ccc/ddd/eee/fff/ggg/hhh/iii/last-component"),
+            None,
+            10
+        );
+        assert_eq!(long.chars().count(), 10);
+        assert!(long.starts_with("…"));
+        assert_eq!(long, "…component");
+    }
 }
