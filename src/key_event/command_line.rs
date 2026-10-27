@@ -295,6 +295,89 @@ impl<'a> App<'a> {
             }
         }
     }
+
+    /// Move the cursor to the end of the nearest word at or after the cursor
+    /// (`Alt-f`).
+    pub fn cursor_word_forward(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            crate::utils::cursor_next_word_end(content, cursor);
+
+            if self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
+
+    /// Move the cursor to the start of the nearest word before the cursor
+    /// (`Alt-b`).
+    pub fn cursor_word_backward(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            crate::utils::cursor_prev_word_start(content, cursor);
+
+            if self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
+
+    /// Delete the whole word before the cursor (`Ctrl-Backspace`).
+    pub fn delete_word_before_cursor(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref mut content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            let length = content.len();
+            crate::utils::delete_word_before_cursor(content, cursor);
+
+            // The candidates are meaningless after the content has changed.
+            if content.len() != length && self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
+
+    /// Delete the whole word after the cursor (`Alt-d`).
+    pub fn delete_word_after_cursor(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref mut content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            let length = content.len();
+            crate::utils::delete_word_after_cursor(content, cursor);
+
+            // The candidates are meaningless after the content has changed.
+            if content.len() != length && self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
+
+    /// Delete the character after the cursor (`Ctrl-d`).
+    pub fn delete_char_after_cursor(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref mut content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            let length = content.len();
+            crate::utils::delete_char_after_cursor(content, cursor);
+
+            // The candidates are meaningless after the content has changed.
+            if content.len() != length && self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
 }
 
 /// Complete the name of the item selected in the file browser into the
@@ -432,4 +515,216 @@ fn update_completion(
     completion.selected_item.select(Some(0));
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn app_with(content: &str, cursor: CursorPos) -> App<'static> {
+        let mut app = App::default();
+        app.selected_block.set_command_line(content, cursor);
+        app
+    }
+
+    fn command_line<'app, 'a>(app: &'app App<'a>) -> (&'app String, CursorPos) {
+        if let Block::CommandLine(
+            CmdContent::String(ref content),
+            cursor
+        ) = app.selected_block
+        {
+            (content, cursor)
+        } else {
+            panic!("The command line is not editable")
+        }
+    }
+
+    /// Describe a cursor position in a readable way, as `CursorPos` doesn't
+    /// implement `Debug`.
+    fn describe(cursor: CursorPos) -> String {
+        match cursor {
+            CursorPos::Index(idx) => format!("Index({idx})"),
+            CursorPos::End => String::from("End"),
+            CursorPos::None => String::from("None"),
+        }
+    }
+
+    fn assert_command_line(app: &App, content: &str, cursor: CursorPos) {
+        let (actual_content, actual_cursor) = command_line(app);
+        assert_eq!(actual_content, content);
+        assert_eq!(describe(actual_cursor), describe(cursor));
+    }
+
+    #[test]
+    fn test_cursor_word_forward() {
+        let mut app = app_with(":rename foo.txt", CursorPos::Index(0));
+
+        app.cursor_word_forward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(7));
+
+        app.cursor_word_forward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(11));
+
+        app.cursor_word_forward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::End);
+
+        // The cursor stays at the end of the command line.
+        app.cursor_word_forward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::End);
+    }
+
+    #[test]
+    fn test_cursor_word_backward() {
+        let mut app = app_with(":rename foo.txt", CursorPos::End);
+
+        app.cursor_word_backward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(12));
+
+        app.cursor_word_backward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(8));
+
+        app.cursor_word_backward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(1));
+
+        app.cursor_word_backward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(0));
+
+        // The cursor stays at the beginning of the command line.
+        app.cursor_word_backward();
+        assert_command_line(&app, ":rename foo.txt", CursorPos::Index(0));
+    }
+
+    #[test]
+    fn test_delete_word_before_cursor() {
+        // Delete the word from the end of the command line.
+        let mut app = app_with(":rename foo.txt", CursorPos::End);
+        app.delete_word_before_cursor();
+        assert_command_line(&app, ":rename foo.", CursorPos::End);
+
+        // Delete the word in the middle of the command line.
+        let mut app = app_with("hello world", CursorPos::Index(8));
+        app.delete_word_before_cursor();
+        assert_command_line(&app, "hello rld", CursorPos::Index(6));
+
+        // Delete the separators before a word.
+        let mut app = app_with("  hello", CursorPos::Index(2));
+        app.delete_word_before_cursor();
+        assert_command_line(&app, "hello", CursorPos::Index(0));
+
+        // Nothing to delete at the beginning of the command line.
+        let mut app = app_with(":rename", CursorPos::Index(0));
+        app.delete_word_before_cursor();
+        assert_command_line(&app, ":rename", CursorPos::Index(0));
+
+        // Delete the punctuation right before the cursor.
+        let mut app = app_with(":rename", CursorPos::Index(1));
+        app.delete_word_before_cursor();
+        assert_command_line(&app, "rename", CursorPos::Index(0));
+
+        // The word after the command name is deleted with the separators.
+        let mut app = app_with(":rename", CursorPos::End);
+        app.delete_word_before_cursor();
+        assert_command_line(&app, ":", CursorPos::End);
+
+        // The whole content is deleted when the cursor is at its end.
+        let mut app = app_with("hello", CursorPos::Index(5));
+        app.delete_word_before_cursor();
+        assert_command_line(&app, "", CursorPos::End);
+
+        // The completion popup is reset after the deletion.
+        let mut app = app_with("hello", CursorPos::End);
+        app.command_completion.show_frame = true;
+        app.delete_word_before_cursor();
+        assert!(!app.command_completion.show_frame());
+    }
+
+    #[test]
+    fn test_delete_word_after_cursor() {
+        // Delete the word right after the cursor.
+        let mut app = app_with(":rename foo.txt", CursorPos::Index(1));
+        app.delete_word_after_cursor();
+        assert_command_line(&app, ": foo.txt", CursorPos::Index(1));
+
+        // The separators between the cursor and the word are deleted as well.
+        let mut app = app_with(":rename foo.txt", CursorPos::Index(7));
+        app.delete_word_after_cursor();
+        assert_command_line(&app, ":rename.txt", CursorPos::Index(7));
+
+        // Nothing to delete at the end of the command line.
+        let mut app = app_with(":rename", CursorPos::End);
+        app.delete_word_after_cursor();
+        assert_command_line(&app, ":rename", CursorPos::End);
+
+        // A multi-byte word is deleted as a whole.
+        let mut app = app_with("文件 abc", CursorPos::Index(0));
+        app.delete_word_after_cursor();
+        assert_command_line(&app, " abc", CursorPos::Index(0));
+
+        // The completion popup is reset after the deletion.
+        let mut app = app_with(":rename foo", CursorPos::Index(1));
+        app.command_completion.show_frame = true;
+        app.delete_word_after_cursor();
+        assert!(!app.command_completion.show_frame());
+    }
+
+    #[test]
+    fn test_delete_char_after_cursor() {
+        // Delete the character under the cursor; the cursor stays in place.
+        let mut app = app_with(":rename", CursorPos::Index(1));
+        app.delete_char_after_cursor();
+        assert_command_line(&app, ":ename", CursorPos::Index(1));
+
+        // Nothing to delete at the end of the command line.
+        let mut app = app_with(":rename", CursorPos::End);
+        app.delete_char_after_cursor();
+        assert_command_line(&app, ":rename", CursorPos::End);
+
+        // A multi-byte character is deleted as a whole.
+        let mut app = app_with("文件 x", CursorPos::Index(0));
+        app.delete_char_after_cursor();
+        assert_command_line(&app, "件 x", CursorPos::Index(0));
+
+        // The completion popup is reset after the deletion.
+        let mut app = app_with(":rename", CursorPos::Index(1));
+        app.command_completion.show_frame = true;
+        app.delete_char_after_cursor();
+        assert!(!app.command_completion.show_frame());
+    }
+
+    #[test]
+    fn test_word_operations_with_multibyte_content() {
+        let mut app = app_with("文件 abc", CursorPos::Index(0));
+
+        app.cursor_word_forward();
+        assert_command_line(&app, "文件 abc", CursorPos::Index(6));
+
+        app.cursor_word_forward();
+        assert_command_line(&app, "文件 abc", CursorPos::End);
+
+        app.cursor_word_backward();
+        assert_command_line(&app, "文件 abc", CursorPos::Index(7));
+
+        app.delete_word_before_cursor();
+        assert_command_line(&app, "abc", CursorPos::Index(0));
+    }
+
+    #[test]
+    fn test_word_operations_on_readonly_command_line() {
+        let mut app = App {
+            selected_block: Block::CommandLine(
+                CmdContent::Text(ratatui::text::Text::raw("readonly")),
+                CursorPos::None
+            ),
+            ..Default::default()
+        };
+
+        app.cursor_word_forward();
+        app.cursor_word_backward();
+        app.delete_word_before_cursor();
+
+        assert!(matches!(
+            app.selected_block,
+            Block::CommandLine(CmdContent::Text(_), CursorPos::None)
+        ));
+    }
 }

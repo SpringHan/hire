@@ -91,6 +91,7 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
 
 3. **Text Editing**:
    - Insert text at beginning/end of filenames (`H`/`A` in Colemak, `I`/`A` in QWERTY)
+   - Move to the next/previous word: `Alt-f` / `Alt-b`; delete a whole word before/after the cursor: `C-Backspace` / `Alt-d`; delete the character after the cursor: `C-d`
 
 4. **Exiting**:
    - `Enter` - Apply edited content to current path
@@ -176,6 +177,11 @@ keymap = [
 - Cursor move to beginning: `C-a`
 - Cursor move to end: `C-e`
 - Delete word: `Alt-Backspace` (Also in edit mode)
+- Delete the whole word before the cursor: `C-Backspace` (Also in edit mode; also `C-h` / `C-w` on terminals without the kitty keyboard protocol)
+- Delete the whole word after the cursor: `Alt-d` (Also in edit mode)
+- Cursor move to the end of the next word: `Alt-f` (Also in edit mode)
+- Cursor move to the start of the previous word: `Alt-b` (Also in edit mode)
+- Delete the character after the cursor: `C-d` (Also in edit mode)
 - Expand command line: `Alt-Tab`
 - Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)

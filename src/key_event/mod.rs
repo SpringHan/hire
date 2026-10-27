@@ -104,6 +104,59 @@ pub fn handle_event(
                                 }
                             },
 
+                            // Terminals without the kitty keyboard protocol
+                            // report `Ctrl-Backspace` as `Ctrl-h`, so it's
+                            // treated as deleting the word before the cursor.
+                            // `Ctrl-w` is accepted as the readline equivalent.
+                            'h' | 'w' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.delete_word_before_cursor();
+                                } else {
+                                    app.delete_word_before_cursor();
+                                }
+                            },
+
+                            // Delete the character after the cursor.
+                            'd' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.delete_char_after_cursor();
+                                } else {
+                                    app.delete_char_after_cursor();
+                                }
+                            },
+
+                            _ => ()
+                        }
+                    },
+
+                    // Move word by word in edit mode or on the command line.
+                    KeyModifiers::ALT => {
+                        match c {
+                            'f' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_word_forward();
+                                } else {
+                                    app.cursor_word_forward();
+                                }
+                            },
+
+                            'b' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_word_backward();
+                                } else {
+                                    app.cursor_word_backward();
+                                }
+                            },
+
+                            // Delete the word after the cursor.
+                            'd' => {
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.delete_word_after_cursor();
+                                } else {
+                                    app.delete_word_after_cursor();
+                                }
+                            },
+
                             _ => ()
                         }
                     },
@@ -149,6 +202,22 @@ pub fn handle_event(
         },
 
         KeyCode::Backspace => {
+            // `Ctrl-Backspace` deletes the whole word before the cursor in
+            // edit mode or on the command line, instead of a single character.
+            if key.modifiers == KeyModifiers::CONTROL &&
+                matches!(app.selected_block, Block::CommandLine(_, _))
+            {
+                app.delete_word_before_cursor();
+                return Ok(())
+            }
+
+            if key.modifiers == KeyModifiers::CONTROL &&
+                app.edit_mode.inserting()
+            {
+                app.edit_mode.delete_word_before_cursor();
+                return Ok(())
+            }
+
             if let Block::CommandLine(
                 ref mut origin,
                 ref mut cursor

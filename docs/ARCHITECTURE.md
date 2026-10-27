@@ -276,10 +276,10 @@ early-returns an `anyhow`-backed error.
 
 **`key_event/mod.rs`** — the input dispatcher.
 
-- `handle_event` handles modifier chords (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`),
-  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Tab`
-  expand). Non-control characters go to the active `SwitchCase`, the command
-  line, or the keymap.
+- `handle_event` handles modifier chords (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`,
+  `Ctrl-Backspace`, `Alt-f` / `Alt-b`), `Backspace`, `Esc`, `Enter`, arrows, and
+  `Tab` (completion / `Alt-Tab` expand). Non-control characters go to the active
+  `SwitchCase`, the command line, or the keymap.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
   into a concrete call into the operation modules.
 - Re-exports the public types used by `app`, `ui` and `main`
@@ -290,7 +290,11 @@ position, selected candidate); `completion` (TAB completion: builtin commands
 for `:xxx`, files for arguments, and completing the selected browser item when
 the cursor follows a space); `switch_to` (move through candidates);
 `update_cmdline` (write a candidate back); `get_content` (read the text up to
-the cursor); `App::cursor_left` / `App::cursor_right`.
+the cursor); `App::cursor_left` / `App::cursor_right`, the word-wise
+`cursor_word_forward` (`Alt-f`) / `cursor_word_backward` (`Alt-b`),
+`delete_word_before_cursor` (`Ctrl-Backspace`) / `delete_word_after_cursor`
+(`Alt-d`) and `delete_char_after_cursor` (`Ctrl-d`), all of which are shared
+with edit mode through the helpers in `utils`.
 
 **`key_event/cursor_movement/`** — `directory_movement` (left/right into
 parent/child, right opens files), `move_cursor` (up/down/scroll/index, also
@@ -299,8 +303,11 @@ expands the mark range while `mark_expand` is on), `move_cursor_core`, and
 
 **`key_event/edit/`** — an inline batch editor over the current directory.
 `EditMode` holds one `EditItem` per file plus newly created items, supports
-insert mode, cursor movement, marking and delete flags; `save_edit` applies all
-renames/creations/deletions at once behind a confirmation page.
+insert mode, cursor movement (including word-wise `Alt-f` / `Alt-b`, the
+`Ctrl-Backspace` / `Alt-d` whole-word deletions and `Ctrl-d` character
+deletion, applied to every item whose cursor is active), marking and delete
+flags; `save_edit` applies all renames/creations/deletions at once behind a
+confirmation page.
 
 **`key_event/file_operations.rs`** — `append_file_name` (prefill `:rename` for
 the selected file, cursor before the extension), `delete_operation` /
@@ -427,6 +434,11 @@ and draw the completion candidate list above the command line.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
   expand tabs, parse ANSI), `delete_word`.
+- Word-wise text editing shared by the command line and edit mode:
+  `is_word_char`, `next_word_end` / `prev_word_start`,
+  `cursor_next_word_end` / `cursor_prev_word_start`,
+  `delete_word_before_cursor` / `delete_word_after_cursor` and
+  `delete_char_after_cursor` (plus the `CursorPos` conversion helpers).
 - The global rendered window height (`WINDOW_HEIGHT`, `update_window_height`,
   `get_window_height`) used to size scrolling and preview reads.
 

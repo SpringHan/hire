@@ -74,6 +74,82 @@ impl EditMode {
         Ok(())
     }
 
+    /// Move the cursor of the editing items to the end of the nearest word
+    /// (`Alt-f`).
+    ///
+    /// Like [`Self::cursor_move`], every item whose cursor is active is moved,
+    /// which handles the marked items as well.
+    pub fn cursor_word_forward(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue
+            }
+
+            crate::utils::cursor_next_word_end(
+                &item.editing_name,
+                &mut item.cursor
+            );
+        }
+    }
+
+    /// Move the cursor of the editing items to the start of the nearest word
+    /// (`Alt-b`).
+    pub fn cursor_word_backward(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue
+            }
+
+            crate::utils::cursor_prev_word_start(
+                &item.editing_name,
+                &mut item.cursor
+            );
+        }
+    }
+
+    /// Delete the whole word before the cursor of the editing items
+    /// (`Ctrl-Backspace`).
+    pub fn delete_word_before_cursor(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue
+            }
+
+            crate::utils::delete_word_before_cursor(
+                &mut item.editing_name,
+                &mut item.cursor
+            );
+        }
+    }
+
+    /// Delete the whole word after the cursor of the editing items (`Alt-d`).
+    pub fn delete_word_after_cursor(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue
+            }
+
+            crate::utils::delete_word_after_cursor(
+                &mut item.editing_name,
+                &mut item.cursor
+            );
+        }
+    }
+
+    /// Delete the character after the cursor of the editing items (`Ctrl-d`).
+    pub fn delete_char_after_cursor(&mut self) {
+        for item in self.items.iter_mut() {
+            if item.cursor == CursorPos::None {
+                continue
+            }
+
+            crate::utils::delete_char_after_cursor(
+                &mut item.editing_name,
+                &mut item.cursor
+            );
+        }
+    }
+
     /// Enter insert modal.
     pub fn enter_insert(&mut self, state: &mut ListState, pos: CursorPos) {
         if self.items.is_empty() {
@@ -374,4 +450,135 @@ pub fn generate_msg() -> CmdContent {
         Text::raw("Are you sure to apply the edited files? (y to confirm)")
             .fg(Color::Red)
     )
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn edit_mode_with(name: &str, cursor: CursorPos) -> EditMode {
+        EditMode {
+            items: vec![EditItem {
+                editing_name: String::from(name),
+                is_dir: false,
+                delete: false,
+                cursor,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_cursor_word_movement() {
+        let mut edit_mode = edit_mode_with("oldname.txt", CursorPos::End);
+
+        edit_mode.cursor_word_backward();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(8));
+
+        edit_mode.cursor_word_backward();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        edit_mode.cursor_word_forward();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
+
+        edit_mode.cursor_word_forward();
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        assert_eq!(edit_mode.items[0].editing_name, "oldname.txt");
+    }
+
+    #[test]
+    fn test_delete_word_before_cursor() {
+        let mut edit_mode = edit_mode_with("oldname.txt", CursorPos::End);
+
+        edit_mode.delete_word_before_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "oldname.");
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // The separators between the word and the cursor are removed as well.
+        edit_mode.delete_word_before_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "");
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // A word in the middle of the name is deleted from its start.
+        let mut edit_mode = edit_mode_with("hello world", CursorPos::Index(8));
+        edit_mode.delete_word_before_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "hello rld");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(6));
+    }
+
+    #[test]
+    fn test_word_operations_only_touch_active_items() {
+        let mut edit_mode = EditMode {
+            items: vec![
+                EditItem {
+                    editing_name: String::from("one two"),
+                    is_dir: false,
+                    delete: false,
+                    cursor: CursorPos::End,
+                },
+                EditItem {
+                    editing_name: String::from("abc"),
+                    is_dir: false,
+                    delete: false,
+                    cursor: CursorPos::None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        edit_mode.delete_word_before_cursor();
+        edit_mode.cursor_word_backward();
+
+        assert_eq!(edit_mode.items[0].editing_name, "one ");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        // The item without a cursor is untouched.
+        assert_eq!(edit_mode.items[1].editing_name, "abc");
+        assert!(edit_mode.items[1].cursor == CursorPos::None);
+    }
+
+    #[test]
+    fn test_delete_char_after_cursor() {
+        let mut edit_mode = edit_mode_with("abc.txt", CursorPos::Index(0));
+
+        edit_mode.delete_char_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "bc.txt");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        // Repeated deletions remove the following characters one by one.
+        edit_mode.delete_char_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "c.txt");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        // Nothing to delete at the end of the name.
+        let mut edit_mode = edit_mode_with("abc.txt", CursorPos::End);
+        edit_mode.delete_char_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "abc.txt");
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+    }
+
+    #[test]
+    fn test_delete_word_after_cursor() {
+        // Delete the word right after the cursor.
+        let mut edit_mode = edit_mode_with("hello.txt", CursorPos::Index(0));
+
+        edit_mode.delete_word_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, ".txt");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        // Nothing to delete at the end of the name.
+        let mut edit_mode = edit_mode_with("hello.txt", CursorPos::End);
+
+        edit_mode.delete_word_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "hello.txt");
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // A word in the middle of the name is deleted up to its end.
+        let mut edit_mode = edit_mode_with("hello world", CursorPos::Index(2));
+
+        edit_mode.delete_word_after_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, "he world");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(2));
+    }
 }

@@ -180,6 +180,196 @@ pub fn delete_word(_str: &mut String, cursor: &mut CursorPos) {
     }
 }
 
+/// Check whether the character is a part of a word when the cursor moves or
+/// deletes word by word.
+///
+/// Whitespace and punctuation like `:` or `.` separate words, so a file name
+/// such as `foo_bar.txt` is made of the words `foo_bar` and `txt`. Non-ASCII
+/// letters (e.g. CJK characters) are word characters.
+pub fn is_word_char(_char: char) -> bool {
+    _char.is_alphanumeric() || _char == '_'
+}
+
+/// Convert a cursor position into the insertion point of a text.
+///
+/// The returned value is the byte index at which new characters are inserted,
+/// which may equal the length of `content` when the cursor is at its end.
+/// `None` is returned when there is no cursor or the cursor points inside a
+/// multi-byte character.
+pub fn cursor_insertion_point(content: &str, cursor: CursorPos) -> Option<usize> {
+    let pos = match cursor {
+        CursorPos::Index(idx) => idx,
+        CursorPos::End => content.len(),
+        CursorPos::None => return None,
+    };
+
+    if pos <= content.len() && content.is_char_boundary(pos) {
+        Some(pos)
+    } else {
+        None
+    }
+}
+
+/// Build the cursor state for an insertion point inside `content`.
+///
+/// `CursorPos::End` is used when the insertion point is placed after the last
+/// character, which keeps the cursor valid while characters are appended.
+pub fn cursor_from_insertion_point(content: &str, pos: usize) -> CursorPos {
+    if pos >= content.len() {
+        CursorPos::End
+    } else {
+        CursorPos::Index(pos)
+    }
+}
+
+/// Return the byte index right after the last character of the nearest word at
+/// or after `start`, and the length of `content` when there is no word left.
+pub fn next_word_end(content: &str, start: usize) -> usize {
+    let mut end = start;
+    let mut in_word = false;
+
+    for (idx, _char) in content[start..].char_indices() {
+        if !is_word_char(_char) {
+            if in_word {
+                break
+            }
+
+            continue
+        }
+
+        in_word = true;
+        end = start + idx + _char.len_utf8();
+    }
+
+    if in_word {
+        end
+    } else {
+        content.len()
+    }
+}
+
+/// Return the byte index of the first character of the nearest word before
+/// `start`, and 0 when there is none.
+pub fn prev_word_start(content: &str, start: usize) -> usize {
+    let mut word_start = start;
+    let mut in_word = false;
+
+    for (idx, _char) in content[..start].char_indices().rev() {
+        if !is_word_char(_char) {
+            // The separators right before the cursor are skipped first, and the
+            // first separator after the word marks the word boundary.
+            if in_word {
+                break
+            }
+
+            continue
+        }
+
+        in_word = true;
+        word_start = idx;
+    }
+
+    // There is no word but only separators before the cursor: the beginning of
+    // the content is the nearest boundary.
+    if in_word {
+        word_start
+    } else {
+        0
+    }
+}
+
+/// Move the cursor to the end of the nearest word at or after the cursor.
+///
+/// The word separators are skipped first, so the cursor lands right after the
+/// last character of the next word, and at the end of the content when there is
+/// no word left.
+pub fn cursor_next_word_end(content: &str, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(content, *cursor) else {
+        return
+    };
+
+    *cursor = cursor_from_insertion_point(content, next_word_end(content, pos));
+}
+
+/// Move the cursor to the start of the nearest word before the cursor.
+///
+/// The word separators right before the cursor are skipped first, so the cursor
+/// lands on the first character of the previous word, and at the beginning of
+/// the content when there is no word left.
+pub fn cursor_prev_word_start(content: &str, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(content, *cursor) else {
+        return
+    };
+
+    *cursor = cursor_from_insertion_point(content, prev_word_start(content, pos));
+}
+
+/// Delete the whole word before the cursor and update content & cursor
+/// position.
+///
+/// The deleted range starts at the word start found by [`prev_word_start`], so
+/// the separators between the word and the cursor are removed as well:
+/// `:rename foo.txt` becomes `:rename foo.` when the cursor is placed after
+/// `txt`.
+///
+/// Unlike [`delete_word`], the word boundaries are the same as the word-wise
+/// cursor movement, and the content is never cut inside a multi-byte character.
+pub fn delete_word_before_cursor(_str: &mut String, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(_str, *cursor) else {
+        return
+    };
+
+    let start = prev_word_start(_str, pos);
+    if start == pos {
+        return
+    }
+
+    _str.replace_range(start..pos, "");
+    *cursor = cursor_from_insertion_point(_str, start);
+}
+
+/// Delete the whole word after the cursor and update content & cursor position.
+///
+/// The deleted range ends at the word end found by [`next_word_end`], so the
+/// separators between the cursor and the word are removed as well:
+/// `:rename foo.txt` becomes `:rename .txt` when the cursor is placed before
+/// `foo`.
+///
+/// The word boundaries are the same as the word-wise cursor movement, and the
+/// content is never cut inside a multi-byte character.
+pub fn delete_word_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(_str, *cursor) else {
+        return
+    };
+
+    let end = next_word_end(_str, pos);
+    if end == pos {
+        return
+    }
+
+    _str.replace_range(pos..end, "");
+    *cursor = cursor_from_insertion_point(_str, pos);
+}
+
+/// Delete the character after the cursor and update content & cursor position.
+///
+/// The cursor stays at the same insertion point, so repeating the operation
+/// deletes the following characters one by one. A multi-byte character is
+/// removed as a whole, and nothing happens when the cursor is at the end of the
+/// content.
+pub fn delete_char_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(_str, *cursor) else {
+        return
+    };
+
+    let Some(_char) = _str[pos..].chars().next() else {
+        return
+    };
+
+    _str.replace_range(pos..pos + _char.len_utf8(), "");
+    *cursor = cursor_from_insertion_point(_str, pos);
+}
+
 pub fn update_window_height(height: u16) {
     let current = WINDOW_HEIGHT.load(Ordering::Acquire);
     if current != height {
@@ -189,4 +379,206 @@ pub fn update_window_height(height: u16) {
 
 pub fn get_window_height() -> u16 {
     WINDOW_HEIGHT.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_is_word_char() {
+        assert!(is_word_char('a'));
+        assert!(is_word_char('0'));
+        assert!(is_word_char('_'));
+        assert!(is_word_char('文'));
+        assert!(!is_word_char(' '));
+        assert!(!is_word_char('/'));
+        assert!(!is_word_char('.'));
+        assert!(!is_word_char('-'));
+    }
+
+    #[test]
+    fn test_next_word_end() {
+        let content = "hello world";
+
+        // From the beginning and from inside a word, the end of that word.
+        assert_eq!(next_word_end(content, 0), 5);
+        assert_eq!(next_word_end(content, 2), 5);
+
+        // From a separator, the end of the next word.
+        assert_eq!(next_word_end(content, 5), 11);
+        assert_eq!(next_word_end(content, 6), 11);
+        assert_eq!(next_word_end(content, 7), 11);
+
+        // There is no word left.
+        assert_eq!(next_word_end(content, 11), 11);
+        assert_eq!(next_word_end("hello  ", 5), 7);
+    }
+
+    #[test]
+    fn test_prev_word_start() {
+        let content = "hello world";
+
+        // From the end and from inside a word, the start of that word.
+        assert_eq!(prev_word_start(content, 11), 6);
+        assert_eq!(prev_word_start(content, 8), 6);
+
+        // From a word start, the start of the previous word.
+        assert_eq!(prev_word_start(content, 6), 0);
+        assert_eq!(prev_word_start(content, 5), 0);
+
+        // There is no word before the cursor.
+        assert_eq!(prev_word_start(content, 0), 0);
+        assert_eq!(prev_word_start("  hello", 2), 0);
+    }
+
+    #[test]
+    fn test_cursor_insertion_point() {
+        assert!(cursor_insertion_point("abc", CursorPos::End) == Some(3));
+        assert!(cursor_insertion_point("abc", CursorPos::Index(1)) == Some(1));
+        assert!(cursor_insertion_point("abc", CursorPos::None).is_none());
+
+        // The cursor cannot point outside the content or inside a character.
+        assert!(cursor_insertion_point("abc", CursorPos::Index(4)).is_none());
+        assert!(cursor_insertion_point("文件", CursorPos::Index(1)).is_none());
+    }
+
+    #[test]
+    fn test_cursor_from_insertion_point() {
+        assert!(cursor_from_insertion_point("abc", 0) == CursorPos::Index(0));
+        assert!(cursor_from_insertion_point("abc", 2) == CursorPos::Index(2));
+        assert!(cursor_from_insertion_point("abc", 3) == CursorPos::End);
+        assert!(cursor_from_insertion_point("", 0) == CursorPos::End);
+    }
+
+    #[test]
+    fn test_cursor_word_movement() {
+        let content = "hello world";
+        let mut cursor = CursorPos::Index(0);
+
+        cursor_next_word_end(content, &mut cursor);
+        assert!(cursor == CursorPos::Index(5));
+
+        cursor_next_word_end(content, &mut cursor);
+        assert!(cursor == CursorPos::End);
+
+        cursor_prev_word_start(content, &mut cursor);
+        assert!(cursor == CursorPos::Index(6));
+
+        cursor_prev_word_start(content, &mut cursor);
+        assert!(cursor == CursorPos::Index(0));
+
+        // Nothing happens when there is no cursor.
+        let mut cursor = CursorPos::None;
+        cursor_next_word_end(content, &mut cursor);
+        cursor_prev_word_start(content, &mut cursor);
+        assert!(cursor == CursorPos::None);
+    }
+
+    #[test]
+    fn test_delete_word_before_cursor() {
+        // Delete the word in the middle of the content.
+        let mut content = String::from("hello world");
+        let mut cursor = CursorPos::Index(8);
+
+        delete_word_before_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "hello rld");
+        assert!(cursor == CursorPos::Index(6));
+
+        // Multi-byte characters are never cut.
+        let mut content = String::from("文件 abc");
+        let mut cursor = CursorPos::End;
+
+        delete_word_before_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "文件 ");
+        assert!(cursor == CursorPos::End);
+
+        // Nothing to delete at the beginning of the content.
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::Index(0);
+
+        delete_word_before_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "abc");
+        assert!(cursor == CursorPos::Index(0));
+    }
+
+    #[test]
+    fn test_delete_char_after_cursor() {
+        // Delete the character under the cursor, the cursor stays in place.
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::Index(1);
+
+        delete_char_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "ac");
+        assert!(cursor == CursorPos::Index(1));
+
+        // Repeated deletions remove the following characters one by one.
+        delete_char_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "a");
+        assert!(cursor == CursorPos::End);
+
+        // Nothing to delete at the end of the content.
+        delete_char_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "a");
+        assert!(cursor == CursorPos::End);
+
+        // A multi-byte character is removed as a whole.
+        let mut content = String::from("文件abc");
+        let mut cursor = CursorPos::Index(0);
+
+        delete_char_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "件abc");
+        assert!(cursor == CursorPos::Index(0));
+
+        // Nothing happens without a cursor.
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::None;
+
+        delete_char_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "abc");
+        assert!(cursor == CursorPos::None);
+    }
+
+    #[test]
+    fn test_delete_word_after_cursor() {
+        // From inside a word, the rest of that word is deleted.
+        let mut content = String::from("hello world");
+        let mut cursor = CursorPos::Index(2);
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "he world");
+        assert!(cursor == CursorPos::Index(2));
+
+        // From a separator, the separator and the next word are deleted.
+        let mut content = String::from("hello world");
+        let mut cursor = CursorPos::Index(5);
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "hello");
+        assert!(cursor == CursorPos::End);
+
+        // Nothing to delete at the end of the content.
+        let mut content = String::from("hello");
+        let mut cursor = CursorPos::End;
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "hello");
+        assert!(cursor == CursorPos::End);
+
+        // Multi-byte characters are never cut.
+        let mut content = String::from("文件 abc");
+        let mut cursor = CursorPos::Index(0);
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, " abc");
+        assert!(cursor == CursorPos::Index(0));
+
+        // Nothing happens without a cursor.
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::None;
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "abc");
+        assert!(cursor == CursorPos::None);
+    }
 }
