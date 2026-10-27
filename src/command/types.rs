@@ -36,6 +36,9 @@ pub enum AppCommand {
     CommandInsert,
     QuitAfterOutput,
 
+    /// Run a root instance of hire with the tabs of the current session.
+    SudoSession,
+
     /// When the boolean is true, only mark single file.
     Mark(bool),
 
@@ -123,6 +126,7 @@ impl AppCommand {
             "mark_expand"       => Self::MarkExpand,
             "output_file"       => Self::OutputFile,
             "path_history"      => Self::PathHistory,
+            "sudo_session"      => Self::SudoSession,
             "full_path"         => Self::PrintFullPath,
             "single_symlink"    => Self::SingleSymlink,
             "show_navi_index"   => Self::ShowNaviIndex,

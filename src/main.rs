@@ -6,6 +6,7 @@ mod config;
 mod command;
 mod key_event;
 
+use std::path::Path;
 use std::time::Duration;
 
 use clap::Parser;
@@ -27,6 +28,11 @@ use key_event::{
 fn main() -> AppResult<()> {
     let args = utils::Args::parse();
 
+    // A sudo session runs with an isolated config directory.
+    if args.config_dir != "NULL" {
+        config::set_config_dir_override(&args.config_dir);
+    }
+
     let mut initial = true;
     let mut app = App::default();
     let image_recvs = app.init_image_picker();
@@ -37,6 +43,14 @@ fn main() -> AppResult<()> {
 
     // Load the working directory set by the user.
     app.load_working_directory();
+
+    // Restore the tabs handed over by a sudo session.
+    if args.sudo_session != "NULL" {
+        let session = key_event::SessionTabs::load(
+            Path::new(&args.sudo_session)
+        )?;
+        app.apply_session_tabs(&session)?;
+    }
 
     let mut terminal = ratatui::init();
 

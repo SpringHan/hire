@@ -557,6 +557,7 @@ dependencies = [
  "image",
  "is_executable",
  "lazy_static",
+ "libc",
  "ratatui",
  "ratatui-image",
  "thiserror 2.0.11",

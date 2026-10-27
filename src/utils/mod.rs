@@ -43,6 +43,14 @@ pub struct Args {
     /// Kill the hire process after an output operation.
     #[arg(short, long, default_value_t = false)]
     pub quit_after_output: bool,
+
+    /// Internal: restore the tabs handed over by a sudo session.
+    #[arg(long, hide = true, default_value_t = String::from("NULL"))]
+    pub sudo_session: String,
+
+    /// Internal: the isolated config directory used by a sudo session.
+    #[arg(long, hide = true, default_value_t = String::from("NULL"))]
+    pub config_dir: String,
 }
 
 #[derive(Clone, Copy)]

@@ -176,6 +176,25 @@ keymap = [
 ]
 ```
 
+### Root Session
+
+Sometimes root privileges are needed in the middle of a browsing session. `sudo_session` starts a root instance of hire in the same terminal and hands the current tabs over to it, so the root instance opens exactly the tabs you had open:
+
+```toml
+keymap = [
+    # Other bindings.....
+
+    { key = "Z", run = "sudo_session" },
+]
+```
+
+- Pressing the key suspends the current (unprivileged) instance, asks `sudo` for the password on the normal screen and starts `sudo -E <hire> --sudo-session <state> --config-dir <dir>`.
+- The new instance restores every tab (path, hidden-file flag and the file selected in the tab) and starts in the tab which was focused.
+- Do the root work there, then quit it (`q`, and confirm with `y` when tabs are open). The root process exits and the original unprivileged instance comes back exactly where it was: this is how the root privileges are dropped manually.
+- The root instance runs with a throw-away copy of `auto_config.toml`, `user_config.toml` and `keymap.toml`. Its configuration changes (new bookmarks, stored tabs) are discarded when it exits, so your real config files are never rewritten as root.
+- Changes of tabs made in the root instance are not synced back to the original instance.
+- Files created or modified as root keep the root ownership; nothing is chowned automatically.
+
 ## Keybindings for command line
 
 - Cursor move left: `C-b`

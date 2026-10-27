@@ -9,6 +9,7 @@ mod interaction;
 mod file_search;
 mod path_history;
 mod command_line;
+mod sudo_session;
 mod goto_operation;
 mod cursor_movement;
 mod file_operations;
@@ -46,9 +47,10 @@ use crate::utils::{
 // Export
 pub use tab::TabList;
 pub use file_search::FileSearcher;
+pub use sudo_session::SessionTabs;
+pub use macro_page::execute_macro;
 pub use edit::{EditMode, EditItem};
 pub use simple_operations::output_path;
-pub use macro_page::execute_macro;
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
@@ -478,6 +480,7 @@ impl AppCommand {
             AppCommand::MacroPage       => macro_page::macro_operation(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
             AppCommand::SingleSymlink   => paste_operation::make_single_symlink(app)?,
+            AppCommand::SudoSession     => sudo_session::sudo_session(app, terminal)?,
             AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,
             AppCommand::QuitAfterOutput => app.quit_after_output = !app.quit_after_output,
 

@@ -4,8 +4,9 @@ mod types;
 mod keymap;
 
 use std::{
+    sync::OnceLock,
     fs::{self, File, OpenOptions},
-    io::{self, ErrorKind, Read, Write}
+    io::{self, ErrorKind, Read, Write},
 };
 
 use anyhow::Result;
@@ -17,6 +18,17 @@ use crate::{app::App, error::{AppError, AppResult}};
 
 pub use types::*;
 pub use keymap::Keymap;
+
+/// A config directory used instead of the default one.
+///
+/// It's set by the hidden `--config-dir` argument, which a sudo session uses to
+/// run with a throw-away copy of the user's config.
+static CONFIG_DIR_OVERRIDE: OnceLock<String> = OnceLock::new();
+
+/// Use `dir` as the config directory (overrides `HIRE_CONFIG_DIR`).
+pub fn set_config_dir_override(dir: &str) {
+    let _ = CONFIG_DIR_OVERRIDE.set(dir.to_owned());
+}
 
 /// Get T from Option<T>.
 /// When it succeeded, return the value, otherwise throw anyhow error.
@@ -149,20 +161,24 @@ pub fn get_document(path: String) -> Result<DocumentMut> {
 /// for tests and for running the app with an isolated configuration (the
 /// configured GUI command, for example, is then never the one of the user).
 pub fn get_conf_file() -> io::Result<(String, String, String)> {
-    let config_dir = match std::env::var("HIRE_CONFIG_DIR") {
-        Ok(dir) if !dir.trim().is_empty() => {
-            format!("{}/", dir.trim().trim_end_matches('/'))
-        },
-        _ => {
-            let user = std::env::var("USER").expect("Failed to get user name!");
-            format!(
-                "{}/.config/springhan/hire/",
-                if user == String::from("root") {
-                    String::from("/root")
-                } else {
-                    format!("/home/{}", user)
-                }
-            )
+    let config_dir = if let Some(dir) = CONFIG_DIR_OVERRIDE.get() {
+        format!("{}/", dir.trim().trim_end_matches('/'))
+    } else {
+        match std::env::var("HIRE_CONFIG_DIR") {
+            Ok(dir) if !dir.trim().is_empty() => {
+                format!("{}/", dir.trim().trim_end_matches('/'))
+            },
+            _ => {
+                let user = std::env::var("USER").expect("Failed to get user name!");
+                format!(
+                    "{}/.config/springhan/hire/",
+                    if user == String::from("root") {
+                        String::from("/root")
+                    } else {
+                        format!("/home/{}", user)
+                    }
+                )
+            }
         }
     };
 

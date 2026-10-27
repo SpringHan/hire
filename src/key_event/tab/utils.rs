@@ -361,7 +361,7 @@ fn remove_storage_tabs(app: &mut App, idx: usize) -> anyhow::Result<bool> {
 }
 
 /// Update current tab info.
-fn update_current_tab(app: &mut App) {
+pub fn update_current_tab(app: &mut App) {
     let selected_idx = if app.root() {
         app.selected_item.parent_selected()
     } else {

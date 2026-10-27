@@ -100,6 +100,38 @@ impl<'a> TabList<'a> {
     pub fn len(&self) -> usize {
         self.list.len()
     }
+
+    /// Return the current tab index, all `(path, hide_files)` tabs and the
+    /// selected file index of every tab.
+    pub fn snapshot(&self) -> (usize, Vec<(PathBuf, bool)>, Vec<Option<usize>>) {
+        (
+            self.current,
+            self.list.to_owned(),
+            self.selected_file.to_owned()
+        )
+    }
+
+    /// Replace the open tabs with a snapshot taken from another instance.
+    ///
+    /// The `selected` list is padded so that it always matches `list`; the
+    /// current index is clamped into the given tabs.
+    pub fn set_snapshot(
+        &mut self,
+        current: usize,
+        list: Vec<(PathBuf, bool)>,
+        selected: Vec<Option<usize>>
+    ) {
+        if list.is_empty() {
+            return
+        }
+
+        let mut selected = selected;
+        selected.resize(list.len(), None);
+
+        self.current = current.min(list.len() - 1);
+        self.list = list;
+        self.selected_file = selected;
+    }
 }
 
 #[cfg(test)]

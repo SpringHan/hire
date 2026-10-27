@@ -222,7 +222,8 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 **`config/mod.rs`** — config lives in `~/.config/springhan/hire/` (override it
 with the `HIRE_CONFIG_DIR` environment variable, which keeps tests and
 automated runs away from the user's real configuration; see §6 for the test
-recipe). Three files are used:
+recipe). The hidden `--config-dir` argument sets an override even higher, which
+is how a sudo session runs with its throw-away config copy. Three files are used:
 `auto_config.toml` (written by the app: bookmarks, stored tabs),
 `user_config.toml` (hand-written: `default_shell`, `gui_commands`,
 `file_read_program`, `gui_file_open_cmd`) and `keymap.toml`.
@@ -271,10 +272,11 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` and `$.` substitution. |
 | `key_event/shell/utils.rs` | Run shells/commands (with or without output), open files, working-dir cache. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
+| `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
-| `key_event/tab/types.rs` | `TabList` (open tabs) and `TabState` (tab menu state). |
+| `key_event/tab/types.rs` | `TabList` (open tabs, with `snapshot`/`set_snapshot` for sessions) and `TabState` (tab menu state). |
 | `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore. |
 
 **`key_event/mod.rs`** — the input dispatcher.
@@ -373,6 +375,16 @@ when it's set, otherwise write that path to the temp/output file; both honor
 `quit_after_output`) and `jump_to_temp_file` (jump to the path stored in that
 file).
 
+**`key_event/sudo_session.rs`** — `SessionTabs` (the focused tab index plus every
+tab's path, `hide_files` flag and selected file index) is serialized to a
+temporary TOML file; `sudo_session` copies the config files into a temporary
+directory, leaves the TUI and runs
+`sudo -E <current_exe> --sudo-session <state> --config-dir <dir>` in the same
+terminal. The new process reads `--sudo-session` at startup
+(`App::apply_session_tabs`) and runs with the temporary config
+(`--config-dir`). Quitting the root instance returns to the original,
+unprivileged one — there is no euid juggling in either process.
+
 **`key_event/switch/`** — the generic menu framework. `SwitchCase::new` installs
 a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;
 `switch_match` invokes the handler with the pressed character and closes the
@@ -442,7 +454,8 @@ command line; the layout arithmetic saturates instead of overflowing.
 **`utils/mod.rs`**
 
 - `Args` — clap-derived CLI options (`--working-directory`, `--start-from`,
-  `--output-file`, `--quit-after-output`).
+  `--output-file`, `--quit-after-output`), plus the hidden `--sudo-session` /
+  `--config-dir` arguments used by the sudo session.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
   expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
@@ -506,6 +519,18 @@ metadata shown in the state line and preview.
 `key_event::command_line::completion`, which completes builtin commands, file
 names, or the selected browser item (when the cursor is right after a space) and
 shows a candidate popup (`ui/cmdline_popup.rs`).
+
+### Sudo session
+
+```
+sudo_session (keybinding, e.g. `Z`)
+  └─ sync the current tab → SessionTabs → /tmp/hire-sudo-*/session.toml
+     copy auto_config/user_config/keymap → the same temporary directory
+       └─ sudo -E <hire> --sudo-session <file> --config-dir <dir>
+            └─ new hire: config override + apply_session_tabs + TUI
+                 └─ quit (`q`, confirm with `y` when tabs are open)
+                      └─ the root process exits, the original TUI is redrawn
+```
 
 ### Menus (`SwitchCase`)
 
