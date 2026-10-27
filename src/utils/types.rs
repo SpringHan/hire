@@ -4,10 +4,19 @@ use std::collections::HashMap;
 
 use ratatui::{text::Text, widgets::ListState};
 
+/// The cursor position inside a piece of editable text.
+///
+/// `Index` is a **byte offset** into the UTF-8 text and always lies on a
+/// character boundary, so a multi-byte character (e.g. a CJK one) is moved and
+/// deleted as a whole. `End` means the cursor is placed after the last
+/// character, and `None` means the text isn't editable.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CursorPos {
+    /// The insertion point, as a byte offset on a character boundary.
     Index(usize),
+    /// The insertion point after the last character.
     End,
+    /// No editable cursor.
     None
 }
 

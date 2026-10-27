@@ -1,14 +1,12 @@
 // Command Line
 
-use std::ops::AddAssign;
-
 use ratatui::DefaultTerminal;
 
 use crate::{
     key_event::{CommandStr, ShellCommand},
     utils::{Block, CmdContent, CursorPos},
     error::{AppResult, ErrorType},
-    utils::Direction,
+    utils::{cursor_from_insertion_point, cursor_insertion_point, Direction},
     rt_error,
     App,
 };
@@ -28,9 +26,18 @@ impl<'a> App<'a> {
             ) = self.selected_block
         {
             let content_ref = origin.get_mut();
-            if let CursorPos::Index(idx) = cursor {
-                content_ref.insert(*idx, content);
-                idx.add_assign(1);
+            if let CursorPos::Index(_) = *cursor {
+                // The cursor is a byte offset, so it has to move over the whole
+                // inserted character, which may take several bytes (e.g. CJK).
+                let Some(pos) = cursor_insertion_point(content_ref, *cursor) else {
+                    return ()
+                };
+
+                content_ref.insert(pos, content);
+                *cursor = cursor_from_insertion_point(
+                    content_ref,
+                    pos + content.len_utf8()
+                );
                 return ()
             }
 

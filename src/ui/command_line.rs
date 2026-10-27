@@ -246,32 +246,55 @@ pub fn get_command_line_style<'a>(
     }
 }
 
+/// Build the command line spans with the character under the cursor
+/// highlighted.
+///
+/// The cursor is a byte offset on a character boundary, so the text is walked
+/// with `char_indices()` and compared by the byte position. Comparing the
+/// character count would be wrong as soon as the content holds multi-byte
+/// characters (e.g. CJK ones).
 fn get_command_line_span_list<'a>(
     command_cont: &'a CmdContent,
     cursor: CursorPos,
     eye_catching: bool
 ) -> Vec<Span<'a>>
 {
-    let mut span_list: Vec<Span> = Vec::new();
     if let CursorPos::Index(idx) = cursor {
-        let mut i = 0;
-        for c in command_cont.get().chars() {
-            span_list.push(
-                if i == idx {
-                    Span::raw(String::from(c))
+        let content = command_cont.get();
+        let mut span_list: Vec<Span> = Vec::new();
+        let mut cursor_drawn = false;
+
+        for (byte_start, _char) in content.char_indices() {
+            let char_len = _char.len_utf8();
+
+            // A cursor placed inside a character (which shouldn't happen, but
+            // is handled gracefully) belongs to that character.
+            if idx >= byte_start && idx < byte_start + char_len {
+                cursor_drawn = true;
+                span_list.push(
+                    Span::raw(_char.to_string())
                         .fg(Color::Black)
                         .bg(Color::White)
-                } else {
-                    Span::raw(String::from(c))
-                        .fg(Color::White)
-                }
+                );
+            } else {
+                span_list.push(
+                    Span::raw(_char.to_string()).fg(Color::White)
+                );
+            }
+        }
+
+        // The cursor may be placed at the end of the line, and it has to stay
+        // visible in that case.
+        if !cursor_drawn {
+            span_list.push(
+                Span::raw(" ").fg(Color::Black).bg(Color::White)
             );
-            i += 1;
         }
 
         return span_list
     }
 
+    let mut span_list: Vec<Span> = Vec::new();
     span_list.push(Span::from(command_cont.get()).fg(if eye_catching {
         Color::Red
     } else {
@@ -288,6 +311,57 @@ fn get_command_line_span_list<'a>(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Return the content of the spans which are drawn as the cursor.
+    fn highlighted(spans: &[Span]) -> Vec<String> {
+        spans
+            .iter()
+            .filter(|span| span.style.bg == Some(Color::White))
+            .map(|span| span.content.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_command_line_cursor_with_multibyte_content() {
+        let content = CmdContent::String(String::from("中文"));
+
+        let list = get_command_line_span_list(
+            &content,
+            CursorPos::Index(0),
+            false
+        );
+        assert_eq!(highlighted(&list), vec![String::from("中")]);
+
+        let list = get_command_line_span_list(
+            &content,
+            CursorPos::Index(3),
+            false
+        );
+        assert_eq!(highlighted(&list), vec![String::from("文")]);
+
+        let list = get_command_line_span_list(&content, CursorPos::End, false);
+        assert_eq!(highlighted(&list), vec![String::from(" ")]);
+
+        // A cursor at the end of the content stays visible.
+        let list = get_command_line_span_list(
+            &content,
+            CursorPos::Index(6),
+            false
+        );
+        assert_eq!(highlighted(&list), vec![String::from(" ")]);
+    }
+
+    #[test]
+    fn test_command_line_cursor_with_ascii_content() {
+        let content = CmdContent::String(String::from(":rename"));
+        let list = get_command_line_span_list(
+            &content,
+            CursorPos::Index(1),
+            false
+        );
+
+        assert_eq!(highlighted(&list), vec![String::from("r")]);
+    }
 
     #[test]
     fn test_working_dir_label() {

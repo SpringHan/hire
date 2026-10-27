@@ -1,11 +1,20 @@
 // Operations on command line.
 
-use std::{borrow::Cow, ops::{AddAssign, SubAssign}};
+use std::borrow::Cow;
 
 use ratatui::widgets::ListState;
 
 use crate::{
-    utils::{Block, CmdContent, CursorPos},
+    utils::{
+        cursor_from_insertion_point,
+        cursor_insertion_point,
+        display_width,
+        next_char_boundary,
+        prev_char_boundary,
+        Block,
+        CmdContent,
+        CursorPos,
+    },
     error::AppResult,
     utils::str_split,
     option_get,
@@ -108,7 +117,7 @@ pub fn completion(app: &mut App) -> AppResult<()> {
                     break;
                 }
 
-                position += command_slice[i].len() + 1;
+                position += display_width(command_slice[i]) + 1;
             }
             update_completion(
                 app,
@@ -173,7 +182,7 @@ pub fn update_cmdline(
     // Can make completion
     let err_msg = "Cannot get any candidate for completion";
 
-    let (content, mut cursor) = content_info.unwrap();
+    let (content, _) = content_info.unwrap();
     let mut command_slice = str_split(content);
 
     let new_value = option_get!(
@@ -196,11 +205,10 @@ pub fn update_cmdline(
     }
 
     let updated_content = command_slice.join(" ");
-    if cursor != CursorPos::End {
-        cursor = CursorPos::Index(updated_content.len());
-    }
 
-    app_block.set_command_line(updated_content, cursor);
+    // The completion always places the cursor at the end of the updated
+    // content, which is represented by `CursorPos::End`.
+    app_block.set_command_line(updated_content, CursorPos::End);
 
     Ok(())
 }
@@ -219,46 +227,44 @@ pub fn get_content(app_block: &Block) -> Option<(String, CursorPos)> {
         return None
     }
 
-    // Get content slice
-    let idx = match cursor {
-        CursorPos::Index(idx) => idx,
-        CursorPos::End => _content.len() - 1,
+    // The slice ends after the character at the cursor, which may be a
+    // multi-byte one, so the next character boundary is used instead of the
+    // byte offset itself.
+    let end = match cursor {
+        CursorPos::Index(_) => {
+            let idx = cursor_insertion_point(&_content, cursor)?;
+            next_char_boundary(&_content, idx).unwrap_or(_content.len())
+        },
+        CursorPos::End => _content.len(),
         CursorPos::None => return None,
     };
-    let content = &_content[..=idx];
 
-    Some((content.to_owned(), cursor))
+    Some((_content[..end].to_owned(), cursor))
 }
 
 impl<'a> App<'a> {
     pub fn cursor_left(&mut self, edge: bool) {
         if let Block::CommandLine(
-            ref command,
+            CmdContent::String(ref command),
             ref mut cursor
         ) = self.selected_block
         {
-            if edge {
-                *cursor = CursorPos::Index(0);
-                if self.command_completion.show_frame {
-                    self.command_completion.reset();
-                }
+            let previous = if edge {
+                Some(CursorPos::Index(0))
+            } else {
+                let Some(pos) = cursor_insertion_point(command, *cursor) else {
+                    return
+                };
 
-                return ()
-            }
+                prev_char_boundary(command, pos).map(CursorPos::Index)
+            };
 
-            match cursor {
-                CursorPos::Index(idx) => {
-                    if *idx == 0 {
-                        return ()
-                    }
-                    idx.sub_assign(1);
-                },
-                CursorPos::End => {
-                    *cursor = CursorPos::Index(
-                        command.get().len() - 1
-                    );
-                },
-                _ => ()
+            let Some(previous) = previous else {
+                return
+            };
+
+            if *cursor != previous {
+                *cursor = previous;
             }
 
             if self.command_completion.show_frame {
@@ -269,29 +275,35 @@ impl<'a> App<'a> {
 
     pub fn cursor_right(&mut self, edge: bool) {
         if let Block::CommandLine(
-            ref command,
+            CmdContent::String(ref command),
             ref mut cursor
         ) = self.selected_block
         {
-            if edge {
-                *cursor = CursorPos::End;
-                if self.command_completion.show_frame {
-                    self.command_completion.reset();
-                }
+            let next = if edge {
+                Some(CursorPos::End)
+            } else {
+                let Some(pos) = cursor_insertion_point(command, *cursor) else {
+                    return
+                };
 
-                return ()
+                Some(
+                    match next_char_boundary(command, pos) {
+                        Some(next) => cursor_from_insertion_point(command, next),
+                        None => CursorPos::End,
+                    }
+                )
+            };
+
+            let Some(next) = next else {
+                return
+            };
+
+            if *cursor != next {
+                *cursor = next;
             }
 
-            if let CursorPos::Index(idx) = cursor {
-                if *idx == command.get().len() - 1 {
-                    *cursor = CursorPos::End;
-                } else {
-                    idx.add_assign(1);
-                }
-
-                if self.command_completion.show_frame {
-                    self.command_completion.reset();
-                }
+            if self.command_completion.show_frame {
+                self.command_completion.reset();
             }
         }
     }
@@ -437,26 +449,15 @@ fn insert_before_cursor(app_block: &mut Block, text: &str) -> bool {
         CmdContent::String(ref mut content),
         ref mut cursor
     ) = *app_block {
-        match cursor {
-            CursorPos::Index(idx) => {
-                if *idx > content.len() {
-                    return false
-                }
+        let Some(pos) = cursor_insertion_point(content, *cursor) else {
+            return false
+        };
 
-                content.insert_str(*idx, text);
+        content.insert_str(pos, text);
 
-                // When the cursor reaches the end of the content, use `End`
-                // instead of an index which is out of the content.
-                let new_idx = *idx + text.len();
-                *cursor = if new_idx == content.len() {
-                    CursorPos::End
-                } else {
-                    CursorPos::Index(new_idx)
-                };
-            },
-            CursorPos::End => content.push_str(text),
-            CursorPos::None => return false,
-        }
+        // The cursor always ends up after the inserted text, and it's switched
+        // to `End` when the insertion reaches the end of the content.
+        *cursor = cursor_from_insertion_point(content, pos + text.len());
 
         return true
     }
@@ -483,8 +484,9 @@ fn update_completion(
         
         for file in files_iter {
             if file.name.starts_with(current) {
-                if max_width < file.name.len() {
-                    max_width = file.name.len();
+                let width = display_width(&file.name);
+                if max_width < width {
+                    max_width = width;
                 }
                 candidates.push(Cow::Owned(file.name.to_owned()));
             }
@@ -494,8 +496,9 @@ fn update_completion(
 
         for cmd in commands.into_iter() {
             if cmd.starts_with(current) {
-                if max_width < cmd.len() {
-                    max_width = cmd.len();
+                let width = display_width(cmd);
+                if max_width < width {
+                    max_width = width;
                 }
                 candidates.push(Cow::Borrowed(cmd));
             }
@@ -520,6 +523,8 @@ fn update_completion(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use crate::app::FileSaver;
 
     fn app_with(content: &str, cursor: CursorPos) -> App<'static> {
         let mut app = App::default();
@@ -726,5 +731,117 @@ mod test {
             app.selected_block,
             Block::CommandLine(CmdContent::Text(_), CursorPos::None)
         ));
+    }
+
+    fn file_saver(name: &str) -> FileSaver {
+        let mut file = FileSaver::default();
+        file.name = String::from(name);
+        file
+    }
+
+    #[test]
+    fn test_command_line_append_with_multibyte_content() {
+        let mut app = app_with("中b", CursorPos::Index(3));
+
+        app.command_line_append('X');
+        assert_command_line(&app, "中Xb", CursorPos::Index(4));
+
+        // The cursor moves over the whole inserted character.
+        app.command_line_append('文');
+        assert_command_line(&app, "中X文b", CursorPos::Index(7));
+    }
+
+    #[test]
+    fn test_cursor_movement_with_multibyte_content() {
+        let mut app = app_with("中文ab", CursorPos::End);
+
+        app.cursor_left(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(7));
+
+        app.cursor_left(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(6));
+
+        app.cursor_left(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(3));
+
+        app.cursor_left(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(0));
+
+        app.cursor_left(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(0));
+
+        app.cursor_right(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(3));
+
+        app.cursor_right(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(6));
+
+        app.cursor_right(false);
+        assert_command_line(&app, "中文ab", CursorPos::Index(7));
+
+        app.cursor_right(false);
+        assert_command_line(&app, "中文ab", CursorPos::End);
+
+        // The cursor never enters a multi-byte character.
+        let mut app = app_with("中文", CursorPos::End);
+        app.cursor_left(false);
+        assert_command_line(&app, "中文", CursorPos::Index(3));
+    }
+
+    #[test]
+    fn test_cursor_movement_on_empty_command_line() {
+        let mut app = app_with("", CursorPos::End);
+
+        app.cursor_left(false);
+        assert_command_line(&app, "", CursorPos::End);
+
+        app.cursor_right(false);
+        assert_command_line(&app, "", CursorPos::End);
+    }
+
+    #[test]
+    fn test_get_content_with_multibyte_content() {
+        let app = app_with("中文ab", CursorPos::End);
+        let (content, cursor) = get_content(&app.selected_block).unwrap();
+        assert_eq!(content, "中文ab");
+        assert!(cursor == CursorPos::End);
+
+        let app = app_with("中文ab", CursorPos::Index(3));
+        let (content, cursor) = get_content(&app.selected_block).unwrap();
+        assert_eq!(content, "中文");
+        assert!(cursor == CursorPos::Index(3));
+
+        // An index at the end of the content doesn't panic.
+        let app = app_with("中文", CursorPos::Index(6));
+        let (content, cursor) = get_content(&app.selected_block).unwrap();
+        assert_eq!(content, "中文");
+        assert!(cursor == CursorPos::Index(6));
+    }
+
+    #[test]
+    fn test_completion_position_with_multibyte_content() {
+        let mut app = app_with(":create_symlink 中文 a", CursorPos::End);
+        app.current_files = vec![file_saver("abc")];
+
+        assert!(completion(&mut app).is_ok());
+
+        // `:create_symlink` and `中文` are 16 and 4 columns wide, so the
+        // candidate for `a` starts at column 21 (byte offsets would say 23).
+        assert_eq!(app.command_completion.popup_position(), (21, 3));
+        assert_command_line(&app, ":create_symlink 中文 abc", CursorPos::End);
+    }
+
+    #[test]
+    fn test_completion_candidate_width_with_multibyte_content() {
+        let mut app = app_with(":create_symlink 中", CursorPos::End);
+        app.current_files = vec![file_saver("中文文件名")];
+
+        assert!(matches!(
+            update_completion(&mut app, CompletionType::File, "中"),
+            Ok(true)
+        ));
+
+        // The popup is sized by the display width (five CJK characters).
+        assert_eq!(app.command_completion.popup_position().1, 10);
     }
 }

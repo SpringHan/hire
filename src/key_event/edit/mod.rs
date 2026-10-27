@@ -7,7 +7,16 @@ use std::fs;
 use ratatui::{style::{Color, Stylize}, text::Text, widgets::ListState};
 
 use crate::{
-    app::App, error::{AppError, AppResult}, option_get, utils::{delete_word, CmdContent, CursorPos, FileContent}
+    app::App, error::{AppError, AppResult}, option_get, utils::{
+        cursor_from_insertion_point,
+        cursor_insertion_point,
+        delete_word,
+        next_char_boundary,
+        prev_char_boundary,
+        CmdContent,
+        CursorPos,
+        FileContent,
+    }
 };
 
 use super::{cursor_movement::move_cursor_core, Goto, SwitchCaseData};
@@ -23,52 +32,43 @@ impl EditMode {
         edge: bool
     ) -> AppResult<()> {
         for item in self.items.iter_mut() {
-            if !right {
-                match item.cursor {
-                    CursorPos::Index(ref mut idx) => {
-                        if edge {
-                            item.cursor = CursorPos::Index(0);
-                        } else {
-                            if *idx > 0 {
-                                *idx -= 1;
-                            }
-                        }
-                    },
-                    CursorPos::End => {
-                        if item.editing_name.is_empty() {
-                            continue;
-                        }
+            if item.cursor == CursorPos::None {
+                continue
+            }
 
-                        if edge {
-                            item.cursor = CursorPos::Index(0);
-                        } else {
-                            item.cursor = CursorPos::Index(
-                                item.editing_name.len() - 1
-                            );
-                        }
-                    },
+            if edge {
+                item.cursor = if right {
+                    CursorPos::End
+                } else {
+                    CursorPos::Index(0)
+                };
 
-                    CursorPos::None => ()
+                continue
+            }
+
+            // The cursor is a byte offset on a character boundary, so the
+            // movement has to jump over the whole character (e.g. a CJK one).
+            let Some(pos) = cursor_insertion_point(
+                &item.editing_name,
+                item.cursor
+            ) else {
+                continue
+            };
+
+            item.cursor = if right {
+                match next_char_boundary(&item.editing_name, pos) {
+                    Some(next) => cursor_from_insertion_point(
+                        &item.editing_name,
+                        next
+                    ),
+                    None => CursorPos::End,
                 }
             } else {
-                match item.cursor {
-                    CursorPos::Index(ref mut index) => {
-                        if edge {
-                            item.cursor = CursorPos::End;
-                        } else {
-                            if *index < item.editing_name.len() - 1 {
-                                *index += 1;
-                                continue;
-                            }
-
-                            if *index == item.editing_name.len() - 1 {
-                                item.cursor = CursorPos::End;
-                            }
-                        }
-                    },
-                    _ => ()
+                match prev_char_boundary(&item.editing_name, pos) {
+                    Some(previous) => CursorPos::Index(previous),
+                    None => CursorPos::Index(0),
                 }
-            }
+            };
         }
 
         Ok(())
@@ -189,16 +189,21 @@ impl EditMode {
 
     pub fn insert_char(&mut self, _char: char) {
         for item in self.items.iter_mut() {
-            if item.cursor == CursorPos::None {
-                continue;
-            }
+            let Some(pos) = cursor_insertion_point(
+                &item.editing_name,
+                item.cursor
+            ) else {
+                continue
+            };
 
-            if let CursorPos::Index(ref mut idx) = item.cursor {
-                item.editing_name.insert(*idx, _char);
-                *idx += 1;
-            } else {
-                item.editing_name.push(_char);
-            }
+            item.editing_name.insert(pos, _char);
+
+            // The cursor is a byte offset, so it has to move over the whole
+            // inserted character, which may take several bytes (e.g. CJK).
+            item.cursor = cursor_from_insertion_point(
+                &item.editing_name,
+                pos + _char.len_utf8()
+            );
         }
     }
 
@@ -217,14 +222,25 @@ impl EditMode {
                 continue;
             }
 
-            if let CursorPos::Index(ref mut idx) = item.cursor {
-                if *idx != 0 {
-                    item.editing_name.remove(*idx - 1);
-                    *idx -= 1;
-                }
-            } else {
-                item.editing_name.pop();
-            }
+            let Some(pos) = cursor_insertion_point(
+                &item.editing_name,
+                item.cursor
+            ) else {
+                continue
+            };
+
+            let Some(start) = prev_char_boundary(&item.editing_name, pos)
+            else {
+                continue
+            };
+
+            // Remove the whole preceding character, which may take several
+            // bytes (e.g. CJK).
+            item.editing_name.replace_range(start..pos, "");
+            item.cursor = cursor_from_insertion_point(
+                &item.editing_name,
+                start
+            );
         }
     }
 
@@ -580,5 +596,80 @@ mod test {
         edit_mode.delete_word_after_cursor();
         assert_eq!(edit_mode.items[0].editing_name, "he world");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(2));
+    }
+
+    #[test]
+    fn test_insert_char_with_multibyte_content() {
+        let mut edit_mode = edit_mode_with("中b", CursorPos::Index(3));
+
+        edit_mode.insert_char('X');
+        assert_eq!(edit_mode.items[0].editing_name, "中Xb");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(4));
+
+        // The cursor moves over the whole inserted character.
+        edit_mode.insert_char('文');
+        assert_eq!(edit_mode.items[0].editing_name, "中X文b");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
+    }
+
+    #[test]
+    fn test_cursor_move_with_multibyte_content() {
+        let mut edit_mode = edit_mode_with("中文ab", CursorPos::End);
+
+        edit_mode.cursor_move(false, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
+
+        edit_mode.cursor_move(false, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(6));
+
+        edit_mode.cursor_move(false, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(3));
+
+        edit_mode.cursor_move(false, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        edit_mode.cursor_move(true, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(3));
+
+        edit_mode.cursor_move(true, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(6));
+
+        edit_mode.cursor_move(true, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
+
+        edit_mode.cursor_move(true, false).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // The edge movement still jumps to the beginning and the end.
+        edit_mode.cursor_move(false, true).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        edit_mode.cursor_move(true, true).unwrap();
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+    }
+
+    #[test]
+    fn test_backspace_with_multibyte_content() {
+        // The whole preceding character is deleted.
+        let mut edit_mode = edit_mode_with("中a", CursorPos::Index(3));
+
+        edit_mode.backspace(false);
+        assert_eq!(edit_mode.items[0].editing_name, "a");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+
+        let mut edit_mode = edit_mode_with("中a", CursorPos::End);
+
+        edit_mode.backspace(false);
+        assert_eq!(edit_mode.items[0].editing_name, "中");
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+    }
+
+    #[test]
+    fn test_delete_word_with_multibyte_content() {
+        let mut edit_mode = edit_mode_with("中文 x", CursorPos::Index(6));
+
+        edit_mode.delete_word_before_cursor();
+        assert_eq!(edit_mode.items[0].editing_name, " x");
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
     }
 }

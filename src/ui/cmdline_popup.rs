@@ -76,20 +76,23 @@ pub fn render_completion(
         return ()
     }
 
-    // Adjust area for completion popup window
+    // Adjust area for completion popup window. The origin is a terminal column
+    // computed from the display width, so it must not be mixed with the byte
+    // length of the command line (see `display_width`).
+    let x_offset = origin_len.saturating_sub(1);
     if app.command_expand {
         area.y += 1;
-        area.x += origin_len - 1;
+        area.x = area.x.saturating_add(x_offset);
     } else {
-        area.x += origin_len - 1;
+        area.x = area.x.saturating_add(x_offset);
         area_minus(&mut area.y, 5);
     }
 
     area.height = 5;
-    area.width = max_length + 2;
-    
-    if area.x + area.width > frame.area().width {
-        area.x = frame.area().width - area.width;
+    area.width = max_length.saturating_add(2);
+
+    if area.x.saturating_add(area.width) > frame.area().width {
+        area.x = frame.area().width.saturating_sub(area.width);
     }
     
     frame.render_stateful_widget(

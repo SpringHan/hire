@@ -294,7 +294,10 @@ the cursor); `App::cursor_left` / `App::cursor_right`, the word-wise
 `cursor_word_forward` (`Alt-f`) / `cursor_word_backward` (`Alt-b`),
 `delete_word_before_cursor` (`Ctrl-Backspace`) / `delete_word_after_cursor`
 (`Alt-d`) and `delete_char_after_cursor` (`Ctrl-d`), all of which are shared
-with edit mode through the helpers in `utils`.
+with edit mode through the helpers in `utils`. The cursor is a UTF-8 byte
+offset on a character boundary, so movement and deletion always jump over whole
+characters; the completion popup is positioned and sized by the display width
+(`utils::display_width`) instead of the byte length.
 
 **`key_event/cursor_movement/`** — `directory_movement` (left/right into
 parent/child, right opens files), `move_cursor` (up/down/scroll/index, also
@@ -306,8 +309,9 @@ expands the mark range while `mark_expand` is on), `move_cursor_core`, and
 insert mode, cursor movement (including word-wise `Alt-f` / `Alt-b`, the
 `Ctrl-Backspace` / `Alt-d` whole-word deletions and `Ctrl-d` character
 deletion, applied to every item whose cursor is active), marking and delete
-flags; `save_edit` applies all renames/creations/deletions at once behind a
-confirmation page.
+flags. Cursors are byte offsets on character boundaries, so multi-byte names
+are edited whole; `save_edit` applies all renames/creations/deletions at once
+behind a confirmation page.
 
 **`key_event/file_operations.rs`** — `append_file_name` (prefill `:rename` for
 the selected file, cursor before the extension), `delete_operation` /
@@ -406,7 +410,8 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 **`ui/utils.rs`** — `render_list` converts `FileSaver`s into styled items
 (directory/file/executable/symlink/orphan colours plus the marked sidebar);
 `render_editing_list` does the same for `EditItem`s, including the edit cursor
-and delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
+(highlighted with the same byte-offset logic as the command line) and
+delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
 state line.
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
@@ -414,11 +419,15 @@ line (permission/owner/size/link info on the left and, on the right, the
 working directory path when set plus the status labels
 `WD EXPAND -- RECORDING -- QUIT`) or the editable command line;
 `state_labels` builds the status label row; `get_command_line_span_list`
-produces the character spans with the block cursor highlighted; `StateLine` is
-the small two-part widget used for the state line.
+produces the character spans with the block cursor highlighted, comparing the
+cursor byte offset with `char_indices()` so multi-byte characters are
+highlighted correctly; `StateLine` is the small two-part widget used for the
+state line.
 
 **`ui/cmdline_popup.rs`** — `CompletionPopup` and `render_completion` position
-and draw the completion candidate list above the command line.
+and draw the completion candidate list above the command line. The position and
+width come from `utils::display_width`, so CJK candidates line up with the
+command line; the layout arithmetic saturates instead of overflowing.
 
 ### `src/utils/` — shared helpers
 
@@ -433,18 +442,26 @@ and draw the completion candidate list above the command line.
   `--output-file`, `--quit-after-output`).
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
-  expand tabs, parse ANSI), `delete_word`.
+  expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
+  content is never split).
 - Word-wise text editing shared by the command line and edit mode:
   `is_word_char`, `next_word_end` / `prev_word_start`,
   `cursor_next_word_end` / `cursor_prev_word_start`,
   `delete_word_before_cursor` / `delete_word_after_cursor` and
-  `delete_char_after_cursor` (plus the `CursorPos` conversion helpers).
+  `delete_char_after_cursor`.
+- `CursorPos` handling: `cursor_insertion_point` / `cursor_from_insertion_point`
+  (byte offset on a character boundary) and `prev_char_boundary` /
+  `next_char_boundary` for character-wise movement and deletion.
+- `display_width` — the terminal column width of a text (wide characters take
+  two columns), used by the command line cursor and the completion popup.
 - The global rendered window height (`WINDOW_HEIGHT`, `update_window_height`,
   `get_window_height`) used to size scrolling and preview reads.
 
 **`utils/types.rs`**
 
 - `CursorPos` (`Index` / `End` / `None`) — text cursor representation.
+  `Index` is a UTF-8 byte offset which must lie on a character boundary,
+  `End` means after the last character and `None` means no editable cursor.
 - `CmdContent` (`String` / `Text`) — editable command-line content vs.
   styled, read-only messages.
 - `Block` (`Browser(bool)` / `CommandLine(CmdContent, CursorPos)`) — which

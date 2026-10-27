@@ -15,8 +15,6 @@ mod file_operations;
 mod paste_operation;
 mod simple_operations;
 
-use std::ops::SubAssign;
-
 use command_line::completion;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -34,7 +32,16 @@ use crate::rt_error;
 use crate::app::App;
 use crate::error::AppResult;
 use crate::command::AppCommand;
-use crate::utils::{delete_word, Block, CmdContent, CursorPos, Direction};
+use crate::utils::{
+    cursor_from_insertion_point,
+    cursor_insertion_point,
+    delete_word,
+    prev_char_boundary,
+    Block,
+    CmdContent,
+    CursorPos,
+    Direction,
+};
 
 // Export
 pub use tab::TabList;
@@ -233,18 +240,17 @@ pub fn handle_event(
                     }
                 } else {
                     let content_ref = origin.get_mut();
-                    match cursor {
-                        CursorPos::Index(idx) => {
-                            if *idx == 0 {
-                                return Ok(())
-                            }
-                            content_ref.remove(*idx - 1);
-                            idx.sub_assign(1);
-                        },
-                        CursorPos::End => {
-                            content_ref.pop();
-                        },
-                        _ => ()
+                    let Some(pos) = cursor_insertion_point(content_ref, *cursor)
+                    else {
+                        return Ok(())
+                    };
+
+                    if let Some(start) = prev_char_boundary(content_ref, pos) {
+                        content_ref.replace_range(start..pos, "");
+                        *cursor = cursor_from_insertion_point(
+                            content_ref,
+                            start
+                        );
                     }
                 }
 

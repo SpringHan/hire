@@ -6,7 +6,7 @@ use std::{borrow::Cow, fs::File, io::Read, sync::atomic::{AtomicU16, Ordering}};
 
 use anyhow::bail;
 use clap::Parser;
-use ratatui::text::Text;
+use ratatui::text::{Span, Text};
 use ansi_to_tui::IntoText;
 use lazy_static::lazy_static;
 
@@ -121,63 +121,52 @@ pub fn read_to_text(
 }
 
 /// Delete word and update content & cursor position.
+///
+/// The character right before the cursor decides how much is deleted: a word
+/// separator is deleted alone, otherwise the whole word in front of the cursor
+/// is removed. The word separators are the ASCII punctuation characters, which
+/// is the rule this function has always used (see [`is_delete_word_separator`]);
+/// non-ASCII characters are word characters and are never split.
 pub fn delete_word(_str: &mut String, cursor: &mut CursorPos) {
-    if _str.len() == 0 {
-        return ()
-    }
+    let Some(pos) = cursor_insertion_point(_str, *cursor) else {
+        return
+    };
 
-    let mut end_idx: usize;
-    let mut deleting_char = false;
-    let mut remain_str = String::new();
-
-    if let CursorPos::Index(idx) = cursor {
-        if *idx == 0 {
-            return ()
-        }
-        end_idx = *idx - 1;
-        remain_str = _str[*idx..].to_owned();
-    } else {
-        end_idx = _str.len() - 1;
-    }
-
-    // Get the end position of editing slice after deleting
-    for byte in _str
-        .bytes()
-        .rev()
-        .skip(_str.len() - end_idx - 1)
-    {
-
-        if (byte >= 32 && byte <= 47) ||
-            (byte >= 58 && byte <= 64) ||
-            (byte >= 91 && byte <= 96) ||
-            (byte >= 123 && byte <= 126)
-        {
-            if !deleting_char {
-                end_idx = end_idx.saturating_sub(1);
+    // Find the start of the edited slice: either the separator right before the
+    // cursor, or the beginning of the word in front of it.
+    let mut start = pos;
+    for (idx, _char) in _str[..pos].char_indices().rev() {
+        if is_delete_word_separator(_char) {
+            if start == pos {
+                start = idx;
             }
 
-            break;
+            break
         }
 
-        end_idx = end_idx.saturating_sub(1);
-        if !deleting_char {
-            deleting_char = true;
-        }
+        start = idx;
     }
 
-    // Update content & cursor position
-    if end_idx == 0 {
-        _str.clear();
-    } else {
-        *_str = _str[0..=end_idx].to_owned();
-    }
-    if !remain_str.is_empty() {
-        _str.push_str(&remain_str);
+    if start == pos {
+        return
     }
 
-    if let CursorPos::Index(idx) = cursor {
-        *idx = if end_idx == 0 { 0 } else { end_idx + 1 };
-    }
+    let remain = _str[pos..].to_owned();
+    _str.truncate(start);
+    _str.push_str(&remain);
+    *cursor = cursor_from_insertion_point(_str, start);
+}
+
+/// Check whether the character separates words for [`delete_word`].
+///
+/// The separator set is the ASCII punctuation range, which is the rule
+/// [`delete_word`] has always used. It's kept separate from [`is_word_char`],
+/// which drives the word-wise cursor movement and word deletions.
+fn is_delete_word_separator(_char: char) -> bool {
+    matches!(
+        _char,
+        '\x20'..='\x2f' | '\x3a'..='\x40' | '\x5b'..='\x60' | '\x7b'..='\x7e'
+    )
 }
 
 /// Check whether the character is a part of a word when the cursor moves or
@@ -208,6 +197,31 @@ pub fn cursor_insertion_point(content: &str, cursor: CursorPos) -> Option<usize>
     } else {
         None
     }
+}
+
+/// Return the byte index of the nearest character boundary before `pos`.
+///
+/// `None` is returned when `pos` is 0 or doesn't lie on a character boundary.
+pub fn prev_char_boundary(content: &str, pos: usize) -> Option<usize> {
+    if pos == 0 || pos > content.len() || !content.is_char_boundary(pos) {
+        return None
+    }
+
+    content[..pos].char_indices().next_back().map(|(idx, _)| idx)
+}
+
+/// Return the byte index of the nearest character boundary after `pos`.
+///
+/// The result may be the length of `content`, which means the cursor reaches
+/// the end of it. `None` is returned when `pos` is at the end or doesn't lie on
+/// a character boundary.
+pub fn next_char_boundary(content: &str, pos: usize) -> Option<usize> {
+    if pos >= content.len() || !content.is_char_boundary(pos) {
+        return None
+    }
+
+    let _char = content[pos..].chars().next()?;
+    Some(pos + _char.len_utf8())
 }
 
 /// Build the cursor state for an insertion point inside `content`.
@@ -368,6 +382,16 @@ pub fn delete_char_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
 
     _str.replace_range(pos..pos + _char.len_utf8(), "");
     *cursor = cursor_from_insertion_point(_str, pos);
+}
+
+/// Return the width of `text` when it's rendered in the terminal.
+///
+/// Wide characters (e.g. CJK ones) take two columns and combining marks take
+/// none, so neither the byte length nor the character count can be used for
+/// layout. Only this width can be used to position the completion popup and the
+/// command line cursor.
+pub fn display_width(text: &str) -> usize {
+    Span::raw(text).width()
 }
 
 pub fn update_window_height(height: u16) {
@@ -580,5 +604,92 @@ mod test {
         delete_word_after_cursor(&mut content, &mut cursor);
         assert_eq!(content, "abc");
         assert!(cursor == CursorPos::None);
+    }
+
+    #[test]
+    fn test_prev_char_boundary() {
+        assert_eq!(prev_char_boundary("abc", 3), Some(2));
+        assert_eq!(prev_char_boundary("abc", 1), Some(0));
+        assert_eq!(prev_char_boundary("abc", 0), None);
+        assert_eq!(prev_char_boundary("", 0), None);
+
+        // A CJK character takes three bytes.
+        assert_eq!(prev_char_boundary("中文", 6), Some(3));
+        assert_eq!(prev_char_boundary("中文", 3), Some(0));
+
+        // The position has to be a character boundary of the content.
+        assert_eq!(prev_char_boundary("中", 1), None);
+        assert_eq!(prev_char_boundary("abc", 4), None);
+    }
+
+    #[test]
+    fn test_next_char_boundary() {
+        assert_eq!(next_char_boundary("abc", 0), Some(1));
+        assert_eq!(next_char_boundary("abc", 2), Some(3));
+        assert_eq!(next_char_boundary("abc", 3), None);
+        assert_eq!(next_char_boundary("", 0), None);
+
+        // A CJK character takes three bytes.
+        assert_eq!(next_char_boundary("中文", 0), Some(3));
+        assert_eq!(next_char_boundary("中文", 3), Some(6));
+
+        assert_eq!(next_char_boundary("中", 1), None);
+    }
+
+    #[test]
+    fn test_display_width() {
+        assert_eq!(display_width(""), 0);
+        assert_eq!(display_width("abc"), 3);
+        assert_eq!(display_width("中文"), 4);
+        assert_eq!(display_width("a中b"), 4);
+    }
+
+    #[test]
+    fn test_delete_word() {
+        // The ASCII behaviour is preserved.
+        let mut content = String::from("hello world");
+        let mut cursor = CursorPos::Index(8);
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "hello rld");
+        assert!(cursor == CursorPos::Index(6));
+
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::End;
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "");
+        assert!(cursor == CursorPos::End);
+
+        // Only the separator right before the cursor is deleted.
+        let mut content = String::from("abc..");
+        let mut cursor = CursorPos::End;
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "abc.");
+        assert!(cursor == CursorPos::End);
+
+        // The word separators in front of the deleted word are kept.
+        let mut content = String::from("abc.def");
+        let mut cursor = CursorPos::Index(7);
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "abc.");
+        assert!(cursor == CursorPos::End);
+
+        // Multi-byte characters are never split.
+        let mut content = String::from("中文");
+        let mut cursor = CursorPos::End;
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "");
+        assert!(cursor == CursorPos::End);
+
+        let mut content = String::from("中文.txt");
+        let mut cursor = CursorPos::Index(6);
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, ".txt");
+        assert!(cursor == CursorPos::Index(0));
+
+        let mut content = String::from("中文 x");
+        let mut cursor = CursorPos::Index(6);
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, " x");
+        assert!(cursor == CursorPos::Index(0));
     }
 }

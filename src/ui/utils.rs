@@ -84,37 +84,60 @@ pub fn render_editing_list<'a>(
     (temp_items, sidebar_used)
 }
 
+/// Build the line of an editing name with the character under the cursor
+/// highlighted.
+///
+/// The cursor is a byte offset on a character boundary, so the name is walked
+/// with `char_indices()` and compared by the byte position. Comparing the
+/// character count would be wrong as soon as the name holds multi-byte
+/// characters (e.g. CJK ones).
+fn editing_name_line<'a>(name: &'a str, cursor: CursorPos) -> Line<'a> {
+    if let CursorPos::Index(pos) = cursor {
+        let mut line = Line::default();
+        let mut cursor_drawn = false;
+
+        for (byte_start, _char) in name.char_indices() {
+            let char_len = _char.len_utf8();
+
+            // A cursor placed inside a character (which shouldn't happen, but
+            // is handled gracefully) belongs to that character.
+            if pos >= byte_start && pos < byte_start + char_len {
+                cursor_drawn = true;
+                line.push_span(
+                    Span::raw(_char.to_string())
+                        .fg(Color::Black)
+                        .bg(Color::White)
+                );
+            } else {
+                line.push_span(Span::raw(_char.to_string()));
+            }
+        }
+
+        // The cursor may be placed at the end of the name, and it has to stay
+        // visible in that case.
+        if !cursor_drawn {
+            line.push_span(Span::raw(" ").fg(Color::Black).bg(Color::White));
+        }
+
+        return line
+    }
+
+    if let CursorPos::End = cursor {
+        let mut line = Line::raw(name);
+        line.push_span(Span::raw(" ").bg(Color::White));
+        return line
+    }
+
+    Line::raw(name)
+}
+
 fn get_editing_item_color<'a>(
     item: &'a EditItem,
     file: Option<&FileSaver>,
     colors: &TermColors,
     marked: bool,
 ) -> (Item<'a>, Option<Style>) {
-    let left_text = if item.cursor() != CursorPos::None {
-        if let CursorPos::Index(pos) = item.cursor() {
-            let mut temp = Line::default();
-
-            for (idx, _char) in item.name().chars().enumerate() {
-                if idx == pos {
-                    temp.push_span(
-                        Span::raw(_char.to_string())
-                            .fg(Color::Black)
-                            .bg(Color::White)
-                    );
-                } else {
-                    temp.push_span(Span::raw(_char.to_string()));
-                }
-            }
-
-            temp
-        } else {
-            let mut temp = Line::raw(item.name());
-            temp.push_span(Span::raw(" ").bg(Color::White));
-            temp
-        }
-    } else {
-        Line::raw(item.name())
-    };
+    let left_text = editing_name_line(item.name(), item.cursor());
 
     let mut temp_item = Item::new(left_text, None);
 
@@ -232,6 +255,37 @@ pub fn shorten_path(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Return the content of the spans which are drawn as the cursor.
+    fn highlighted(spans: &[Span]) -> Vec<String> {
+        spans
+            .iter()
+            .filter(|span| span.style.bg == Some(Color::White))
+            .map(|span| span.content.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_editing_name_cursor_with_multibyte_content() {
+        let line = editing_name_line("中文.txt", CursorPos::Index(0));
+        assert_eq!(highlighted(&line.spans), vec![String::from("中")]);
+
+        let line = editing_name_line("中文.txt", CursorPos::Index(3));
+        assert_eq!(highlighted(&line.spans), vec![String::from("文")]);
+
+        let line = editing_name_line("中文.txt", CursorPos::End);
+        assert_eq!(highlighted(&line.spans), vec![String::from(" ")]);
+
+        // A cursor at the end of the name stays visible.
+        let line = editing_name_line("中文.txt", CursorPos::Index(10));
+        assert_eq!(highlighted(&line.spans), vec![String::from(" ")]);
+    }
+
+    #[test]
+    fn test_editing_name_cursor_with_ascii_content() {
+        let line = editing_name_line("abc.txt", CursorPos::Index(1));
+        assert_eq!(highlighted(&line.spans), vec![String::from("b")]);
+    }
 
     #[test]
     fn test_shorten_path() {
