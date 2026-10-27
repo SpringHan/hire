@@ -165,11 +165,26 @@ mod goto_test {
     use super::*;
 
     #[test]
-    fn test_print() {
+    fn test_read_config() {
+        // The config is built in memory, so the test never reads (nor depends
+        // on) the real user config, which may open a GUI program.
+        let document: DocumentMut = r#"
+            goto_dir = { h = "/home", G = "/home/user/Github" }
+        "#
+            .parse()
+            .expect("Invalid TOML document");
+
         let mut app = App::default();
-        crate::config::init_config(&mut app).unwrap();
-        // println!("{}\n{:?}", app.config_path, app.target_dir);
-        // panic!()
+        read_config(&mut app, &document).expect("Failed to read goto_dir");
+
+        assert_eq!(
+            app.target_dir.get(&'h').map(String::as_str),
+            Some("/home")
+        );
+        assert_eq!(
+            app.target_dir.get(&'G').map(String::as_str),
+            Some("/home/user/Github")
+        );
     }
 
     #[test]

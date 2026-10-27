@@ -142,18 +142,29 @@ pub fn get_document(path: String) -> Result<DocumentMut> {
     }
 }
 
-/// Get the two config file and create them if they don't exist.
-/// Format: (auto_config_path, user_config_path)
+/// Get the three config file paths, creating the config directory if needed.
+///
+/// The directory is `~/.config/springhan/hire/` by default. It can be
+/// overridden with the `HIRE_CONFIG_DIR` environment variable, which is useful
+/// for tests and for running the app with an isolated configuration (the
+/// configured GUI command, for example, is then never the one of the user).
 pub fn get_conf_file() -> io::Result<(String, String, String)> {
-    let user = std::env::var("USER").expect("Failed to get user name!");
-    let config_dir = format!(
-        "{}/.config/springhan/hire/",
-        if user == String::from("root") {
-            String::from("/root")
-        } else {
-            format!("/home/{}", user)
+    let config_dir = match std::env::var("HIRE_CONFIG_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => {
+            format!("{}/", dir.trim().trim_end_matches('/'))
+        },
+        _ => {
+            let user = std::env::var("USER").expect("Failed to get user name!");
+            format!(
+                "{}/.config/springhan/hire/",
+                if user == String::from("root") {
+                    String::from("/root")
+                } else {
+                    format!("/home/{}", user)
+                }
+            )
         }
-    );
+    };
 
     if let Err(err) = File::open(&config_dir) {
         if err.kind() == ErrorKind::NotFound {

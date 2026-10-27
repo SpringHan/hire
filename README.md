@@ -17,6 +17,12 @@ I made the project with the aim for practicing Rust and this tool was almost cre
 
 There're three config files for hire: `auto_config.toml`, `user_config.toml` and `keymap.toml`.
 
+By default they live in `~/.config/springhan/hire/`. Set the `HIRE_CONFIG_DIR`
+environment variable to use another directory, e.g.
+`HIRE_CONFIG_DIR=/tmp/hire-config hire`; this is handy to run the app (or tests)
+with a configuration that is independent from your own, so commands such as
+`gui_file_open_cmd` are never triggered by accident.
+
 Notice: The `auto_config.toml` is generated & edited by app.
 
 ### user_config.toml

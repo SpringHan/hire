@@ -219,8 +219,11 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 | `config/types.rs` | `Config` / `ConfigValue` / `AppConfig`: typed user settings and defaults. |
 | `config/keymap.rs` | `Keymap` (normal/edit/navi maps) and `keymap.toml` loading. |
 
-**`config/mod.rs`** — config lives in `~/.config/springhan/hire/`. Three files
-are used: `auto_config.toml` (written by the app: bookmarks, stored tabs),
+**`config/mod.rs`** — config lives in `~/.config/springhan/hire/` (override it
+with the `HIRE_CONFIG_DIR` environment variable, which keeps tests and
+automated runs away from the user's real configuration; see §6 for the test
+recipe). Three files are used:
+`auto_config.toml` (written by the app: bookmarks, stored tabs),
 `user_config.toml` (hand-written: `default_shell`, `gui_commands`,
 `file_read_program`, `gui_file_open_cmd`) and `keymap.toml`.
 `get_document`/`write_document` wrap `toml_edit`. The `option_get!` macro
@@ -540,3 +543,40 @@ when files are marked, execution is repeated for every marked target.
 | `install.sh` | Builds the release binary and installs the binary, keymap and scripts. |
 | `README.md` | User documentation (configuration, features, keybindings). |
 | `docs/ARCHITECTURE.md` | This document. |
+
+---
+
+## 6. Running tests
+
+`cargo test` only runs the unit tests. They never launch the application and
+never execute the user configuration: the only config-related test
+(`goto_test::test_read_config`) builds its TOML document in memory.
+
+**Any test that drives the real binary — a pty harness, an expect-like script or
+a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise
+the app reads the developer's `~/.config/springhan/hire/`, and pressing `Enter`
+in the browser calls `output_path`, which runs the configured
+`gui_file_open_cmd` (e.g. `emacsclient -n`) and opens windows on the developer's
+desktop.
+
+The isolated directory needs a `keymap.toml` (the app expects one) and an empty
+`user_config.toml` (so `gui_file_open_cmd` keeps its empty default; the app
+creates `auto_config.toml` itself). A minimal setup:
+
+```bash
+tmp=$(mktemp -d)
+cp keymap_config/default.toml "$tmp/keymap.toml"
+: > "$tmp/user_config.toml"
+
+HIRE_CONFIG_DIR="$tmp" cargo test
+HIRE_CONFIG_DIR="$tmp" ./target/debug/hire --start-from "$workdir" --output-file "$tmp/out"
+rm -rf "$tmp"
+```
+
+With the isolated config, `Enter` in the browser writes the path into the output
+file (`--output-file`, or `/tmp/hire.tmp` when it isn't given) instead of
+starting a GUI program, so an e2e harness can check the result safely.
+
+The shipped keymaps don't bind `:`; use the configured `create_file`,
+`create_dir` or `search` key (e.g. `=` in `keymap_config/default.toml`) to reach
+the command line from the browser.
