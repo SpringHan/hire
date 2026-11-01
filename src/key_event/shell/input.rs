@@ -179,6 +179,36 @@ pub fn encode_key(key: &KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Encode pasted text for the child.
+///
+/// With bracketed paste the text is wrapped in `ESC[200~` / `ESC[201~` and sent
+/// verbatim. Without it the paste is indistinguishable from typing, so line
+/// breaks become `cr`; an embedded `\n` is not a terminal Enter.
+pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
+    let mut bytes = Vec::new();
+
+    if bracketed {
+        bytes.extend_from_slice(b"\x1b[200~");
+        bytes.extend_from_slice(text.as_bytes());
+        bytes.extend_from_slice(b"\x1b[201~");
+        return bytes
+    }
+
+    let normalized = text.replace("\r\n", "\r");
+
+    for ch in normalized.chars() {
+        if ch == '\n' {
+            bytes.push(b'\r');
+            continue
+        }
+
+        let mut buf = [0u8; 4];
+        bytes.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+    }
+
+    bytes
+}
+
 /// The byte a `Ctrl-<char>` combination produces.
 fn ctrl_byte(c: char) -> Option<u8> {
     match c {
@@ -213,6 +243,22 @@ mod tests {
         let home = key(KeyCode::Home, KeyModifiers::NONE);
         assert_eq!(encode_key(&home, false).unwrap(), b"\x1b[H");
         assert_eq!(encode_key(&home, true).unwrap(), b"\x1bOH");
+    }
+
+    #[test]
+    fn test_paste_encoding() {
+        assert_eq!(encode_paste("a\nb", false), b"a\rb".to_vec());
+        assert_eq!(encode_paste("a\r\nb", false), b"a\rb".to_vec());
+        assert_eq!(
+            encode_paste("a\nb", true),
+            b"\x1b[200~a\nb\x1b[201~".to_vec()
+        );
+
+        // CJK text must keep its UTF-8 bytes.
+        assert_eq!(
+            encode_paste("中文", false),
+            "中文".as_bytes().to_vec()
+        );
     }
 
     #[test]

@@ -59,6 +59,8 @@ pub use shell::{
     CommandStr,
     ShellPrefix,
     ShellSessions,
+    handle_view_mouse,
+    handle_view_paste,
     open_shell,
     shell_process,
     fetch_working_directory,

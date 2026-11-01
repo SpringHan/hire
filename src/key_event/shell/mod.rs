@@ -7,6 +7,7 @@ mod pty;
 mod session;
 mod view;
 mod menu;
+mod mouse;
 
 pub use types::*;
 pub use utils::*;
@@ -14,6 +15,7 @@ pub use input::*;
 pub use session::*;
 pub use view::*;
 pub use menu::*;
+pub use mouse::*;
 
 use crate::{
     config::{Config, ConfigValue},

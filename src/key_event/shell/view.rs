@@ -3,9 +3,17 @@
 // Opening, attaching, detaching and killing shell sessions, plus the key
 // handling and the numbered selection used while a shell is attached.
 
-use std::time::{Duration, Instant};
+use std::{
+    io::stdout,
+    time::{Duration, Instant},
+};
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::{
+    event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind},
+    execute,
+    style::Print,
+};
+use vt100::MouseProtocolMode;
 
 use crate::{
     app::App,
@@ -15,7 +23,14 @@ use crate::{
     utils::{Block, ShellId},
 };
 
-use super::{default_shell, encode_key};
+use super::{
+    button_bit,
+    default_shell,
+    encode_key,
+    encode_mouse,
+    encode_paste,
+    inside as mouse_inside,
+};
 
 /// How long a partial shell number is kept before it is committed.
 const DIGIT_COMMIT_DELAY: Duration = Duration::from_millis(450);
@@ -56,6 +71,7 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     app.shell_prefix_active = false;
     app.shell_pending_kill = None;
     app.shell_notice = None;
+    app.mouse_buttons = 0;
     app.clear_shell_digits();
     app.selected_block = Block::Shell(id);
     app.clear_screen = true;
@@ -69,6 +85,7 @@ pub fn detach(app: &mut App) {
     app.shell_prefix_active = false;
     app.shell_pending_kill = None;
     app.shell_notice = None;
+    app.mouse_buttons = 0;
     app.clear_shell_digits();
     app.selected_block = Block::Browser(in_root);
     app.clear_screen = true;
@@ -173,6 +190,107 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
     }
 
     write_key(app, id, &key)
+}
+
+/// Forward a mouse event to the attached shell.
+pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
+    let Some(id) = app.selected_block.shell_id() else {
+        return Ok(())
+    };
+
+    // The kill confirmation owns the input; do not leak clicks to the child.
+    if app.shell_pending_kill.is_some() {
+        return Ok(())
+    }
+
+    app.shell_prefix_active = false;
+    app.clear_shell_digits();
+
+    let area = app.shell_area;
+    let inside_area = mouse_inside(area, mouse.column, mouse.row);
+
+    match mouse.kind {
+        MouseEventKind::Down(button) => {
+            if !inside_area {
+                return Ok(())
+            }
+            app.mouse_buttons |= button_bit(button);
+        },
+
+        MouseEventKind::Up(button) => {
+            // A release which started inside the shell still has to be
+            // delivered, even if the pointer is now over the title bar.
+            if !inside_area && app.mouse_buttons == 0 {
+                return Ok(())
+            }
+            app.mouse_buttons &= !button_bit(button);
+        },
+
+        MouseEventKind::Drag(_) => {
+            if app.mouse_buttons == 0 {
+                return Ok(())
+            }
+        },
+
+        MouseEventKind::Moved => {
+            if !inside_area {
+                return Ok(())
+            }
+        },
+
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown |
+        MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+            if !inside_area {
+                return Ok(())
+            }
+        },
+    }
+
+    let (mode, encoding) = match app.shell_sessions.get(id) {
+        Some(session) => {
+            let parser = session.parser();
+            let screen = parser.screen();
+            (screen.mouse_protocol_mode(), screen.mouse_protocol_encoding())
+        },
+        None => return Ok(()),
+    };
+
+    let Some(bytes) = encode_mouse(&mouse, mode, encoding, area) else {
+        return Ok(())
+    };
+
+    if let Some(session) = app.shell_sessions.get_mut(id) {
+        let _ = session.write(&bytes);
+    }
+
+    Ok(())
+}
+
+/// Forward a bracketed paste (or typed text) to the attached shell.
+pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
+    let Some(id) = app.selected_block.shell_id() else {
+        return Ok(())
+    };
+
+    if app.shell_pending_kill.is_some() {
+        return Ok(())
+    }
+
+    app.shell_prefix_active = false;
+    app.clear_shell_digits();
+
+    let bracketed = app
+        .shell_sessions
+        .get(id)
+        .map(|session| session.parser().screen().bracketed_paste())
+        .unwrap_or(false);
+    let bytes = encode_paste(&text, bracketed);
+
+    if let Some(session) = app.shell_sessions.get_mut(id) {
+        let _ = session.write(&bytes);
+    }
+
+    Ok(())
 }
 
 impl App<'_> {
@@ -288,6 +406,51 @@ impl App<'_> {
             self.app_error.append_errors(err.iter());
         }
     }
+
+    /// Keep the outer terminal's mouse and bracketed-paste modes in sync with
+    /// the attached shell. Called once per main-loop iteration: the child may
+    /// enable or disable them at any time.
+    pub fn sync_terminal_modes(&mut self) {
+        let (mouse, paste) = match self
+            .selected_block
+            .shell_id()
+            .and_then(|id| self.shell_sessions.get(id))
+        {
+            Some(session) => {
+                let parser = session.parser();
+                let screen = parser.screen();
+                (screen.mouse_protocol_mode(), screen.bracketed_paste())
+            },
+            None => (MouseProtocolMode::None, false),
+        };
+
+        if mouse != self.outer_mouse_mode {
+            let _ = set_outer_mouse_mode(mouse);
+            self.outer_mouse_mode = mouse;
+            // A mode switch cancels any half-tracked drag.
+            self.mouse_buttons = 0;
+        }
+
+        if paste != self.outer_bracketed_paste {
+            let _ = set_outer_bracketed_paste(paste);
+            self.outer_bracketed_paste = paste;
+        }
+    }
+
+    /// Restore the outer terminal before leaving hire.
+    pub fn disable_terminal_modes(&mut self) {
+        if self.outer_mouse_mode != MouseProtocolMode::None {
+            let _ = set_outer_mouse_mode(MouseProtocolMode::None);
+            self.outer_mouse_mode = MouseProtocolMode::None;
+        }
+
+        if self.outer_bracketed_paste {
+            let _ = set_outer_bracketed_paste(false);
+            self.outer_bracketed_paste = false;
+        }
+
+        self.mouse_buttons = 0;
+    }
 }
 
 fn write_key(app: &mut App, id: ShellId, key: &KeyEvent) -> AppResult<()> {
@@ -366,4 +529,40 @@ fn push_digit(app: &mut App, digit: char) {
     if app.shell_digits.len() >= width || value.saturating_mul(10) > max {
         app.commit_shell_digits();
     }
+}
+
+/// Enable the outer terminal's mouse tracking in the mode the child needs.
+///
+/// SGR encoding (`?1006`) is always requested so crossterm reports releases
+/// and large coordinates reliably; the event is re-encoded for the child.
+fn set_outer_mouse_mode(mode: MouseProtocolMode) -> std::io::Result<()> {
+    let mut sequence = String::from(
+        "\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l",
+    );
+
+    match mode {
+        MouseProtocolMode::None => (),
+        MouseProtocolMode::Press | MouseProtocolMode::PressRelease => {
+            sequence.push_str("\x1b[?1000h")
+        },
+        MouseProtocolMode::ButtonMotion => sequence.push_str("\x1b[?1002h"),
+        MouseProtocolMode::AnyMotion => sequence.push_str("\x1b[?1003h"),
+    }
+
+    if mode != MouseProtocolMode::None {
+        sequence.push_str("\x1b[?1006h");
+    }
+
+    execute!(stdout(), Print(sequence))
+}
+
+fn set_outer_bracketed_paste(enabled: bool) -> std::io::Result<()> {
+    execute!(
+        stdout(),
+        Print(if enabled {
+            "\x1b[?2004h"
+        } else {
+            "\x1b[?2004l"
+        })
+    )
 }

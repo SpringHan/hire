@@ -20,6 +20,8 @@ use app::{App, MacroStatus};
 use key_event::{
     execute_macro,
     handle_event,
+    handle_view_mouse,
+    handle_view_paste,
     open_shell,
     fetch_working_directory,
 };
@@ -68,6 +70,9 @@ fn main() -> AppResult<()> {
         // Reap shells which exited, and commit a partially typed shell number.
         app.handle_shell_events();
         app.tick_shell_digits();
+        // The attached shell may enable/disable mouse tracking or bracketed
+        // paste at any time; mirror it on the outer terminal.
+        app.sync_terminal_modes();
 
         if app.clear_screen {
             terminal.clear()?;
@@ -104,35 +109,55 @@ fn main() -> AppResult<()> {
             let mut budget = if shell_view { 128 } else { 1 };
 
             while budget > 0 {
-                if let event::Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        let in_shell = app.selected_block.is_shell();
+                match event::read()? {
+                    event::Event::Key(key) => {
+                        if key.kind == KeyEventKind::Press {
+                            let in_shell = app.selected_block.is_shell();
 
-                        if !in_shell &&
-                            key.code == KeyCode::Char('q') &&
-                            key.modifiers.is_empty()
-                        {
-                            if app.macro_attri.status == MacroStatus::Recording {
-                                app.macro_attri.status = MacroStatus::None;
-                                continue 'outer;
+                            if !in_shell &&
+                                key.code == KeyCode::Char('q') &&
+                                key.modifiers.is_empty()
+                            {
+                                if app.macro_attri.status == MacroStatus::Recording {
+                                    app.macro_attri.status = MacroStatus::None;
+                                    continue 'outer;
+                                }
+
+                                match check_quit_condition(&mut app) {
+                                    QuitCheckRes::Quit => break 'outer,
+                                    QuitCheckRes::Reset => continue 'outer,
+                                    QuitCheckRes::Continue => (),
+                                }
                             }
 
-                            match check_quit_condition(&mut app) {
-                                QuitCheckRes::Quit => break 'outer,
-                                QuitCheckRes::Reset => continue 'outer,
-                                QuitCheckRes::Continue => (),
+                            if !in_shell {
+                                macro_check_with_key(&mut app, key);
+                            }
+
+                            let result = handle_event(key, &mut app, &mut terminal);
+                            if let Err(err) = result {
+                                app.app_error.append_errors(err.iter());
                             }
                         }
+                    },
 
-                        if !in_shell {
-                            macro_check_with_key(&mut app, key);
+                    event::Event::Mouse(mouse) => {
+                        if app.selected_block.is_shell() {
+                            if let Err(err) = handle_view_mouse(mouse, &mut app) {
+                                app.app_error.append_errors(err.iter());
+                            }
                         }
+                    },
 
-                        let result = handle_event(key, &mut app, &mut terminal);
-                        if let Err(err) = result {
-                            app.app_error.append_errors(err.iter());
+                    event::Event::Paste(text) => {
+                        if app.selected_block.is_shell() {
+                            if let Err(err) = handle_view_paste(text, &mut app) {
+                                app.app_error.append_errors(err.iter());
+                            }
                         }
-                    }
+                    },
+
+                    _ => (),
                 }
 
                 budget -= 1;
@@ -180,6 +205,8 @@ fn main() -> AppResult<()> {
         }
     }
     
+    // Leave the terminal in its normal mouse/paste mode.
+    app.disable_terminal_modes();
     ratatui::restore();
     Ok(())
 }

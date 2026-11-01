@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
+use ratatui::layout::Rect;
 use ratatui::text::Text;
 use image_preview::ImagePreview;
 use ratatui::widgets::ListState;
@@ -117,6 +118,18 @@ pub struct App<'a> {
     /// view with the command line.
     pub shell_notice: Option<String>,
 
+    /// The mouse protocol currently enabled on the *outer* terminal.
+    pub outer_mouse_mode: vt100::MouseProtocolMode,
+
+    /// Whether the outer terminal is in bracketed-paste mode.
+    pub outer_bracketed_paste: bool,
+
+    /// Buttons currently held down and forwarded to the shell.
+    pub mouse_buttons: u8,
+
+    /// The rectangle occupied by the shell screen in the last frame.
+    pub shell_area: Rect,
+
     // Image Preview
     pub image_preview: ImagePreview,
 
@@ -183,6 +196,10 @@ impl<'a> Default for App<'a> {
             shell_digit_deadline: None,
             clear_screen: false,
             shell_notice: None,
+            outer_mouse_mode: vt100::MouseProtocolMode::None,
+            outer_bracketed_paste: false,
+            mouse_buttons: 0,
+            shell_area: Rect::default(),
             switch_case: None,
             mark_expand: false,
             command_scroll: None,

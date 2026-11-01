@@ -147,6 +147,10 @@ Whenever a working directory has been set, its path is shown on the right side o
 
 - Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.
 - The title bar shows how many shells the current tab has (`|1:2|` means tab 1 has two shells) and the attached shell's position (`SH 2/3`).
+- Mouse and pasted text are forwarded like a normal terminal:
+  - When the program inside the shell enables mouse tracking, hire captures the mouse and forwards clicks, drags and the wheel (in the protocol/encoding the program asked for). Hold `Shift` while dragging to use your terminal's own text selection.
+  - When the program enables bracketed paste (`ESC[?2004h`), a paste arrives as a single bracketed paste, preserving newlines and CJK text.
+  - Focus events are not forwarded.
 
 `default_shell` selects the program, and `shell_prefix` changes the prefix chord:
 

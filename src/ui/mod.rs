@@ -102,6 +102,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         frame.render_widget(computer_info, title_layout[0]);
         frame.render_widget(item_num_info, title_layout[1]);
 
+        // Mouse coordinates are translated against this rectangle.
+        app.shell_area = chunks[1];
         shell_block::render_shell(app, frame, chunks[1])?;
         render_command_line(app, frame, chunks[2]);
 

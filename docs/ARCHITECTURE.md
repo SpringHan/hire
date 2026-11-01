@@ -24,11 +24,12 @@ Hire is an event-driven application built around one mutable state object, `App`
 1. CLI args → App::default() → init_config()
 2. loop:
    a. execute pending macro
-   b. reap exited shell sessions; commit a timed-out shell number
+   b. reap exited shell sessions; commit a timed-out shell number; mirror the
+      child's mouse/bracketed-paste modes on the outer terminal
    c. clear the terminal if a shell was attached/detached
    d. ui::ui(frame, &mut app)
-   e. poll/read key events (16 ms while a shell is attached, 200 ms otherwise)
-   f. handle_event(key, &mut app, terminal)
+   e. poll/read events (16 ms while a shell is attached, 200 ms otherwise)
+   f. handle_event / handle_view_mouse / handle_view_paste
    g. drain search / image channels
 
 ### Modules
@@ -77,9 +78,11 @@ Key architectural traits:
    session owns every key except its prefix chord). Almost all input handling
    branches on `app.selected_block`.
 
-4. **Key pipeline.** A raw `KeyEvent` is first checked for the attached shell
-   view; while a shell is attached, `key_event/shell/view.rs` handles the prefix
-   chord and forwards every other key to the PTY as terminal bytes. In the
+4. **Event pipeline.** A raw `KeyEvent` is first checked for the attached
+   shell view; while a shell is attached, `key_event/shell/view.rs` handles the
+   prefix chord and forwards every other key to the PTY as terminal bytes.
+   `Event::Mouse` and `Event::Paste` are routed to the same view when a shell is
+   attached and the child has enabled the corresponding mode. In the
    browser/command line, `handle_event` first handles special keys (`Esc`,
    `Enter`, arrows, `Tab`, `Backspace`, control chords), then routes ordinary
    characters to the active `SwitchCase` menu, to the command line, or through
@@ -102,7 +105,11 @@ Key architectural traits:
    foreground process. Only shell *exits* travel through a channel. The
    `vt100::Parser`/`Screen` is rendered into the ratatui buffer by
    `ui/shell_block.rs`; keyboard events are translated back into terminal bytes
-   by `key_event/shell/input.rs`.
+   by `key_event/shell/input.rs`. The attached child's protocol state also
+   drives the *outer* terminal: `key_event/shell/mouse.rs` re-encodes mouse
+   events for the child's tracking mode/encoding, and `sync_terminal_modes`
+   enables/disables outer mouse capture and bracketed paste to match the child
+   (so the browser never captures the mouse).
 
 ---
 
@@ -179,6 +186,11 @@ Responsibilities:
   and `shell_digit_deadline` (numbered selection), `clear_screen` (full repaint
   after attaching/detaching) and `shell_notice` (an error shown in the shell
   status line instead of replacing the view).
+- Outer-terminal state for the shell view: `outer_mouse_mode` and
+  `outer_bracketed_paste` (what hire has enabled on the real terminal),
+  `mouse_buttons` (buttons currently held, used to end a drag cleanly) and
+  `shell_area` (the rectangle of the shell screen, used to translate/clamp
+  mouse coordinates).
 - File-list lifecycle: `init_all_files`, `init_parent_files`,
   `init_current_files`, `init_child_files`, `read_files`, `refresh_parent_item`,
   `refresh_current_item`, `refresh_child_item`, `refresh_select_item`,
@@ -302,7 +314,8 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
 | `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY, reader thread parsing into the shared `vt100` screen, write, resize, kill + reap. |
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. |
-| `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord) and `encode_key` (`KeyEvent` → terminal bytes). |
+| `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
+| `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
 | `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine, exit cleanup and numbered selection. |
 | `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
@@ -423,7 +436,16 @@ parses every chunk into the shared `vt100::Parser` behind a `Mutex`, so a
 background shell keeps consuming output even while hire runs a foreground
 program. Only exits travel through a channel. `input.rs` translates crossterm
 `KeyEvent`s back into terminal bytes, following the child's DECCKM state for
-the arrow keys and Home/End (`ESC O A` versus `ESC [ A`). `menu.rs` is the `T` page listing the
+the arrow keys and Home/End (`ESC O A` versus `ESC [ A`), and encodes pasted
+text as a bracketed paste when the child asked for one. `mouse.rs` translates
+`event::MouseEvent` into the child's mouse protocol mode (`Press` /
+`PressRelease` / `ButtonMotion` / `AnyMotion`) and encoding (`Sgr` / `Default` /
+`Utf8`), dropping events the child's mode does not want and translating the
+coordinates from the outer terminal into the shell area. `sync_terminal_modes`
+is called every loop: it captures the mouse (SGR-encoded) only while the child
+wants it and only while the view is attached, and enables bracketed paste on
+the outer terminal when the child does; `disable_terminal_modes` restores both
+before hire exits. `menu.rs` is the `T` page listing the
 tab's shells. The screen is rendered by `ui/shell_block.rs`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
@@ -576,17 +598,22 @@ command line; the layout arithmetic saturates instead of overflowing.
 ### Key dispatch
 
 ```
-crossterm KeyEvent
-  └─ main.rs: quit shortcut (skipped in the shell view) / macro recording
-       └─ key_event::handle_event
-            ├─ Block::Shell?       → shell::handle_view_key
-            │                         ├─ prefix chord? → detach/switch/create/kill/number
-            │                         └─ otherwise → encode_key → write to the PTY
-            ├─ modifier chords (Ctrl-…)
-            ├─ special keys: Backspace, Esc, Enter, ↑/↓/←/→, Tab
-            ├─ active SwitchCase?  → switch_match → handler
-            ├─ Block::Browser?     → keymap lookup → AppCommand → execute
-            └─ Block::CommandLine? → append character to the command line
+crossterm Event
+  ├─ Key(KeyEvent)
+  │    └─ main.rs: quit shortcut (skipped in the shell view) / macro recording
+  │         └─ key_event::handle_event
+  │              ├─ Block::Shell?       → shell::handle_view_key
+  │              │                         ├─ prefix chord? → detach/switch/create/kill/number
+  │              │                         └─ otherwise → encode_key → write to the PTY
+  │              ├─ modifier chords (Ctrl-…)
+  │              ├─ special keys: Backspace, Esc, Enter, ↑/↓/←/→, Tab
+  │              ├─ active SwitchCase?  → switch_match → handler
+  │              ├─ Block::Browser?     → keymap lookup → AppCommand → execute
+  │              └─ Block::CommandLine? → append character to the command line
+  ├─ Mouse(MouseEvent) (capture is only enabled for a mouse-aware shell)
+  │    └─ shell::handle_view_mouse → encode_mouse → write to the PTY
+  └─ Paste(String) (bracketed paste is only enabled for a shell)
+       └─ shell::handle_view_paste → encode_paste → write to the PTY
 ```
 
 ### File browser model
@@ -621,6 +648,10 @@ spawn_shell (`S`) / --working-directory
                  ├─ `C-s n/p`, `C-s <number>` → attach another shell
                  ├─ `C-s c` → open another shell on the same tab
                  ├─ `C-s x` → prompt; `y` kills it and attaches the next
+                 ├─ mouse events → encode_mouse (child's mode/encoding) → PTY
+                 ├─ paste events → encode_paste (bracketed if the child asked) → PTY
+                 ├─ sync_terminal_modes: outer mouse capture + bracketed paste
+                 │    are enabled only while this shell asks for them
                  └─ shell exits → handle_shell_events reaps it, removes the id
                       from the tab and attaches the next live shell (or the browser)
 
@@ -722,6 +753,12 @@ A pty harness has one more trap: at startup `ratatui-image`'s
 the query's reader thread keeps reading stdin afterwards, eating whatever keys
 the harness sends. Reply with e.g. `\x1b[6;20;10t\x1b[0n` before typing. A real
 terminal answers immediately, so interactive use is unaffected.
+
+Mouse and paste can be exercised the same way: once the child program enables a
+mouse mode (e.g. `printf '\033[?1000h\033[?1006h'`), write an SGR mouse report
+such as `\x1b[<0;10;10M` to the harness; once it enables bracketed paste
+(`\033[?2004h`), write `\x1b[200~text\x1b[201~`. If the child reads raw bytes,
+it sees the sequence hire forwarded.
 
 For shell sessions, a pty harness also needs a real window size: set
 `TIOCSWINSZ` on the pty (e.g. 40x120). A 0x0 pty makes `WINDOW_HEIGHT` zero and

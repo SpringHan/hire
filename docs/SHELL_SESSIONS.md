@@ -461,6 +461,70 @@ of them, so a single digit is not always enough. The number is accumulated:
 The shell menu uses the same 0-based numbering and the same accumulation rule,
 so `[10]` selects the eleventh shell of the tab.
 
+### 8.5 Mouse events
+
+The attached shell may enable mouse tracking at any time (`?9`, `?1000`,
+`?1002`, `?1003`) and may also switch the report encoding (`?1005` UTF-8,
+`?1006` SGR). The outer terminal is captured **only** while the attached
+session asks for it:
+
+| Child mode (`vt100`) | Outer capture |
+| --- | --- |
+| `None` | nothing |
+| `Press` / `PressRelease` | `?1000h` |
+| `ButtonMotion` | `?1002h` |
+| `AnyMotion` | `?1003h` |
+
+`?1006h` (SGR) is always enabled on the outer terminal, because crossterm then
+reports releases and large coordinates reliably; every event is re-encoded for
+the child. `sync_terminal_modes` runs once per main-loop iteration and writes
+the sequence only when the state changes; `disable_terminal_modes` restores the
+terminal (`?9l`, `?1000l`, `?1001l`, `?1002l`, `?1003l`, `?1005l`, `?1006l`,
+`?1015l`, `?1016l`) on detach and on quit. Capturing only while the child wants
+it keeps the browser, title and status line available for the terminal's own
+text selection.
+
+`handle_view_mouse`:
+
+1. A `Down` is forwarded only inside `app.shell_area` (the rectangle recorded by
+   `ui::ui` for the shell screen); presses and wheel events elsewhere are
+   ignored.
+2. A `Drag`/`Up` is forwarded if a button is currently held, with the
+   coordinates clamped to the shell area, so a drag which leaves the shell (or
+   a release over the title bar) does not get stuck.
+3. `mouse_buttons` is a bitmask of the held buttons, reset on attach/detach and
+   whenever the child changes the mouse mode.
+4. Mouse activity cancels a pending prefix/number state; a pending kill
+   confirmation swallows mouse events.
+
+`encode_mouse` then:
+
+- filters by mode: `Press` → presses + wheel only; `PressRelease` → no motion;
+  `ButtonMotion` → no bare motion; `AnyMotion` → everything;
+- maps buttons to xterm codes (left 0 / middle 1 / right 2, wheel 64–67), adds
+  32 for motion and 4/8/16 for Shift/Alt/Ctrl;
+- produces SGR (`ESC[<b;x;yM` / `m`), Default/X10 (`ESC[M` + three bytes; a
+  release uses button 3 and coordinates are clamped to 223) or UTF-8 (`ESC[M` +
+  three UTF-8-encoded values), matching the child's encoding;
+- converts the outer 0-based terminal coordinates into 1-based coordinates
+  relative to the top-left of the shell area.
+
+### 8.6 Bracketed paste
+
+When the attached child enables bracketed paste (`ESC[?2004h`, exposed by
+`Screen::bracketed_paste()`), `sync_terminal_modes` enables it on the outer
+terminal too, so crossterm delivers the clipboard as one `Event::Paste(text)`
+instead of a stream of key events.
+
+`handle_view_paste` reads the child's state at paste time:
+
+- enabled → `ESC[200~` + the text verbatim + `ESC[201~`;
+- disabled (race/fallback) → the text is typed: `\r\n`/`\n` become `\r`, and
+  CJK/other characters keep their UTF-8 bytes.
+
+The outer `?2004` is disabled on detach and on quit. Focus events are
+deliberately not enabled or forwarded.
+
 ---
 
 ## 9. Actions: open / attach / detach / kill
@@ -473,8 +537,12 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()>;
 pub fn detach(app: &mut App);
 pub fn next_shell(app: &mut App, forward: bool) -> AppResult<()>;
 pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()>;
+pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()>;
+pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()>;
 
 impl App<'_> {
+    pub fn sync_terminal_modes(&mut self);
+    pub fn disable_terminal_modes(&mut self);
     pub fn handle_shell_events(&mut self);
     pub fn tick_shell_digits(&mut self);
     pub fn commit_shell_digits(&mut self);
@@ -530,7 +598,13 @@ Changes:
 3. Per-frame event drain: while a shell is attached, read up to N queued events
    per iteration (`while event::poll(Duration::ZERO)?`), otherwise keep the
    current one-event behaviour. Otherwise a paste would be limited to one key
-   per 16 ms.
+   per 16 ms. The same loop also handles `Event::Mouse` (→ `handle_view_mouse`)
+   and `Event::Paste` (→ `handle_view_paste`) when a shell is attached.
+3b. Call `app.sync_terminal_modes()` after the shell events and before drawing:
+   the child may enable/disable mouse tracking and bracketed paste at any time,
+   and the outer terminal must follow. `app.disable_terminal_modes()` runs
+   before `ratatui::restore()` so quitting never leaves the terminal in mouse
+   capture or bracketed-paste mode.
 4. Never treat `q` as "quit hire" while a shell is attached:
    ```rust
    let in_shell = matches!(app.selected_block, utils::Block::Shell(_));
@@ -592,6 +666,7 @@ expanded-command-line handling and the browser layout:
 if let Block::Shell(_) = app.selected_block {
     frame.render_widget(computer_info, title_layout[0]);
     frame.render_widget(item_num_info, title_layout[1]);
+    app.shell_area = chunks[1];                 // mouse coordinate origin
     render_shell(app, frame, chunks[1])?;       // the shell area
     render_command_line(app, frame, chunks[2]); // shell status line
     return Ok(());
@@ -760,8 +835,9 @@ keep their existing options.
 | `src/utils/types.rs` | `ShellId`; `Block::Shell(ShellId)`; `Block::is_shell()` / `Block::shell_id()` |
 | `src/key_event/shell/pty.rs` *(new)* | `PtyProcess` (spawn, reader thread, write, resize, kill + reap) |
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions` |
-| `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab` |
+| `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key`, `encode_paste` |
+| `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key`, `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `sync_terminal_modes`, `disable_terminal_modes` |
 | `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
@@ -769,12 +845,12 @@ keep their existing options.
 | `src/key_event/tab/utils.rs` | migrate every mutation site; kill shells on tab close; show shell counts |
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
-| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice` |
-| `src/main.rs` | drain exits + `tick_shell_digits`, `clear_screen`, poll timeout, event drain, `q` guard, quit warning, `-w` mode |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
+| `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
 | `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
 | `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
-| `src/ui/mod.rs` | shell-view branch; title badge |
+| `src/ui/mod.rs` | shell-view branch; title badge; records `shell_area` |
 | `src/ui/shell_block.rs` *(new)* | screen renderer + status line (prefix/digits/kill prompt/notice) |
 | `src/ui/command_line.rs` | `Block::Shell` arm (reuses `StateLine`) |
 | `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding |
@@ -806,6 +882,11 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Shell program missing | `AppError` from `open_shell`, shown in the browser; no session is registered |
 | Blank / cleared shells cells | written as a real space, so erases reach the outer terminal (see §11.1) |
 | Curses program in the shell | arrows/Home/End follow the child's DECCKM state, so vim/less/htop receive the form they expect |
+| Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; events are re-encoded for the child's mode/encoding |
+| Mouse disabled by the child / detach / quit | outer capture is disabled; a half-tracked drag is reset |
+| Mouse press on title or status line | ignored; a drag/release which started inside is clamped to the shell area |
+| Child enables bracketed paste | outer `?2004h` is set; a paste is forwarded as one bracketed paste |
+| Focus events | not enabled and not forwarded |
 
 ---
 
@@ -816,11 +897,13 @@ the shell status line). Everything else matches with `if let` or `_`.
   kills the shells.
 - `docs/ARCHITECTURE.md`:
   - §1 event-loop step: drain shell exits, `clear_screen`, variable poll.
-  - §3 module table: the five new `key_event/shell/*` files and `ui/shell_block.rs`.
+  - §3 module table: the six new `key_event/shell/*` files and
+    `ui/shell_block.rs`.
   - §3 `Block` description: add `Shell(ShellId)`.
   - §3 `App` field list: `shell_sessions`, `shell_prefix`, `shell_prefix_active`,
     `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`,
-    `clear_screen`, `shell_notice`.
+    `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`,
+    `mouse_buttons`, `shell_area`.
   - §3 `key_event/tab/types.rs`: `Tab` / `TabId`.
   - §4: a "Shell session" flow (spawn → attach → detach → menu → exit/close).
   - §5: this document.
@@ -837,6 +920,7 @@ the shell status line). Everything else matches with `if let` or `_`.
 | 0 | `Tab`/`TabId` refactor, no behaviour change | done |
 | 1 | PTY + reader + screen renderer + `Block::Shell` + prefix + attach/detach + `spawn_shell` / `-w` wiring | done |
 | 2 | Shell menu, tab badges, kill/quit confirmations, `shell_prefix` config, sudo/storage/quit edge cases | done |
+| 2b | Mouse forwarding (4 tracking modes × 3 encodings) and bracketed paste; outer mode sync | done |
 | 3 | Scroll mode (`C-s [`), rename, activity notification, optional split panes | not implemented |
 
 Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the
