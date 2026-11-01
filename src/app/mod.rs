@@ -21,7 +21,7 @@ use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
 use crate::key_event::{
     AppCompletion, EditMode, FileSearcher, NaviIndex, ShellPrefix, ShellSessions,
-    SwitchCase,
+    SwitchCase, TabId,
 };
 use crate::utils::{
     read_to_text,
@@ -103,6 +103,13 @@ pub struct App<'a> {
 
     /// A kill confirmation is waiting for `y`.
     pub shell_pending_kill: Option<ShellId>,
+
+    /// A confirmation to kill every shell of this tab is waiting for `y`.
+    ///
+    /// The tab id is remembered instead of a boolean so the shells of the tab
+    /// the confirmation was opened for are killed even when the view changed
+    /// in the meantime.
+    pub shell_pending_kill_all: Option<TabId>,
 
     /// Digits typed after the prefix, used to select a shell by number.
     pub shell_digits: String,
@@ -192,6 +199,7 @@ impl<'a> Default for App<'a> {
             shell_prefix: ShellPrefix::default(),
             shell_prefix_active: false,
             shell_pending_kill: None,
+            shell_pending_kill_all: None,
             shell_digits: String::new(),
             shell_digit_deadline: None,
             clear_screen: false,

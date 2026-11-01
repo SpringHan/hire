@@ -44,10 +44,34 @@ impl Tab {
     }
 }
 
+/// A tab operation which waits for the user's confirmation.
+///
+/// Every one of them is destructive: removing tabs (or replacing the whole tab
+/// list) kills the shells mounted on them, so the tab menu asks first whenever
+/// there is a mounted shell to lose. `ClearShells` kills the shells but keeps
+/// the tab itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TabAction {
+    /// Close the tab at this index.
+    Remove(usize),
+
+    /// Close every tab except the current one.
+    RemoveOthers,
+
+    /// Replace every open tab with the stored group at this index.
+    ApplyStorage(usize),
+
+    /// Kill every shell mounted on this tab; the tab stays open.
+    ClearShells(TabId),
+}
+
 #[derive(Clone)]
 pub struct TabState {
     pub(super) delete: bool,
     pub(super) storage: bool,
+
+    /// The destructive operation waiting for a `y` confirmation, if any.
+    pub(super) pending: Option<TabAction>,
 
     /// Whether the user attempts to save opening tabs.
     pub(super) save_tabs: bool,
@@ -75,6 +99,7 @@ impl Default for TabState {
         Self {
             delete: false,
             storage: false,
+            pending: None,
             save_tabs: false,
             single_index: false,
             selecting: Vec::new(),

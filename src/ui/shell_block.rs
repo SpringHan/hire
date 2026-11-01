@@ -114,7 +114,18 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
         Span::raw(format!("  {cwd}  [{pos}/{total}]")),
     ]);
 
-    let (hint, style) = if let Some(pending) = app.shell_pending_kill {
+    let (hint, style) = if let Some(tab_id) = app.shell_pending_kill_all {
+        let count = app
+            .tab_list
+            .tab_by_id(tab_id)
+            .map(|tab| tab.shells.len())
+            .unwrap_or(0);
+
+        (
+            format!("Kill all {count} shell(s) of this tab? (y/N)"),
+            Style::default().red().add_modifier(Modifier::BOLD),
+        )
+    } else if let Some(pending) = app.shell_pending_kill {
         let title = app
             .shell_sessions
             .get(pending)
@@ -135,7 +146,9 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
         )
     } else if app.shell_prefix_active {
         (
-            String::from("PREFIX  d: detach  n/p: switch  c: new  x: kill"),
+            String::from(
+                "PREFIX  d: detach  n/p: switch  c: new  x: kill  D: kill all",
+            ),
             Style::default().cyan().add_modifier(Modifier::BOLD),
         )
     } else if let Some(notice) = app.shell_notice.as_ref() {
@@ -146,7 +159,7 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
     } else {
         (
             String::from(
-                "prefix d: detach  n/p: switch  c: new  x: kill  prefix x2: literal",
+                "prefix d: detach  n/p: switch  c: new  x: kill  D: kill all  prefix x2: literal",
             ),
             Style::default().add_modifier(Modifier::DIM),
         )

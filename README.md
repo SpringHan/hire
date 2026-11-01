@@ -134,6 +134,23 @@ Hire remembers a working directory, which is shared between runs:
 
 Whenever a working directory has been set, its path is shown on the right side of the state line (long paths are abbreviated).
 
+### Tabs
+
+`tab_operation` (default `t`) opens the tab menu:
+
+| Key | Action |
+| --- | --- |
+| `n` | Create a new tab |
+| `f` / `b` | Switch to the next / previous tab |
+| `c` | Close the current tab |
+| `d` then a number | Delete the tab with that number |
+| `D` | Clear every shell mounted on the current tab (the tab stays open) |
+| `o` | Close every other tab |
+| `s` then a number | Open a stored tab group |
+| `S` | Store the currently open tabs as a group |
+
+Removing a tab kills the shell sessions mounted on it, so whenever a mounted shell would be lost — closing the current tab (`c`), deleting a tab by number (`d`), closing the other tabs (`o`) or restoring a stored group (`s`) — hire asks first and only acts on `y`; any other key returns to the tab menu.
+
 ### Shell Sessions
 
 `spawn_shell` (default `S`) opens a shell that hire owns and shows it in the current tab. The shell is a real PTY session: it keeps running after it is detached, and one tab can hold several of them (like tmux windows).
@@ -150,6 +167,7 @@ Whenever a working directory has been set, its path is shown on the right side o
 | `C-s <number>` | Attach the shell with that number (0-based) |
 | `C-s c` | Create a new shell on this tab and attach it |
 | `C-s x` | Kill the attached shell (press `y` to confirm) |
+| `C-s D` | Kill every shell mounted on the current tab (press `y` to confirm) |
 | `C-s C-s` | Send a literal `C-s` to the shell |
 
 - Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.
@@ -169,7 +187,7 @@ shell_prefix = "C-s"
 Notes:
 
 - `C-s` is normally XOFF. Hire reads the terminal in raw mode and intercepts the chord before forwarding anything, so the shell never sees it. If you run hire inside tmux, or your terminal's own `C-s` handling interferes, set `shell_prefix` to another chord (`C-a`, `C-o`, `F12`, …).
-- Shell sessions live inside the hire process: quitting hire kills them, closing a tab kills the shells mounted on it, and they are not handed over to a sudo session nor stored in `storage_tabs`.
+- Shell sessions live inside the hire process: quitting hire kills them, closing a tab kills the shells mounted on it (the tab menu asks first when shells are mounted), and they are not handed over to a sudo session nor stored in `storage_tabs`.
 - `hire --working-directory` opens a mounted shell as well, so it can be detached and the browser can be used without losing it.
 
 ### Navigation Index

@@ -425,8 +425,8 @@ if app.selected_block.is_shell() {
 `handle_view_key` is a small state machine:
 
 ```text
-pending_kill = Some(id)?
-  ├─ 'y' → kill id, show the next shell of the tab or the browser
+pending_kill = Some(id)? or pending_kill_all = Some(tab_id)?
+  ├─ 'y' → kill that shell, or every shell of that tab (then the browser)
   └─ other → cancel the prompt (the key is swallowed)
 shell_digits not empty?
   ├─ '0'..'9' → append a digit, commit when it can no longer grow
@@ -439,6 +439,7 @@ prefix_active?
   ├─ '0'..'9' → start typing a shell number (0-based)
   ├─ 'c' → create a new shell on this tab and attach it
   ├─ 'x' → ask to kill the attached shell (prompt in the status line)
+  ├─ 'D' → ask to kill every shell mounted on this tab
   ├─ the prefix chord again → send a literal prefix byte
   └─ other → cancel the prefix, then forward the key (do not swallow typing)
 prefix matches?
@@ -558,6 +559,7 @@ impl App<'_> {
     pub fn commit_shell_digits(&mut self);
     pub fn clear_shell_digits(&mut self);
     pub fn remove_shell_from_tab(&mut self, tab_id: TabId, id: ShellId) -> Option<ShellId>;
+    pub fn close_tab_shells(&mut self, tab_id: TabId) -> usize;
 }
 ```
 
@@ -565,7 +567,8 @@ impl App<'_> {
   push the new id onto `current_tab().shells`, set `active_shell`, then
   `attach`.
 - `attach`: fail if the session is missing or dead; clear `switch_case`, command
-  line/expand/completion state, `shell_prefix_active`, `shell_pending_kill`; set
+  line/expand/completion state, `shell_prefix_active`, `shell_pending_kill`,
+  `shell_pending_kill_all`; set
   `selected_block = Block::Shell(id)`; set `active_shell`; set
   `app.clear_screen = true`.
 - `detach`: clear the prefix/pending state, set
@@ -577,6 +580,15 @@ impl App<'_> {
   `shell_pending_kill` (drawn in the status line, y/N), never through
   `SwitchCase` — a `SwitchCase` would replace the shell view and lose the
   terminal area until dismissed.
+- `D` (inside the prefix) requests the same confirmation for **every** shell of
+  the attached shell's tab through `shell_pending_kill_all: Option<TabId>`; the
+  tab id is remembered instead of a boolean so the right tab is cleared even if
+  the view changes while the prompt is open. Confirming calls
+  `App::close_tab_shells(tab_id)`.
+- `close_tab_shells` is the single place which clears a tab's shells: it
+  detaches when the attached shell belongs to the tab, closes every session and
+  clears `Tab.shells` / `Tab.active_shell`. The tab menu's `D`, the shell view's
+  `C-s D`, closing a tab and replacing the tab list all go through it.
 
 `AppCommand::Shell` and `--working-directory` both call `open_shell`, so the
 `-w` mode becomes "open hire with a mounted shell": the user can still detach
@@ -766,8 +778,9 @@ while vim owns the terminal, `bash` at the prompt), start directory, tab
 ordinal (`[2/3]`). Right: the hint `prefix d: detach  n/p: switch  c: new  x:
 kill  prefix x2: literal`; `PREFIX ...` while `shell_prefix_active` is set;
 `Shell #N` while digits are being typed; `Kill shell "vim"? (y/N)` while
-`shell_pending_kill` is set (the same display name); and an application error
-while `shell_notice` is set.
+`shell_pending_kill` is set (the same display name); `Kill all N shell(s) of
+this tab? (y/N)` while `shell_pending_kill_all` is set; and an application
+error while `shell_notice` is set.
 
 `StateLine` (`ui/command_line.rs`) is already public and reusable.
 
@@ -861,15 +874,15 @@ Do not flip the block back just to run a harness.
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions` |
 | `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key`, `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key` (`C-s x`, `C-s D`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
 | `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
 | `src/key_event/tab/types.rs` | `TabId`, `Tab`, `TabList` rewrite (§5) |
-| `src/key_event/tab/utils.rs` | migrate every mutation site; kill shells on tab close; show shell counts |
+| `src/key_event/tab/utils.rs` | migrate every mutation site; `D` clears the current tab's shells; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts |
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
-| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
 | `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
 | `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
@@ -894,9 +907,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 | --- | --- |
 | Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser; tab list updated |
 | Shell exits while detached | remove it from `shells`; clear `active_shell` if it pointed at the shell; no view change |
-| Close a tab with shells | kill every shell of that tab (the tab menu is the only way to close one) |
-| `delete_other_tabs` | closes the shells of every removed tab |
-| Apply stored tabs (`storage_tabs`) | kills all mounted shells first; sessions are never persisted |
+| Close a tab with shells | the tab menu asks first; `y` closes the tab and kills every shell of it (`close_tab_shells`) |
+| `delete_other_tabs` | asks first when a removed tab has shells; `close_tab_shells` on every removed tab |
+| Apply stored tabs (`storage_tabs`) | asks first when any mounted shell would be killed; then every current tab is cleared and replaced; sessions are never persisted |
 | Quit hire | warn when live shells exist; dropping `ShellSessions` drops every `PtyProcess`, which kills and reaps the children |
 | Sudo session | tabs are handed over without shells; the parent's shells keep running while the root instance is open, and are restored on return; the root instance cannot see or attach them |
 | Terminal resize | `render_shell` compares the shell area with the PTY size and calls `Parser::set_size` + `MasterPty::resize` (which raises `SIGWINCH`) |
@@ -909,6 +922,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Program running in a shell (`vim`, `htop`, `less`, …) | the shell menu and the status line show its name (the PTY's foreground process group, `/proc/<pgid>/comm`); the shell's own name returns when it is back at the prompt |
 | `/proc` unreadable or the foreground process already exited | `foreground_title` returns `None` and the session is labelled with the shell program (`meta.title`); no error is reported |
 | Dead session | `foreground_title` returns `None`, so no `/proc` lookup is done and the label falls back to `meta.title` |
+| `C-s D` while attached | a `Kill all N shell(s) of this tab?` prompt; `y` kills every shell of the tab and returns to the browser, any other key cancels |
+| Clear a tab's shells from the tab menu (`D`) | same confirmation; `y` keeps the tab and empties its shell list, then shows the tab menu again |
+| Close/delete a tab, close other tabs, restore a stored group | asks first only when the tabs which would lose shells actually have some; `y` performs it, any other key returns to the tab menu |
 | Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; events are re-encoded for the child's mode/encoding |
 | Mouse disabled by the child / detach / quit | outer capture is disabled; a half-tracked drag is reset |
 | Mouse press on title or status line | ignored; a drag/release which started inside is clamped to the shell area |

@@ -70,6 +70,7 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     app.command_completion.reset();
     app.shell_prefix_active = false;
     app.shell_pending_kill = None;
+    app.shell_pending_kill_all = None;
     app.shell_notice = None;
     app.mouse_buttons = 0;
     app.clear_shell_digits();
@@ -84,6 +85,7 @@ pub fn detach(app: &mut App) {
 
     app.shell_prefix_active = false;
     app.shell_pending_kill = None;
+    app.shell_pending_kill_all = None;
     app.shell_notice = None;
     app.mouse_buttons = 0;
     app.clear_shell_digits();
@@ -131,12 +133,19 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
         return Ok(())
     };
 
-    // A kill confirmation is waiting for `y`.
-    if let Some(pending) = app.shell_pending_kill {
-        app.shell_pending_kill = None;
+    // A kill (or kill-all) confirmation is waiting for `y`.
+    let pending_all = app.shell_pending_kill_all.take();
+    let pending_one = app.shell_pending_kill.take();
 
+    if pending_all.is_some() || pending_one.is_some() {
         if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-            close_shell(app, pending);
+            match (pending_all, pending_one) {
+                (Some(tab_id), _) => {
+                    app.close_tab_shells(tab_id);
+                },
+                (None, Some(pending)) => close_shell(app, pending),
+                (None, None) => (),
+            }
         }
 
         return Ok(())
@@ -176,6 +185,12 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
             KeyCode::Char('p') => return next_shell(app, false),
             KeyCode::Char('c') => return open_shell(app),
             KeyCode::Char('x') => app.shell_pending_kill = Some(id),
+            // Kill every shell mounted on this tab; the tab stays open.
+            KeyCode::Char('D') => {
+                if let Some(tab_id) = app.shell_sessions.get(id).map(|session| session.tab) {
+                    app.shell_pending_kill_all = Some(tab_id);
+                }
+            },
             KeyCode::Char(c) if c.is_ascii_digit() => push_digit(app, c),
             KeyCode::Esc => (),
             _ => return write_key(app, id, &key),
@@ -199,7 +214,7 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
     };
 
     // The kill confirmation owns the input; do not leak clicks to the child.
-    if app.shell_pending_kill.is_some() {
+    if app.shell_pending_kill.is_some() || app.shell_pending_kill_all.is_some() {
         return Ok(())
     }
 
@@ -272,7 +287,7 @@ pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
         return Ok(())
     };
 
-    if app.shell_pending_kill.is_some() {
+    if app.shell_pending_kill.is_some() || app.shell_pending_kill_all.is_some() {
         return Ok(())
     }
 
@@ -362,6 +377,51 @@ impl App<'_> {
         } else {
             None
         }
+    }
+
+    /// Kill every shell mounted on `tab_id` and forget them on the tab.
+    ///
+    /// The tab itself stays open. The attached shell is detached first when it
+    /// belongs to the tab, so the view never points at a session which is
+    /// being dropped. Returns how many shells were closed.
+    ///
+    /// This is the single place which clears a tab's shells: the tab menu's
+    /// `D`, the shell view's `C-s D`, closing a tab and replacing the tab list
+    /// (stored tabs) all go through it.
+    pub fn close_tab_shells(&mut self, tab_id: TabId) -> usize {
+        let shells = self
+            .tab_list
+            .tab_by_id(tab_id)
+            .map(|tab| tab.shells.clone())
+            .unwrap_or_default();
+
+        if shells.is_empty() {
+            return 0
+        }
+
+        if let Some(attached) = self.selected_block.shell_id() {
+            // Trust the session's owner as well as the tab's list: the list is
+            // what is being cleared, and the view must never survive pointing
+            // at a session which is about to be dropped.
+            let owns_attached = self
+                .shell_sessions
+                .get(attached)
+                .map(|session| session.tab == tab_id)
+                .unwrap_or(false);
+
+            if owns_attached || shells.contains(&attached) {
+                detach(self);
+            }
+        }
+
+        self.shell_sessions.close_many(&shells);
+
+        if let Some(tab) = self.tab_list.tab_by_id_mut(tab_id) {
+            tab.shells.clear();
+            tab.active_shell = None;
+        }
+
+        shells.len()
     }
 
     pub fn clear_shell_digits(&mut self) {
@@ -565,4 +625,85 @@ fn set_outer_bracketed_paste(enabled: bool) -> std::io::Result<()> {
             "\x1b[?2004l"
         })
     )
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::Path;
+
+    use ratatui::crossterm::event::KeyModifiers;
+
+    use super::*;
+
+    fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        handle_view_key(KeyEvent::new(code, modifiers), app).unwrap();
+    }
+
+    /// Mount a `/bin/sh` session on the current tab, without attaching it.
+    fn open_test_shell(app: &mut App) -> ShellId {
+        let tab_id = app.tab_list.current_tab().id;
+        let id = app
+            .shell_sessions
+            .open(tab_id, "/bin/sh", Path::new("/"))
+            .unwrap();
+
+        let tab = app.tab_list.current_tab_mut();
+        tab.shells.push(id);
+        tab.active_shell = Some(id);
+
+        id
+    }
+
+    /// `C-s D` asks before killing every shell of the tab; `y` then kills them
+    /// all and leaves the browser behind.
+    #[test]
+    fn test_prefix_d_kills_all_shells_after_confirmation() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        open_test_shell(&mut app);
+        let last = open_test_shell(&mut app);
+        attach(&mut app, last).unwrap();
+
+        assert_eq!(app.tab_list.current_tab().shells.len(), 2);
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('D'), KeyModifiers::SHIFT);
+
+        assert!(app.shell_pending_kill_all.is_some());
+
+        // Nothing is killed before the confirmation.
+        assert_eq!(app.tab_list.current_tab().shells.len(), 2);
+        assert_eq!(app.shell_sessions.alive_count(), 2);
+
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::empty());
+
+        assert!(app.shell_pending_kill_all.is_none());
+        assert!(!app.selected_block.is_shell());
+        assert!(app.tab_list.current_tab().shells.is_empty());
+        assert_eq!(app.shell_sessions.alive_count(), 0);
+    }
+
+    /// Any other key cancels the kill-all confirmation.
+    #[test]
+    fn test_prefix_d_cancel_keeps_the_shells() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('D'), KeyModifiers::SHIFT);
+        press(&mut app, KeyCode::Char('n'), KeyModifiers::empty());
+
+        assert!(app.shell_pending_kill_all.is_none());
+        assert!(app.selected_block.is_shell());
+        assert_eq!(app.tab_list.current_tab().shells.len(), 1);
+        assert_eq!(app.shell_sessions.alive_count(), 1);
+    }
 }

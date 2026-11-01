@@ -183,7 +183,8 @@ Responsibilities:
   preview; edit mode; keymap; loaded config; error queue; output settings;
   host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
-  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill`, `shell_digits`
+  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill` (one shell) and
+  `shell_pending_kill_all` (a tab id; every shell of that tab), `shell_digits`
   and `shell_digit_deadline` (numbered selection), `clear_screen` (full repaint
   after attaching/detaching) and `shell_notice` (an error shown in the shell
   status line instead of replacing the view).
@@ -329,15 +330,15 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program. |
 | `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine, exit cleanup and numbered selection. |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection and `App::close_tab_shells` (the one place which clears a tab's shells). |
 | `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
-| `key_event/tab/types.rs` | `TabId`, `Tab` (path, hidden flag, selection, mounted shells) and `TabList`; `TabState` (tab menu state). |
-| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; closes the shells of a removed tab. |
+| `key_event/tab/types.rs` | `TabId`, `Tab` (path, hidden flag, selection, mounted shells) and `TabList`; `TabState` (tab menu state) and `TabAction` (the destructive operation waiting for confirmation). |
+| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; `D` clears the current tab's shells; every removal (`c`, `d` + number, `o`, restoring a stored group) asks first when mounted shells would be killed. |
 
 **`key_event/mod.rs`** — the input dispatcher.
 
@@ -495,10 +496,16 @@ page when the handler returns `true`. `traits.rs` lets arbitrary structs
 tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
 `shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab page;
 `switch` handles create/next/prev/close/close-others and numeric selection
-(1-based; multi-digit when there are more than nine tabs); closing a tab closes
-its shells. `save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage
-named tab groups persisted in `auto_config.toml`; applying a group closes the
-shells of the tabs it replaces, because sessions cannot be persisted.
+(1-based; multi-digit when there are more than nine tabs); `D` kills every shell
+of the current tab and keeps the tab. Every removal (`c`, `d` + number, `o`, and
+applying a stored group) checks the affected tabs first: a mounted shell turns
+the action into a `SwitchCase` confirmation (`TabAction` in `TabState`, drawn
+like the other y/N pages, `expand: false`), and only `y` runs it — any other key
+returns to the tab menu. Confirmed removals call `App::close_tab_shells`, which
+detaches first when the attached shell belongs to a cleared tab.
+`save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage named tab
+groups persisted in `auto_config.toml`; applying a group asks first because
+sessions cannot be persisted and the shells of the replaced tabs are killed.
 `read_config` restores the groups. `SessionTabs` (sudo) snapshots only path,
 hidden flag and selection, never shells.
 
@@ -546,8 +553,8 @@ cleared cells and an empty symbol would not erase the old character on the
 outer terminal. The cursor is placed with `Frame::set_cursor_position`. `shell_status_lines`
 builds the shell's left/right status text (the program running in the shell —
 `vim` while vim is open, the shell's own name at its prompt — its start
-directory, position, prefix hint, pending kill prompt, typed shell number, or
-`shell_notice`).
+directory, position, prefix hint, the pending single-shell/kill-all prompt,
+typed shell number, or `shell_notice`).
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
 line (permission/owner/size/link info on the left and, on the right, the
@@ -668,6 +675,8 @@ spawn_shell (`S`) / --working-directory
                  ├─ `C-s n/p`, `C-s <number>` → attach another shell
                  ├─ `C-s c` → open another shell on the same tab
                  ├─ `C-s x` → prompt; `y` kills it and attaches the next
+                 ├─ `C-s D` → prompt; `y` kills every shell of the tab
+                 │    (App::close_tab_shells) and returns to the browser
                  ├─ mouse events → encode_mouse (child's mode/encoding) → PTY
                  ├─ paste events → encode_paste (bracketed if the child asked) → PTY
                  ├─ sync_terminal_modes: outer mouse capture + bracketed paste
@@ -683,6 +692,27 @@ shell_menu (`T`)
 `render_command_line`'s `Block::Shell` arm renders its status line. Quitting
 hire confirms when mounted shells are alive; `PtyProcess::drop` kills and reaps
 them.
+
+### Tab removal
+
+```
+tab menu (`t`)
+  ├─ `c`                  → remove the current tab
+  ├─ `d` + number         → remove that tab
+  ├─ `o`                  → remove every other tab
+  ├─ `s` + number         → replace every open tab with a stored group
+  └─ `D`                  → kill every shell of the current tab (tab stays)
+       └─ mounted shells on the affected tabs?
+            ├─ no  → run it at once
+            └─ yes → confirmation page ("... will kill N shells ...")
+                 ├─ `y` → run it (`close_tab_shells`, then remove/replace)
+                 └─ any other key → back to the tab menu, nothing changed
+```
+
+All four removals go through `App::close_tab_shells`, so they detach first when
+the attached shell belongs to a removed tab, kill its sessions and clear
+`Tab.shells` / `Tab.active_shell` before the tab (or the whole list) is
+dropped. Restoring a stored group asks too, because it replaces every open tab.
 
 ### Sudo session
 
@@ -740,11 +770,13 @@ when files are marked, execution is repeated for every marked target.
 
 `cargo test` only runs the unit tests. They never launch the application and
 never execute the user configuration: the only config-related test
-(`goto_test::test_read_config`) builds its TOML document in memory. The only
-test that spawns a process is `key_event::shell::session`'s
-`test_display_title_follows_the_foreground_program`: it runs `/bin/sh` in a
-private PTY (no config, no hire binary) and returns early when `/bin/sh` does
-not exist; it needs no network and no installed binary.
+(`goto_test::test_read_config`) builds its TOML document in memory. The tests
+which spawn processes run `/bin/sh` in a private PTY (no config file, no hire
+binary) and return early when `/bin/sh` does not exist; they need no network and
+no installed binary. They are
+`key_event::shell::session::test_display_title_follows_the_foreground_program`
+(the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
+kill-all) and `key_event::tab::utils::test::*` (tab-removal confirmations).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise
