@@ -3,6 +3,7 @@
 mod utils;
 mod types;
 mod input;
+mod graphics;
 mod pty;
 mod session;
 mod view;
@@ -12,6 +13,7 @@ mod mouse;
 pub use types::*;
 pub use utils::*;
 pub use input::*;
+pub use graphics::GraphicsSupport;
 pub use session::*;
 pub use view::*;
 pub use menu::*;

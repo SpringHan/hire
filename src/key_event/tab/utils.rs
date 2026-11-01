@@ -727,7 +727,7 @@ mod test {
     use std::{borrow::Cow, path::Path};
 
     use crate::{
-        key_event::switch::switch_match,
+        key_event::{shell::GraphicsSupport, switch::switch_match},
         utils::ShellId,
     };
 
@@ -738,7 +738,7 @@ mod test {
         let tab_id = app.tab_list.tabs()[index].id;
         let id = app
             .shell_sessions
-            .open(tab_id, "/bin/sh", Path::new("/"))
+            .open(tab_id, "/bin/sh", Path::new("/"), GraphicsSupport::disabled())
             .unwrap();
 
         let tab = app.tab_list.tab_by_id_mut(tab_id).unwrap();

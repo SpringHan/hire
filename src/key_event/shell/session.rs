@@ -8,14 +8,19 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, Sender, SyncSender},
         Arc, Mutex, MutexGuard,
     },
 };
 
+use portable_pty::PtySize;
+
 use crate::{error::AppResult, key_event::TabId, utils::ShellId};
 
-use super::pty::PtyProcess;
+use super::{
+    graphics::{GraphicsEvent, GraphicsSupport},
+    pty::{PtyGraphics, PtyProcess},
+};
 
 /// The size a session is spawned with; the first draw resizes it to the real
 /// terminal area.
@@ -24,6 +29,9 @@ pub const DEFAULT_PTY_COLS: u16 = 80;
 
 /// How many scrolled-off lines are kept for every session.
 pub const SCROLLBACK_ROWS: usize = 240;
+
+/// How many graphics events may wait for the main loop.
+const GRAPHICS_QUEUE: usize = 32;
 
 pub struct ShellMeta {
     /// The basename of the shell program the session was started with, e.g.
@@ -122,6 +130,8 @@ pub struct ShellSessions {
     next_id: u64,
     exit_tx: Sender<ShellId>,
     exit_rx: Receiver<ShellId>,
+    graphics_tx: SyncSender<(ShellId, GraphicsEvent)>,
+    graphics_rx: Receiver<(ShellId, GraphicsEvent)>,
 }
 
 impl Default for ShellSessions {
@@ -133,17 +143,35 @@ impl Default for ShellSessions {
 impl ShellSessions {
     pub fn new() -> Self {
         let (exit_tx, exit_rx) = mpsc::channel();
+        // Bounded: while hire is blocked in a foreground program nobody drains
+        // the graphics, and image events are large. Dropping one is harmless
+        // (the child repaints on its next preview change), growing forever is
+        // not.
+        let (graphics_tx, graphics_rx) = mpsc::sync_channel(GRAPHICS_QUEUE);
 
         Self {
             sessions: HashMap::new(),
             next_id: 0,
             exit_tx,
             exit_rx,
+            graphics_tx,
+            graphics_rx,
         }
     }
 
     /// Spawn a new shell and return its id.
-    pub fn open(&mut self, tab: TabId, program: &str, cwd: &Path) -> AppResult<ShellId> {
+    ///
+    /// `graphics` is what the new terminal tells the child about image support;
+    /// the PTY's pixel size is derived from it so programs which read the
+    /// window size in pixels scale their images correctly.
+    pub fn open(
+        &mut self,
+        tab: TabId,
+        program: &str,
+        cwd: &Path,
+        graphics: GraphicsSupport,
+    ) -> AppResult<ShellId>
+    {
         let id = ShellId(self.next_id);
         self.next_id += 1;
 
@@ -154,13 +182,22 @@ impl ShellSessions {
         );
         let screen = Arc::new(Mutex::new(parser));
 
+        let cell = graphics.cell;
         let pty = PtyProcess::spawn(
             program,
             cwd,
-            DEFAULT_PTY_ROWS,
-            DEFAULT_PTY_COLS,
+            PtySize {
+                rows: DEFAULT_PTY_ROWS,
+                cols: DEFAULT_PTY_COLS,
+                pixel_width: DEFAULT_PTY_COLS.saturating_mul(cell.0),
+                pixel_height: DEFAULT_PTY_ROWS.saturating_mul(cell.1),
+            },
             screen.clone(),
             self.exit_tx.clone(),
+            PtyGraphics {
+                support: graphics,
+                events: self.graphics_tx.clone(),
+            },
             id,
         )?;
 
@@ -201,6 +238,17 @@ impl ShellSessions {
 
     pub fn alive_count(&self) -> usize {
         self.sessions.values().filter(|s| s.alive).count()
+    }
+
+    /// Take the graphics events produced since the last call.
+    pub fn drain_graphics(&mut self) -> Vec<(ShellId, GraphicsEvent)> {
+        let mut events = Vec::new();
+
+        while let Ok(event) = self.graphics_rx.try_recv() {
+            events.push(event);
+        }
+
+        events
     }
 
     /// Take the ids of every shell which exited since the last call.
@@ -253,7 +301,14 @@ mod test {
         }
 
         let mut sessions = ShellSessions::new();
-        let id = sessions.open(TabId(0), "/bin/sh", Path::new("/")).unwrap();
+        let id = sessions
+            .open(
+                TabId(0),
+                "/bin/sh",
+                Path::new("/"),
+                GraphicsSupport::disabled(),
+            )
+            .unwrap();
         let session = sessions.get_mut(id).unwrap();
 
         // The shell has to start, read the line and put `sleep` in the

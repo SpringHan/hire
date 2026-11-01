@@ -26,8 +26,10 @@ Hire is an event-driven application built around one mutable state object, `App`
 2. loop:
    a. execute pending macro
    b. reap exited shell sessions; commit a timed-out shell number; mirror the
-      child's mouse/bracketed-paste modes on the outer terminal
-   c. clear the terminal if a shell was attached/detached
+      child's mouse/bracketed-paste modes on the outer terminal; answer the
+      shells' terminal queries and forward their kitty images to the terminal
+   c. clear the terminal if a shell was attached/detached (or an image was
+      forwarded: the placeholder cells must be painted after it)
    d. ui::ui(frame, &mut app)
    e. poll/read events (16 ms while a shell is attached, 200 ms otherwise)
    f. handle_event / handle_view_mouse / handle_view_paste
@@ -149,9 +151,10 @@ enters the ratatui alternate screen, and runs the main loop.
 
 Responsibilities:
 
-- `main()` — the event loop: run pending macro, draw UI, poll/read key events,
-  handle the `q` quit shortcut, dispatch keys, drain the search and image
-  channels.
+- `main()` — the event loop: run pending macro, reap shells, answer/forward the
+  shells' graphics (`App::handle_shell_graphics`), draw UI, poll/read key
+  events, handle the `q` quit shortcut, dispatch keys, drain the search and
+  image channels.
 - `shell_in_workdir` — `--working-directory` mode: jump to the stored working
   directory and spawn a shell immediately.
 - `check_output` / `check_start_path` — apply `--output-file` /
@@ -169,7 +172,7 @@ Responsibilities:
 | `app/mod.rs` | Defines the central `App<'a>` struct and its core implementation. Re-exports `Macro`/`MacroStatus`/`MacroTarget`, `TermColors`, `FileSaver`, `sort`. |
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
 | `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles. |
-| `app/image_preview.rs` | `ImagePreview`: terminal image support detection, decode/resize worker threads, channels, `get_image_info`. |
+| `app/image_preview.rs` | `ImagePreview`: terminal image support detection, decode/resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
 
 **`app/mod.rs`** is the heart of the data model:
@@ -326,11 +329,12 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
-| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY, reader thread parsing into the shared `vt100` screen, write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
-| `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program. |
+| `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries and forwards placeholder image transmissions to the real terminal. |
+| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter, write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
+| `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection and `App::close_tab_shells` (the one place which clears a tab's shells). |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells), `graphics_support` and `App::handle_shell_graphics`. |
 | `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
@@ -692,6 +696,29 @@ shell_menu (`T`)
 `render_command_line`'s `Block::Shell` arm renders its status line. Quitting
 hire confirms when mounted shells are alive; `PtyProcess::drop` kills and reaps
 them.
+
+### Images inside a shell
+
+```
+child writes to its PTY → GraphicsFilter (reader thread)
+  ├─ text                        → vt100 screen (as before)
+  ├─ terminal queries            → GraphicsEvent::Reply → the child's PTY
+  │    ├─ kitty `a=q`            → `OK` (direct) / `ENOTSUP` (shared memory, files)
+  │    ├─ `CSI c` (DA1)          → `?62;22c` (no sixel, so the child picks kitty)
+  │    └─ `CSI 14t` / `CSI 16t`  → text area / cell size in pixels
+  └─ kitty image data            → GraphicsEvent::Forward → the real terminal
+       (`a=T`, `U=1`, chunked)      (one buffered sequence per image, `q=2`)
+                                      ↓
+            the child's unicode placeholder cells, which `ui/shell_block.rs`
+            renders like any other cell, make kitty draw the image there
+```
+
+`GraphicsSupport` is `kitty` only when hire's own picker detected the kitty
+protocol for the real terminal; otherwise the child receives no graphics answers
+and behaves exactly as before. Inside tmux the support is off as well, because
+the sequences would need tmux passthrough wrapping. `a=d` deletes are translated
+to deletes of the image ids this shell forwarded, so a TUI inside a shell can
+never remove hire's own preview image.
 
 ### Tab removal
 

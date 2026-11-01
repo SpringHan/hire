@@ -37,6 +37,16 @@ impl ImagePreview {
         self.picker.is_some()
     }
 
+    /// The image protocol chosen for the real terminal, if it supports images.
+    pub fn protocol_type(&self) -> Option<ratatui_image::picker::ProtocolType> {
+        self.picker.map(|picker| picker.protocol_type())
+    }
+
+    /// The size of one terminal cell in pixels `(width, height)`.
+    pub fn font_size(&self) -> Option<(u16, u16)> {
+        self.picker.map(|picker| picker.font_size())
+    }
+
     pub fn make_protocol(&mut self, image: DynamicImage) -> Result<()> {
         if self.picker.is_none() {
             bail!("Unable to setup image picker");

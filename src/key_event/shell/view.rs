@@ -4,9 +4,11 @@
 // handling and the numbered selection used while a shell is attached.
 
 use std::{
-    io::stdout,
+    io::{stdout, Write},
     time::{Duration, Instant},
 };
+
+use ratatui_image::picker::ProtocolType;
 
 use ratatui::crossterm::{
     event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind},
@@ -29,7 +31,9 @@ use super::{
     encode_key,
     encode_mouse,
     encode_paste,
+    graphics::GraphicsEvent,
     inside as mouse_inside,
+    GraphicsSupport,
 };
 
 /// How long a partial shell number is kept before it is committed.
@@ -39,8 +43,9 @@ pub fn open_shell(app: &mut App) -> AppResult<()> {
     let program = default_shell(app)?;
     let tab_id = app.tab_list.current_tab().id;
     let cwd = app.path.to_owned();
+    let graphics = graphics_support(app);
 
-    let id = app.shell_sessions.open(tab_id, &program, &cwd)?;
+    let id = app.shell_sessions.open(tab_id, &program, &cwd, graphics)?;
 
     let tab = app.tab_list.current_tab_mut();
     tab.shells.push(id);
@@ -627,6 +632,65 @@ fn set_outer_bracketed_paste(enabled: bool) -> std::io::Result<()> {
     )
 }
 
+/// The image support a new shell session is allowed to offer.
+///
+/// Kitty graphics are forwarded to the real terminal, so they are only offered
+/// when the real terminal speaks kitty. Inside tmux the sequences would have to
+/// be wrapped for tmux passthrough, which is not done yet, so nothing is
+/// offered there.
+fn graphics_support(app: &App) -> GraphicsSupport {
+    if in_tmux() {
+        return GraphicsSupport::disabled()
+    }
+
+    match app.image_preview.protocol_type() {
+        Some(ProtocolType::Kitty) => GraphicsSupport::kitty(
+            app.image_preview.font_size().unwrap_or((10, 20)),
+        ),
+        _ => GraphicsSupport::disabled(),
+    }
+}
+
+fn in_tmux() -> bool {
+    std::env::var("TERM").is_ok_and(|term| term.starts_with("tmux")) ||
+        std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "tmux")
+}
+
+impl App<'_> {
+    /// Forward the graphics the shells produced to the real terminal and
+    /// answer the capability queries they sent while starting up.
+    ///
+    /// A forwarded image is followed by a full repaint: the placeholder cells
+    /// the child painted must be written *after* the terminal knows the image,
+    /// otherwise they refer to an image it has never seen.
+    pub fn handle_shell_graphics(&mut self) -> AppResult<()> {
+        let mut forwarded = false;
+
+        for (id, event) in self.shell_sessions.drain_graphics() {
+            match event {
+                GraphicsEvent::Reply(bytes) => {
+                    if let Some(session) = self.shell_sessions.get_mut(id) {
+                        let _ = session.write(&bytes);
+                    }
+                },
+
+                GraphicsEvent::Forward(bytes) => {
+                    let mut stdout = stdout();
+                    stdout.write_all(&bytes)?;
+                    stdout.flush()?;
+                    forwarded = true;
+                },
+            }
+        }
+
+        if forwarded {
+            self.clear_screen = true;
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::path::Path;
@@ -644,7 +708,7 @@ mod test {
         let tab_id = app.tab_list.current_tab().id;
         let id = app
             .shell_sessions
-            .open(tab_id, "/bin/sh", Path::new("/"))
+            .open(tab_id, "/bin/sh", Path::new("/"), GraphicsSupport::disabled())
             .unwrap();
 
         let tab = app.tab_list.current_tab_mut();

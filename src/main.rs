@@ -73,6 +73,9 @@ fn main() -> AppResult<()> {
         // The attached shell may enable/disable mouse tracking or bracketed
         // paste at any time; mirror it on the outer terminal.
         app.sync_terminal_modes();
+        // Forward images the shells painted with the kitty graphics protocol
+        // and answer their terminal queries.
+        app.handle_shell_graphics()?;
 
         if app.clear_screen {
             terminal.clear()?;

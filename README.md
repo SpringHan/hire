@@ -172,6 +172,7 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 
 - Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.
 - The title bar shows how many shells the current tab has (`|1:2|` means tab 1 has two shells) and the attached shell's position (`SH 2/3`).
+- Images painted by a TUI inside a mounted shell (for example `yazi` previews) are shown when the terminal speaks the **kitty graphics protocol**: hire answers the program's terminal queries and forwards the image data, and the program's own unicode placeholders place it on screen. Programmes that fall back to sixel/iTerm2 images, and hire running inside tmux, keep the old behaviour (the image is not shown inside the shell).
 - Mouse and pasted text are forwarded like a normal terminal:
   - When the program inside the shell enables mouse tracking, hire captures the mouse and forwards clicks, drags and the wheel (in the protocol/encoding the program asked for). Hold `Shift` while dragging to use your terminal's own text selection.
   - When the program enables bracketed paste (`ESC[?2004h`), a paste arrives as a single bracketed paste, preserving newlines and CJK text.

@@ -7,7 +7,10 @@
 use std::{
     io::{Read, Write},
     path::Path,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{
+        mpsc::{Sender, SyncSender},
+        Arc, Mutex,
+    },
 };
 
 use anyhow::anyhow;
@@ -15,38 +18,50 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 
 use crate::{error::AppResult, utils::ShellId};
 
+use super::graphics::{GraphicsEvent, GraphicsFilter, GraphicsSupport};
+
+/// The graphics channel of a session's reader thread.
+pub struct PtyGraphics {
+    pub support: GraphicsSupport,
+    pub events: SyncSender<(ShellId, GraphicsEvent)>,
+}
+
 pub struct PtyProcess {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     size: (u16, u16),
+    /// Cell size in pixels; `(0, 0)` when it is unknown.
+    cell: (u16, u16),
 }
 
 impl PtyProcess {
-    /// Spawn `program` in a new PTY of `rows` x `cols`.
+    /// Spawn `program` in a new PTY.
     ///
     /// The reader thread keeps parsing `program`'s output into `screen` until
     /// the slave side is closed, then sends the shell id through `exited`.
+    /// Kitty image sequences are split off for `graphics` instead of being
+    /// parsed as text.
     pub fn spawn(
         program: &str,
         cwd: &Path,
-        rows: u16,
-        cols: u16,
+        size: PtySize,
         screen: Arc<Mutex<vt100::Parser>>,
         exited: Sender<ShellId>,
+        graphics: PtyGraphics,
         id: ShellId,
     ) -> AppResult<Self>
     {
-        let rows = rows.max(1);
-        let cols = cols.max(1);
+        let rows = size.rows.max(1);
+        let cols = size.cols.max(1);
 
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: size.pixel_width,
+                pixel_height: size.pixel_height,
             })
             .map_err(|err| anyhow!("Cannot open a pty: {err}"))?;
 
@@ -71,18 +86,36 @@ impl PtyProcess {
             .take_writer()
             .map_err(|err| anyhow!("Cannot write to the pty: {err}"))?;
 
+        let cell = graphics.support.cell;
+
         std::thread::Builder::new()
             .name(format!("hire-shell-{}", id.0))
             .spawn(move || {
                 let mut buf = [0u8; 8192];
+                let mut filter = GraphicsFilter::new(graphics.support);
+                let events = graphics.events;
 
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            if let Ok(mut parser) = screen.lock() {
-                                parser.process(&buf[..n]);
-                            }
+                            let mut parser = screen
+                                .lock()
+                                .unwrap_or_else(|err| err.into_inner());
+                            let (rows, cols) = parser.screen().size();
+
+                            let mut text = |chunk: &[u8]| parser.process(chunk);
+                            let mut emit = |event: GraphicsEvent| {
+                                let _ = events.try_send((id, event));
+                            };
+
+                            filter.feed(
+                                &buf[..n],
+                                rows,
+                                cols,
+                                &mut text,
+                                &mut emit,
+                            );
                         },
                     }
                 }
@@ -95,6 +128,7 @@ impl PtyProcess {
             writer,
             child,
             size: (rows, cols),
+            cell,
         })
     }
 
@@ -119,8 +153,8 @@ impl PtyProcess {
             .resize(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: cols.saturating_mul(self.cell.0),
+                pixel_height: rows.saturating_mul(self.cell.1),
             })
             .map_err(|err| anyhow!("Cannot resize the pty: {err}"))?;
 

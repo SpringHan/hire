@@ -115,6 +115,7 @@ App
  │    ├─ sessions: HashMap<ShellId, ShellSession>
  │    ├─ next_id: u64
  │    ├─ exit_tx / exit_rx: Sender/Receiver<ShellId>
+ │    ├─ graphics_tx / graphics_rx: Sender/Receiver<(ShellId, GraphicsEvent)>
  │    └─ ShellSession {
  │         id: ShellId,
  │         tab: TabId,
@@ -142,7 +143,10 @@ Why this shape:
   blocked in another foreground process (`:!vim`, `shell_command lazygit`,
   `open_file_in_shell`). No unbounded channel, no backpressure on a build that
   keeps printing while the user is elsewhere.
-- Only **exit** events travel through a channel (small and rare).
+- Only **exit** events and **graphics** events travel through a channel. Exits
+  are small and rare; graphics events are the query answers the child waits for
+  and the image data the main loop has to write to the real terminal (a shell
+  cannot write to it from its reader thread).
 
 ---
 
@@ -230,10 +234,10 @@ impl PtyProcess {
     pub fn spawn(
         program: &str,
         cwd: &Path,
-        rows: u16,
-        cols: u16,
+        size: PtySize,                 // rows/cols + pixel size from the cell size
         screen: Arc<Mutex<vt100::Parser>>,
         exited: Sender<ShellId>,
+        graphics: PtyGraphics,         // GraphicsSupport + the events sender
         id: ShellId,
     ) -> AppResult<Self>;
 
@@ -246,7 +250,9 @@ impl PtyProcess {
 
 Implementation notes:
 
-- `native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })`.
+- `native_pty_system().openpty(size)`; the pixel size is
+  `cols × cell_width` by `rows × cell_height`, so programs which read the window
+  size in pixels (or ask for it with `CSI 16t`) size their images correctly.
 - `CommandBuilder::new(program)`, `.cwd(cwd)`; the base environment is inherited,
   so `TERM`, `COLORTERM`, `SSH_*` etc. are already correct. Keep the current
   non-login shell behaviour.
@@ -258,13 +264,17 @@ Implementation notes:
 
 ```rust
 let mut buf = [0u8; 8192];
+let mut filter = GraphicsFilter::new(graphics.support);
 loop {
     match reader.read(&mut buf) {
         Ok(0) | Err(_) => break,
         Ok(n) => {
-            if let Ok(mut parser) = screen.lock() {
-                parser.process(&buf[..n]);
-            }
+            let mut parser = screen.lock().unwrap_or_else(|err| err.into_inner());
+            let (rows, cols) = parser.screen().size();
+            let mut text = |chunk: &[u8]| parser.process(chunk);
+            let mut emit = |event| { let _ = graphics.events.send((id, event)); };
+            // Kitty graphics APCs are split off; the text still goes to vt100.
+            filter.feed(&buf[..n], rows, cols, &mut text, &mut emit);
         }
     }
 }
@@ -306,6 +316,8 @@ pub struct ShellSessions {
     next_id: u64,
     exit_tx: Sender<ShellId>,
     exit_rx: Receiver<ShellId>,
+    graphics_tx: Sender<(ShellId, GraphicsEvent)>,
+    graphics_rx: Receiver<(ShellId, GraphicsEvent)>,
 }
 
 impl ShellSession {
@@ -318,11 +330,13 @@ impl ShellSession {
 
 impl ShellSessions {
     pub fn new() -> Self;
-    pub fn open(&mut self, tab: TabId, program: &str, cwd: &Path) -> AppResult<ShellId>;
+    pub fn open(&mut self, tab: TabId, program: &str, cwd: &Path,
+                graphics: GraphicsSupport) -> AppResult<ShellId>;
     pub fn get(&self, id: ShellId) -> Option<&ShellSession>;
     pub fn get_mut(&mut self, id: ShellId) -> Option<&mut ShellSession>;
     pub fn is_alive(&self, id: ShellId) -> bool;
     pub fn drain_exits(&mut self) -> Vec<ShellId>;
+    pub fn drain_graphics(&mut self) -> Vec<(ShellId, GraphicsEvent)>;
     pub fn close(&mut self, id: ShellId);          // kill + reap + drop
     pub fn close_many(&mut self, ids: &[ShellId]);
     pub fn alive_count(&self) -> usize;
@@ -338,8 +352,9 @@ impl ShellSessions {
   `/proc` is unreadable (non-Linux), and `display_title` then falls back to
   `meta.title`. `meta.title` itself always keeps the shell program.
 - `open` creates the parser (`Parser::new(24, 80, SCROLLBACK_ROWS)`; the first
-  draw resizes it), spawns the PTY, registers the session under a fresh
-  `ShellId` and returns it. Registration into `Tab.shells` is done by the caller
+  draw resizes it), spawns the PTY with the pixel size derived from
+  `graphics.cell`, registers the session under a fresh `ShellId` and returns
+  it. Registration into `Tab.shells` is done by the caller
   (`App::open_shell`), because only `App` can touch `TabList`.
 - `drain_exits` is called once per main-loop iteration; the caller removes the
   id from the owning tab, reaps the child with `close`, and fixes the view if
@@ -790,6 +805,78 @@ error while `shell_notice` is set.
 tab has shells, e.g. `|1:2>|` (tab 1 has 2 mounted shells), and `SH 2/3` while a
 shell is attached.
 
+### 11.4 Images (kitty passthrough)
+
+The screen renderer above only knows cells, so a TUI inside the shell cannot
+make hire display a picture by itself. New file
+`src/key_event/shell/graphics.rs`:
+
+```rust
+pub struct GraphicsSupport {
+    pub kitty: bool,        // the real terminal speaks the kitty protocol
+    pub cell: (u16, u16),   // cell size in pixels, from hire's own picker
+}
+
+pub enum GraphicsEvent {
+    Reply(Vec<u8>),         // write to the child's PTY
+    Forward(Vec<u8>),       // write to the real terminal
+}
+
+pub struct GraphicsFilter { /* pending APC, query tail, forwarding, ids */ }
+
+impl GraphicsFilter {
+    pub fn new(support: GraphicsSupport) -> Self;
+    pub fn feed(&mut self, bytes: &[u8], rows: u16, cols: u16,
+                text: &mut dyn FnMut(&[u8]),
+                emit: &mut dyn FnMut(GraphicsEvent));
+}
+```
+
+The reader thread runs every PTY chunk through `feed`:
+
+- **Text** (everything except `ESC _ … ESC \` APC sequences) is fed to `vt100`
+  exactly as before. APC sequences are removed because `vt100` has no image
+  model and would drop them anyway.
+- **Terminal queries** in the text stream are answered for the child:
+  - the kitty graphics query (`a=q`): `OK` for direct transmission,
+    `ENOTSUP` for shared memory / file media (the child then sends the data
+    inline);
+  - `CSI c` (DA1): `?62;22c` — no sixel, so a TUI which supports both chooses
+    kitty;
+  - `CSI 16t` / `CSI 14t`: the cell size / text area in pixels (from hire's
+    picker). `vt100` still sees the query, which is harmless.
+  - `CSI 5n`: `CSI 0n` (terminal ready).
+- **Kitty image transmissions** (`a=T`/`a=t` with `U=1`, chunked with `m=1`)
+  are collected and forwarded **once per image** to the real terminal, with
+  `q=2` forced so the terminal never answers into hire's own stdin (an answer
+  would be read as key presses). Only placeholder images are forwarded: a
+  direct placement would draw at the child's cursor position, which hire does
+  not own.
+- **Deletes** are translated: `d=A` (the child's "delete everything") becomes
+  one `d=I` per image id this shell forwarded, and a delete for an unknown id is
+  dropped. A TUI inside a shell therefore cannot delete hire's own preview.
+
+No decoding or re-encoding happens: the child sized the image for the real
+cell size (that is what the `CSI 16t` answer is for), and the unicode
+placeholder cells it paints are ordinary cells for `render_shell` (section
+11.1), which writes their contents and foreground colour. Kitty decodes the
+foreground colour as the image id and draws the image under those cells.
+
+`App::handle_shell_graphics` (main loop, before the draw) drains the events,
+writes replies to the child's PTY, forwards image data to stdout and requests a
+full repaint. The repaint matters: the placeholder cells must be written after
+the terminal knows the image. The event channel is bounded (`sync_channel`):
+while hire is blocked in a foreground program nothing drains it, and an image
+event which does not fit is dropped rather than queued forever (the child
+repaints on its next preview change).
+
+**Limitations:** only the kitty protocol is supported. Terminals whose images
+are sixel or iTerm2-only, hire running inside tmux (the sequences would need
+tmux passthrough wrapping), and TUIs which place each image cell by cell
+(a fallback some programs use when they cannot identify the terminal brand)
+keep the old behaviour: no picture inside the shell. `GraphicsSupport::disabled`
+is what the child sees in those cases, so it simply does not use images.
+
 ---
 
 ## 12. Shell menu
@@ -870,11 +957,12 @@ Do not flip the block back just to run a harness.
 | --- | --- |
 | `Cargo.toml` | `portable-pty = "0.9"`, `vt100 = "0.15"` |
 | `src/utils/types.rs` | `ShellId`; `Block::Shell(ShellId)`; `Block::is_shell()` / `Block::shell_id()` |
-| `src/key_event/shell/pty.rs` *(new)* | `PtyProcess` (spawn, reader thread, write, resize, kill + reap) |
-| `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions` |
+| `src/key_event/shell/pty.rs` *(new)* | `PtyProcess` (spawn with the pixel size, reader thread through the graphics filter, write, resize, kill + reap) |
+| `src/key_event/shell/graphics.rs` *(new)* | `GraphicsSupport`, `GraphicsEvent`, `GraphicsFilter` (kitty APC splitting, query answers, image forwarding and delete translation) |
+| `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions`; the graphics event channel and `drain_graphics` |
 | `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key` (`C-s x`, `C-s D`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `detach`, `next_shell`, `handle_view_key` (`C-s x`, `C-s D`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
 | `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
@@ -883,7 +971,8 @@ Do not flip the block back just to run a harness.
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
 | `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
-| `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
+| `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes` + `handle_shell_graphics`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
+| `src/app/image_preview.rs` | `protocol_type` / `font_size` accessors (the shell graphics support is derived from the detected protocol and cell size) |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
 | `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
 | `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
@@ -922,6 +1011,12 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Program running in a shell (`vim`, `htop`, `less`, …) | the shell menu and the status line show its name (the PTY's foreground process group, `/proc/<pgid>/comm`); the shell's own name returns when it is back at the prompt |
 | `/proc` unreadable or the foreground process already exited | `foreground_title` returns `None` and the session is labelled with the shell program (`meta.title`); no error is reported |
 | Dead session | `foreground_title` returns `None`, so no `/proc` lookup is done and the label falls back to `meta.title` |
+| TUI paints an image (kitty graphics) | the image data is forwarded to the real terminal (section 11.4) and the placeholder cells the TUI paints make it visible; the shell screen itself remains text |
+| Terminal without kitty support, or hire inside tmux | the child gets no graphics answers, so it does not use images (the previous behaviour) |
+| TUI uses sixel, iTerm2 images or per-cell kitty placements | not forwarded; only placeholder-style kitty transmissions are supported (section 11.4) |
+| TUI deletes its images (`d=A`) | translated to one delete per forwarded image id, so hire's own preview image is never touched |
+| Image transmitted while the shell is detached | forwarded anyway (the terminal caches it); attaching repaints the placeholder cells |
+| Terminal query from a background shell | answered on the next main-loop iteration by writing to the child's PTY |
 | `C-s D` while attached | a `Kill all N shell(s) of this tab?` prompt; `y` kills every shell of the tab and returns to the browser, any other key cancels |
 | Clear a tab's shells from the tab menu (`D`) | same confirmation; `y` keeps the tab and empties its shell list, then shows the tab menu again |
 | Close/delete a tab, close other tabs, restore a stored group | asks first only when the tabs which would lose shells actually have some; `y` performs it, any other key returns to the tab menu |
@@ -948,8 +1043,10 @@ the shell status line). Everything else matches with `if let` or `_`.
     `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`,
     `mouse_buttons`, `shell_area`.
   - §3 `key_event/tab/types.rs`: `Tab` / `TabId`.
-  - §4: a "Shell session" flow (spawn → attach → detach → menu → exit/close).
+  - §4: a "Shell session" flow (spawn → attach → detach → menu → exit/close)
+    and an "Images inside a shell" flow.
   - §5: this document.
+  - §6 test notes: the in-memory graphics filter tests.
 - `keymap_config/{default,colemak}.toml`: `shell_menu` line.
 - `Cargo.toml` dependency list in §1 of `ARCHITECTURE.md` (`portable-pty`,
   `vt100`).
@@ -964,11 +1061,12 @@ the shell status line). Everything else matches with `if let` or `_`.
 | 1 | PTY + reader + screen renderer + `Block::Shell` + prefix + attach/detach + `spawn_shell` / `-w` wiring | done |
 | 2 | Shell menu, tab badges, kill/quit confirmations, `shell_prefix` config, sudo/storage/quit edge cases | done |
 | 2b | Mouse forwarding (4 tracking modes × 3 encodings) and bracketed paste; outer mode sync | done |
+| 2c | Images painted by a TUI inside a shell: kitty query answers, placeholder image passthrough, pixel size in the PTY | done (kitty terminals only) |
 | 3 | Scroll mode (`C-s [`), rename, activity notification, optional split panes | not implemented |
 
 Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the
 background, `C-s n/p` cycles the tab's shells, `S` from the browser opens
-another one. Phases 0–2 are implemented; phase 3 is not.
+another one. Phases 0–2c are implemented; phase 3 is not.
 
 ---
 
