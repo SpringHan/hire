@@ -140,6 +140,7 @@ Whenever a working directory has been set, its path is shown on the right side o
 
 - `S` — create a new shell on the current tab and attach it.
 - `T` (`shell_menu`) — list the shells mounted on the current tab; digits attach one, `n` creates a new one, `x` followed by a number kills one. Shells are numbered from `0`.
+- The shell menu and the attached shell's status line name the program **currently running** in the shell (`vim`, `htop`, `nvim`, …), not just the shell program it was started with. A shell sitting at its prompt shows its own name (`bash`, `zsh`), so several shells started with the same `default_shell` can be told apart at a glance.
 - While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command:
 
 | Key | Action |

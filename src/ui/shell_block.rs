@@ -107,7 +107,7 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
 
     let left = Line::from(vec![
         Span::styled(
-            session.meta.title.clone(),
+            session.display_title(),
             app.term_colors.executable_style,
         )
         .add_modifier(Modifier::BOLD),
@@ -118,7 +118,7 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
         let title = app
             .shell_sessions
             .get(pending)
-            .map(|session| session.meta.title.clone())
+            .map(|session| session.display_title())
             .unwrap_or_else(|| String::from("shell"));
 
         (

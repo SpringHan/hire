@@ -12,7 +12,8 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
   `unicode-width = "=0.2.0"`.
 - **Supporting crates:** `clap` (CLI args), `toml_edit` (config files),
   `thiserror` + `anyhow` (errors), `chrono` (timestamps), `file-size`,
-  `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`.
+  `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`, `libc`
+  (euid check, `tcgetpgrp` for the foreground program of a shell).
 
 ---
 
@@ -324,8 +325,8 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
-| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY, reader thread parsing into the shared `vt100` screen, write, resize, kill + reap. |
-| `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. |
+| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY, reader thread parsing into the shared `vt100` screen, write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
+| `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program. |
 | `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
 | `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine, exit cleanup and numbered selection. |
@@ -446,7 +447,11 @@ browser), `tick_shell_digits` performs the timeout commit, and
 `pty.rs`'s `PtyProcess` owns the PTY master and the reader thread; the thread
 parses every chunk into the shared `vt100::Parser` behind a `Mutex`, so a
 background shell keeps consuming output even while hire runs a foreground
-program. Only exits travel through a channel. `input.rs` translates crossterm
+program. Only exits travel through a channel. `foreground_pid` calls
+`tcgetpgrp` on the master (it reports the slave's foreground process group), and
+`process_name` reads `/proc/<pid>/comm`, so the menu and the status line show
+`vim` while vim owns the shell and the shell's own name at the prompt.
+`input.rs` translates crossterm
 `KeyEvent`s back into terminal bytes, following the child's DECCKM state for
 the arrow keys and Home/End (`ESC O A` versus `ESC [ A`), and encodes pasted
 text as a bracketed paste when the child asked for one. `mouse.rs` translates
@@ -458,7 +463,8 @@ is called every loop: it captures the mouse (SGR-encoded) only while the child
 wants it and only while the view is attached, and enables bracketed paste on
 the outer terminal when the child does; `disable_terminal_modes` restores both
 before hire exits. `menu.rs` is the `T` page listing the
-tab's shells. The screen is rendered by `ui/shell_block.rs`.
+tab's shells, each labelled with the program running in it. The screen is
+rendered by `ui/shell_block.rs`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
 file's full path in a read-only page), `output_path` (run the configured
@@ -538,8 +544,10 @@ colours, bold/italic/underline/inverse; wide-cell continuations are skipped).
 A blank cell is written as a real space: `vt100::Cell::contents()` is empty for
 cleared cells and an empty symbol would not erase the old character on the
 outer terminal. The cursor is placed with `Frame::set_cursor_position`. `shell_status_lines`
-builds the shell's left/right status text (title, start directory, position,
-prefix hint, pending kill prompt, typed shell number, or `shell_notice`).
+builds the shell's left/right status text (the program running in the shell —
+`vim` while vim is open, the shell's own name at its prompt — its start
+directory, position, prefix hint, pending kill prompt, typed shell number, or
+`shell_notice`).
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
 line (permission/owner/size/link info on the left and, on the right, the
@@ -732,7 +740,11 @@ when files are marked, execution is repeated for every marked target.
 
 `cargo test` only runs the unit tests. They never launch the application and
 never execute the user configuration: the only config-related test
-(`goto_test::test_read_config`) builds its TOML document in memory.
+(`goto_test::test_read_config`) builds its TOML document in memory. The only
+test that spawns a process is `key_event::shell::session`'s
+`test_display_title_follows_the_foreground_program`: it runs `/bin/sh` in a
+private PTY (no config, no hire binary) and returns early when `/bin/sh` does
+not exist; it needs no network and no installed binary.
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

@@ -195,9 +195,11 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
     }
 
     for (idx, id) in tab.shells.iter().enumerate() {
+        // The foreground program, not the shell: `vim` and `zsh` sessions must
+        // be distinguishable at a glance.
         let (title, cwd, alive) = match app.shell_sessions.get(*id) {
             Some(session) => (
-                session.meta.title.clone(),
+                session.display_title(),
                 session.meta.cwd.to_string_lossy().into_owned(),
                 session.alive,
             ),

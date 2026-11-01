@@ -128,6 +128,25 @@ impl PtyProcess {
         Ok(())
     }
 
+    /// The pid of the process group which currently owns the terminal.
+    ///
+    /// The shell and everything it runs live on the slave side of the PTY, so
+    /// the foreground job (`vim`, `htop`, …) is the process group the kernel
+    /// reports for that terminal. `tcgetpgrp` on the master end queries the
+    /// slave's terminal, not hire's own.
+    pub fn foreground_pid(&self) -> Option<u32> {
+        let fd = self.master.as_raw_fd()?;
+
+        // SAFETY: `fd` is the open master end of the PTY owned by `self`.
+        let pgrp = unsafe { libc::tcgetpgrp(fd) };
+
+        if pgrp <= 0 {
+            None
+        } else {
+            Some(pgrp as u32)
+        }
+    }
+
     /// Terminate the child and reap it.
     pub fn kill(&mut self) {
         let _ = self.child.kill();

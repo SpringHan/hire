@@ -26,7 +26,9 @@ pub const DEFAULT_PTY_COLS: u16 = 80;
 pub const SCROLLBACK_ROWS: usize = 240;
 
 pub struct ShellMeta {
-    /// The basename of the shell program, e.g. `bash`.
+    /// The basename of the shell program the session was started with, e.g.
+    /// `bash`. This is not necessarily what is running in the session right
+    /// now; see [`ShellSession::display_title`].
     pub title: String,
 
     /// The directory the shell was started in.
@@ -54,6 +56,30 @@ impl ShellSession {
         self.pty.write(bytes)
     }
 
+    /// The name of the program which currently owns the session's terminal.
+    ///
+    /// `Some("vim")` while vim runs in the shell, `Some("zsh")` at the prompt.
+    /// `None` when it cannot be determined (the session is dead, or `/proc`
+    /// is unreadable), so the caller falls back to the shell name.
+    pub fn foreground_title(&self) -> Option<String> {
+        if !self.alive {
+            return None
+        }
+
+        self.pty.foreground_pid().and_then(process_name)
+    }
+
+    /// The name to show for this session: the program running in it, falling
+    /// back to the shell program it was started with.
+    ///
+    /// A mounted shell whose own name is shown is indistinguishable from every
+    /// other mounted shell of the same shell program; the foreground program
+    /// (`vim`, `htop`, …) is what the user needs to tell them apart.
+    pub fn display_title(&self) -> String {
+        self.foreground_title()
+            .unwrap_or_else(|| self.meta.title.clone())
+    }
+
     /// Keep the parser and the PTY at the same size.
     ///
     /// The size is only applied when it changed: `vt100` resets the wrapped
@@ -72,6 +98,22 @@ impl ShellSession {
         }
 
         self.pty.resize(rows, cols)
+    }
+}
+
+/// The name of `pid` as the kernel reports it (`vim`, `nvim`, `htop`, …).
+///
+/// `/proc/<pid>/comm` is what a process list shows; programs may change it and
+/// the kernel truncates it to 15 bytes. `None` when it cannot be read, e.g. on
+/// a platform without `/proc`, so the caller falls back to the shell name.
+fn process_name(pid: u32) -> Option<String> {
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    let name = name.trim();
+
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_owned())
     }
 }
 
@@ -184,6 +226,49 @@ impl ShellSessions {
         for id in ids {
             self.close(*id);
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn test_process_name_of_the_test_process() {
+        let name = process_name(std::process::id()).expect("the test process has /proc entry");
+
+        assert!(!name.is_empty());
+    }
+
+    /// A session at its prompt reports the shell itself; once a program runs in
+    /// it, the foreground program is reported instead. That name is what the
+    /// shell menu and the status line show.
+    #[test]
+    fn test_display_title_follows_the_foreground_program() {
+        // `/bin/sh` and `/proc` are the only assumptions; skip elsewhere.
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut sessions = ShellSessions::new();
+        let id = sessions.open(TabId(0), "/bin/sh", Path::new("/")).unwrap();
+        let session = sessions.get_mut(id).unwrap();
+
+        // The shell has to start, read the line and put `sleep` in the
+        // foreground process group, so poll instead of sleeping a fixed time.
+        session.write(b"sleep 5\n").unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut title = session.display_title();
+
+        while title != "sleep" && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            title = session.display_title();
+        }
+
+        assert_eq!(title, "sleep");
     }
 }
 

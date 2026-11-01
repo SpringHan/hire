@@ -312,6 +312,8 @@ impl ShellSession {
     pub fn parser(&self) -> MutexGuard<'_, vt100::Parser>;
     pub fn write(&mut self, bytes: &[u8]) -> AppResult<()>;
     pub fn resize(&mut self, rows: u16, cols: u16) -> AppResult<()>;
+    pub fn foreground_title(&self) -> Option<String>; // e.g. "vim"
+    pub fn display_title(&self) -> String;           // foreground, else meta.title
 }
 
 impl ShellSessions {
@@ -327,6 +329,14 @@ impl ShellSessions {
 }
 ```
 
+- `display_title` is what the shell menu and the status line show: the program
+  which currently owns the session's terminal, not the shell it was started
+  with. `foreground_title` asks the PTY for its foreground process group
+  (`tcgetpgrp` on the master, which reports the slave's group) and reads
+  `/proc/<pgid>/comm`; at a prompt that is the shell itself (`bash`, `zsh`),
+  with vim running it is `vim`. It returns `None` on a dead session or when
+  `/proc` is unreadable (non-Linux), and `display_title` then falls back to
+  `meta.title`. `meta.title` itself always keeps the shell program.
 - `open` creates the parser (`Parser::new(24, 80, SCROLLBACK_ROWS)`; the first
   draw resizes it), spawns the PTY, registers the session under a fresh
   `ShellId` and returns it. Registration into `Tab.shells` is done by the caller
@@ -751,12 +761,13 @@ AppBlock::Shell(_) => {
 }
 ```
 
-Left: shell title, start directory, tab ordinal (`[2/3]`), `RUNNING`/exit code.
-Right: the hint `prefix d: detach  n/p: switch  c: new  x: kill  prefix x2:
-literal`; `PREFIX ...` while `shell_prefix_active` is set; `Shell #N` while
-digits are being typed; `Kill shell "bash"? (y/N)` while
-`shell_pending_kill` is set; and an application error while `shell_notice` is
-set.
+Left: the program running in the shell (`ShellSession::display_title` — `vim`
+while vim owns the terminal, `bash` at the prompt), start directory, tab
+ordinal (`[2/3]`). Right: the hint `prefix d: detach  n/p: switch  c: new  x:
+kill  prefix x2: literal`; `PREFIX ...` while `shell_prefix_active` is set;
+`Shell #N` while digits are being typed; `Kill shell "vim"? (y/N)` while
+`shell_pending_kill` is set (the same display name); and an application error
+while `shell_notice` is set.
 
 `StateLine` (`ui/command_line.rs`) is already public and reusable.
 
@@ -777,7 +788,11 @@ by the tab menu.
   `SwitchCaseData::Struct(ShellMenuState)` (`{ deleting: bool, selecting:
   String }`).
 - Message: one line per shell of the current tab, numbered from **0**:
-  `[0] bash  ~/project`; `*` marks the active shell, `!` marks an exited one.
+  `[0] vim  ~/project`; `*` marks the active shell, `!` marks an exited one.
+  The name is `ShellSession::display_title` — the program currently running in
+  that shell, not the shell program it was started with. Without it every
+  shell started from the same `default_shell` would read `zsh` even when one of
+  them is running vim. A shell at its prompt shows the shell's own name.
 - Keys:
   - `0..9` — attach that shell. A number is accumulated exactly like the
     prefix's digits (0-based, width of the largest index); the page is
@@ -891,6 +906,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Shell program missing | `AppError` from `open_shell`, shown in the browser; no session is registered |
 | Blank / cleared shells cells | written as a real space, so erases reach the outer terminal (see §11.1) |
 | Curses program in the shell | arrows/Home/End follow the child's DECCKM state, so vim/less/htop receive the form they expect |
+| Program running in a shell (`vim`, `htop`, `less`, …) | the shell menu and the status line show its name (the PTY's foreground process group, `/proc/<pgid>/comm`); the shell's own name returns when it is back at the prompt |
+| `/proc` unreadable or the foreground process already exited | `foreground_title` returns `None` and the session is labelled with the shell program (`meta.title`); no error is reported |
+| Dead session | `foreground_title` returns `None`, so no `/proc` lookup is done and the label falls back to `meta.title` |
 | Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; events are re-encoded for the child's mode/encoding |
 | Mouse disabled by the child / detach / quit | outer capture is disabled; a half-tracked drag is reset |
 | Mouse press on title or status line | ignored; a drag/release which started inside is clamped to the shell area |
