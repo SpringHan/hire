@@ -201,6 +201,18 @@ pub fn get_conf_file() -> io::Result<(String, String, String)> {
         }
     }
 
+    // NOTE(dev): this block is a deliberate developer toggle, not a bug.
+    //
+    // - Production names: auto_config.toml / user_config.toml / keymap.toml
+    // - Dev names:        auto_config_dev.toml / user_config_dev.toml /
+    //                     keymap_dev.toml
+    //
+    // The dev names are enabled temporarily, in the local working tree, to try
+    // a new feature without polluting the real configuration. The committed
+    // state uses the production names; a working tree with the dev block
+    // active is expected during development. Scripts, tests and e2e harnesses
+    // must check which block is active and create the matching files (see
+    // docs/ARCHITECTURE.md §6, "Dev config filenames").
     Ok((
         format!("{}auto_config.toml", config_dir),
         format!("{}user_config.toml", config_dir),

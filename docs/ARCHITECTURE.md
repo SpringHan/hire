@@ -271,6 +271,18 @@ is how a sudo session runs with its throw-away config copy. Three files are used
 `get_document`/`write_document` wrap `toml_edit`. The `option_get!` macro
 unwraps an `Option` into an early error return.
 
+**Dev config filenames.** `get_conf_file` contains a deliberate developer
+toggle: the block selecting `auto_config_dev.toml` / `user_config_dev.toml` /
+`keymap_dev.toml` can be enabled in the working tree to test a new feature
+without polluting the real configuration. When those names are active, hire
+reads and writes only the `*_dev.toml` files (in the normal config directory or
+under `HIRE_CONFIG_DIR`); the production files are untouched. This is an
+expected local working-tree state, **not** a startup error and not something to
+revert automatically: the committed/default block uses the production names,
+while a developer may temporarily flip it. Scripts, unit tests and pty
+harnesses which prepare a config directory must check which block is active and
+create the matching file names; see §6, "Dev config filenames".
+
 **`config/types.rs`** — `Config` holds a name plus a `ConfigValue`
 (`String`/`Vec`) and can be built from defaults and populated from a TOML
 `Item`. `AppConfig` is the collection stored on `App`.
@@ -729,9 +741,10 @@ in the browser calls `output_path`, which runs the configured
 `gui_file_open_cmd` (e.g. `emacsclient -n`) and opens windows on the developer's
 desktop.
 
-The isolated directory needs a `keymap.toml` (the app expects one) and an empty
-`user_config.toml` (so `gui_file_open_cmd` keeps its empty default; the app
-creates `auto_config.toml` itself). A minimal setup:
+The isolated directory needs the keymap file which the active config block
+selects (the app expects one) and an empty user-config file (so
+`gui_file_open_cmd` keeps its empty default; the app creates the
+`auto_config*` file itself). A minimal setup:
 
 ```bash
 tmp=$(mktemp -d)
@@ -746,6 +759,34 @@ rm -rf "$tmp"
 With the isolated config, `Enter` in the browser writes the path into the output
 file (`--output-file`, or `/tmp/hire.tmp` when it isn't given) instead of
 starting a GUI program, so an e2e harness can check the result safely.
+
+### Dev config filenames
+
+`get_conf_file` has a deliberate developer toggle (see §3). Before preparing a
+config directory, check which `format!` block is active in
+`src/config/mod.rs::get_conf_file`:
+
+| Block | Files |
+| --- | --- |
+| production (committed/default) | `keymap.toml`, `user_config.toml`, `auto_config.toml` |
+| dev (local working-tree toggle) | `keymap_dev.toml`, `user_config_dev.toml`, `auto_config_dev.toml` |
+
+The app creates a missing `auto_config*` file itself, but it panics in
+`init_keymap` if the keymap file is missing, so a harness must create the name
+matching the active block. When the dev block is active:
+
+```bash
+tmp=$(mktemp -d)
+cp keymap_config/default.toml "$tmp/keymap_dev.toml"
+: > "$tmp/user_config_dev.toml"
+HIRE_CONFIG_DIR="$tmp" ./target/debug/hire ...
+```
+
+Do not rename the files or flip the block just to satisfy a harness; use the
+names the current source reads. A working tree with the dev block active is a
+normal development state for testing a feature without polluting the real
+configuration — it is not a bug and must not be reverted automatically (the
+committed state uses the production names).
 
 A pty harness has one more trap: at startup `ratatui-image`'s
 `Picker::from_query_stdio` writes a capability query and waits one second for

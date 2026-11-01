@@ -23,6 +23,12 @@ environment variable to use another directory, e.g.
 with a configuration that is independent from your own, so commands such as
 `gui_file_open_cmd` are never triggered by accident.
 
+When developing hire itself, `src/config/mod.rs` has a deliberate toggle which
+switches the file names to `auto_config_dev.toml`, `user_config_dev.toml` and
+`keymap_dev.toml`, so a new feature can be tested without touching the real
+configuration. That is a developer-only local state; normal builds read the
+production names above. See `docs/ARCHITECTURE.md` §6 for details.
+
 Notice: The `auto_config.toml` is generated & edited by app.
 
 ### user_config.toml

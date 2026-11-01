@@ -825,6 +825,15 @@ Wiring:
 No other configuration is required: shell program, GUI commands and file reader
 keep their existing options.
 
+**Dev config filenames.** While a feature is being developed, the deliberate
+toggle in `config/mod.rs::get_conf_file` may make the app read
+`user_config_dev.toml` / `keymap_dev.toml` instead of the production names; see
+`docs/ARCHITECTURE.md` §6, "Dev config filenames". When preparing a session for
+the shell menu/harness, set `default_shell` in whichever file the active block
+selects, and create the matching keymap file (`keymap_dev.toml` or
+`keymap.toml`); the app panics in `init_keymap` if the keymap file is missing.
+Do not flip the block back just to run a harness.
+
 ---
 
 ## 14. File-by-file change list
