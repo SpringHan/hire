@@ -2,9 +2,18 @@
 
 mod utils;
 mod types;
+mod input;
+mod pty;
+mod session;
+mod view;
+mod menu;
 
 pub use types::*;
 pub use utils::*;
+pub use input::*;
+pub use session::*;
+pub use view::*;
+pub use menu::*;
 
 use crate::{
     config::{Config, ConfigValue},

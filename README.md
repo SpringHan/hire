@@ -128,6 +128,39 @@ Hire remembers a working directory, which is shared between runs:
 
 Whenever a working directory has been set, its path is shown on the right side of the state line (long paths are abbreviated).
 
+### Shell Sessions
+
+`spawn_shell` (default `S`) opens a shell that hire owns and shows it in the current tab. The shell is a real PTY session: it keeps running after it is detached, and one tab can hold several of them (like tmux windows).
+
+- `S` — create a new shell on the current tab and attach it.
+- `T` (`shell_menu`) — list the shells mounted on the current tab; digits attach one, `n` creates a new one, `x` followed by a number kills one. Shells are numbered from `0`.
+- While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command:
+
+| Key | Action |
+| --- | --- |
+| `C-s d` | Detach: the file browser comes back, the shell keeps running on the tab |
+| `C-s n` / `C-s p` | Attach the next / previous shell of the tab |
+| `C-s <number>` | Attach the shell with that number (0-based) |
+| `C-s c` | Create a new shell on this tab and attach it |
+| `C-s x` | Kill the attached shell (press `y` to confirm) |
+| `C-s C-s` | Send a literal `C-s` to the shell |
+
+- Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.
+- The title bar shows how many shells the current tab has (`|1:2|` means tab 1 has two shells) and the attached shell's position (`SH 2/3`).
+
+`default_shell` selects the program, and `shell_prefix` changes the prefix chord:
+
+```toml
+default_shell = "bash"
+shell_prefix = "C-s"
+```
+
+Notes:
+
+- `C-s` is normally XOFF. Hire reads the terminal in raw mode and intercepts the chord before forwarding anything, so the shell never sees it. If you run hire inside tmux, or your terminal's own `C-s` handling interferes, set `shell_prefix` to another chord (`C-a`, `C-o`, `F12`, …).
+- Shell sessions live inside the hire process: quitting hire kills them, closing a tab kills the shells mounted on it, and they are not handed over to a sudo session nor stored in `storage_tabs`.
+- `hire --working-directory` opens a mounted shell as well, so it can be detached and the browser can be used without losing it.
+
 ### Navigation Index
 
 Navigation Index allows quick jumping to specific items by entering their index number. 
@@ -218,6 +251,7 @@ keymap = [
 - [x] Keymap config support
 - [x] Optimize the editing ability for command line
 - [x] Add Edit mode for more convenient file editing
+- [x] Mountable shell sessions per tab (tmux-like attach/detach)
 - [ ] Refactor the project
 - [ ] Highlight for file preview
 - [x] Migrate to Rust 2024 Edition

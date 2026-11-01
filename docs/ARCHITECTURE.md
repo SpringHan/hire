@@ -6,6 +6,10 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
 - **Language / edition:** Rust 2024 (`Cargo.toml`, package `hire`).
 - **TUI stack:** [`ratatui`](https://crates.io/crates/ratatui) 0.29 with
   `crossterm` as the backend, plus `ratatui-image` for inline image preview.
+- **Shell sessions:** `portable-pty` 0.9 (PTY, spawning, resize) and `vt100`
+  0.15 (parsing the shell's output into a screen buffer). `vt100` is held at
+  0.15 because 0.16+ requires `unicode-width 0.2.2`, while ratatui 0.29 pins
+  `unicode-width = "=0.2.0"`.
 - **Supporting crates:** `clap` (CLI args), `toml_edit` (config files),
   `thiserror` + `anyhow` (errors), `chrono` (timestamps), `file-size`,
   `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`.
@@ -20,10 +24,12 @@ Hire is an event-driven application built around one mutable state object, `App`
 1. CLI args → App::default() → init_config()
 2. loop:
    a. execute pending macro
-   b. ui::ui(frame, &mut app)
-   c. poll/read terminal key event
-   d. handle_event(key, &mut app, terminal)
-   e. drain search / image channels
+   b. reap exited shell sessions; commit a timed-out shell number
+   c. clear the terminal if a shell was attached/detached
+   d. ui::ui(frame, &mut app)
+   e. poll/read key events (16 ms while a shell is attached, 200 ms otherwise)
+   f. handle_event(key, &mut app, terminal)
+   g. drain search / image channels
 
 ### Modules
 
@@ -32,16 +38,22 @@ Hire is an event-driven application built around one mutable state object, `App`
   - Input：key event
   - Outupt：AppCommand
   - Function call：AppCommand::execute
+  - Exception: while a shell is attached, the key goes to
+    `key_event::shell::handle_view_key` (prefix chord or PTY bytes)
 - `app::App` — Global state Container
-  - Block::Browser | Block::CommandLine
+  - Block::Browser | Block::CommandLine | Block::Shell
 - `ui::ui` — Only read state of App and render ui
   - Render areas：parent / current / child / file / cmdline
+  - Shell view: title / shell screen (`ui/shell_block`) / shell status line
 
 ### Data stream
 
 key event → key_event::handle_event → AppCommand → AppCommand::execute → App
                                                                           ↑
-ui::ui Read state of App ←───────────────────────────────────────────────┘
+ui::ui Read state of App ←──────────────────────────────────────────────┘
+                                                          
+shell session: PTY bytes → reader thread → vt100 screen → ui::ui (shell view)
+               keys → encode_key → PTY master
 
 
 Key architectural traits:
@@ -59,19 +71,22 @@ Key architectural traits:
    the core file model in `app/mod.rs`. `app/mod.rs` is the hub that other
    modules extend.
 
-3. **Two block modes.** `utils::Block` is either `Browser(bool)` (the file
-   browser; the bool means "current directory is `/`") or
-   `CommandLine(CmdContent, CursorPos)`. Almost all input handling branches on
-   `app.selected_block`.
+3. **Three block modes.** `utils::Block` is `Browser(bool)` (the file
+   browser; the bool means "current directory is `/`"),
+   `CommandLine(CmdContent, CursorPos)`, or `Shell(ShellId)` (an attached shell
+   session owns every key except its prefix chord). Almost all input handling
+   branches on `app.selected_block`.
 
-4. **Key pipeline.** A raw `KeyEvent` is first handled for special keys
-   (`Esc`, `Enter`, arrows, `Tab`, `Backspace`, control chords) inside
-   `handle_event`. Ordinary characters are either routed to the active
-   `SwitchCase` menu, to the command line, or looked up in the keymap and turned
-   into an `AppCommand`, which is then executed by `AppCommand::execute`.
+4. **Key pipeline.** A raw `KeyEvent` is first checked for the attached shell
+   view; while a shell is attached, `key_event/shell/view.rs` handles the prefix
+   chord and forwards every other key to the PTY as terminal bytes. In the
+   browser/command line, `handle_event` first handles special keys (`Esc`,
+   `Enter`, arrows, `Tab`, `Backspace`, control chords), then routes ordinary
+   characters to the active `SwitchCase` menu, to the command line, or through
+   the keymap into an `AppCommand`, which is executed by `AppCommand::execute`.
 
 5. **Menus via `SwitchCase`.** Every "operation page" (paste, delete, tab,
-   goto, macro, …) is a temporary modal implemented with `SwitchCase`: it
+   goto, macro, shell, …) is a temporary modal implemented with `SwitchCase`: it
    replaces the command line with a help message and routes the next character
    to a handler function pointer. Extra state is passed through
    `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
@@ -79,6 +94,15 @@ Key architectural traits:
 6. **Asynchronous work is channel-based.** Incremental file search and image
    decoding/resizing run on worker threads and communicate with the main loop
    through `std::sync::mpsc` channels.
+
+7. **Shell sessions are PTY-backed.** Each mounted shell owns a PTY, a reader
+   thread and a `vt100` screen. The reader thread parses the PTY output into the
+   shared screen (behind a `Mutex`) as it arrives, so a background shell keeps
+   running and keeps its screen up to date even while hire is blocked in a
+   foreground process. Only shell *exits* travel through a channel. The
+   `vt100::Parser`/`Screen` is rendered into the ratatui buffer by
+   `ui/shell_block.rs`; keyboard events are translated back into terminal bytes
+   by `key_event/shell/input.rs`.
 
 ---
 
@@ -93,7 +117,7 @@ hire/
 ├── install.sh            # build + install binary/keymap/scripts
 ├── keymap_config/        # shipped keymap presets (default.toml, colemak.toml)
 ├── scripts/              # helper scripts (hire-rg.sh for the rg/fzf jump)
-├── docs/                 # project documentation (this file)
+├── docs/                 # project documentation (this file, SHELL_SESSIONS.md)
 └── src/
     ├── main.rs           # binary entry point & event loop
     ├── app/              # application state and domain model
@@ -150,6 +174,11 @@ Responsibilities:
   (`path_history`); working directory (`working_directory`); tabs; image
   preview; edit mode; keymap; loaded config; error queue; output settings;
   host/user names.
+- Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
+  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill`, `shell_digits`
+  and `shell_digit_deadline` (numbered selection), `clear_screen` (full repaint
+  after attaching/detaching) and `shell_notice` (an error shown in the shell
+  status line instead of replacing the view).
 - File-list lifecycle: `init_all_files`, `init_parent_files`,
   `init_current_files`, `init_child_files`, `read_files`, `refresh_parent_item`,
   `refresh_current_item`, `refresh_child_item`, `refresh_select_item`,
@@ -226,7 +255,7 @@ recipe). The hidden `--config-dir` argument sets an override even higher, which
 is how a sudo session runs with its throw-away config copy. Three files are used:
 `auto_config.toml` (written by the app: bookmarks, stored tabs),
 `user_config.toml` (hand-written: `default_shell`, `gui_commands`,
-`file_read_program`, `gui_file_open_cmd`) and `keymap.toml`.
+`file_read_program`, `gui_file_open_cmd`, `shell_prefix`) and `keymap.toml`.
 `get_document`/`write_document` wrap `toml_edit`. The `option_get!` macro
 unwraps an `Option` into an early error return.
 
@@ -268,25 +297,34 @@ early-returns an `anyhow`-backed error.
 | `key_event/macro_page.rs` | Macro menu: record/execute, and execute-per-marked-file. |
 | `key_event/path_history.rs` | Path history menu: `goto_prev_path`, `path_history_operation` / `path_history_switch`. |
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
-| `key_event/shell/mod.rs` | `cmdline_shell`: prefill the command line with `:!<shell>`. |
-| `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` and `$.` substitution. |
-| `key_event/shell/utils.rs` | Run shells/commands (with or without output), open files, working-dir cache. |
+| `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
+| `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
+| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
+| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY, reader thread parsing into the shared `vt100` screen, write, resize, kill + reap. |
+| `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. |
+| `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord) and `encode_key` (`KeyEvent` → terminal bytes). |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine, exit cleanup and numbered selection. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
-| `key_event/tab/types.rs` | `TabList` (open tabs, with `snapshot`/`set_snapshot` for sessions) and `TabState` (tab menu state). |
-| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore. |
+| `key_event/tab/types.rs` | `TabId`, `Tab` (path, hidden flag, selection, mounted shells) and `TabList`; `TabState` (tab menu state). |
+| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; closes the shells of a removed tab. |
 
 **`key_event/mod.rs`** — the input dispatcher.
 
-- `handle_event` handles modifier chords (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`,
-  `Ctrl-Backspace`, `Alt-f` / `Alt-b`), `Backspace`, `Esc`, `Enter`, arrows, and
-  `Tab` (completion / `Alt-Tab` expand). Non-control characters go to the active
-  `SwitchCase`, the command line, or the keymap.
+- `handle_event` dispatches everything to `key_event/shell/view.rs` while
+  `selected_block` is `Block::Shell`. Otherwise it handles modifier chords
+  (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`, `Ctrl-Backspace`, `Alt-f` / `Alt-b`),
+  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Tab`
+  expand). Non-control characters go to the active `SwitchCase`, the command
+  line, or the keymap.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
-  into a concrete call into the operation modules.
+  into a concrete call into the operation modules. `AppCommand::Shell` calls
+  `shell::open_shell` (a mounted, attachable session); `AppCommand::ShellMenu`
+  opens the shell menu.
 - Re-exports the public types used by `app`, `ui` and `main`
   (`TabList`, `FileSearcher`, `EditMode`, `SwitchCase`, `ShellCommand`, …).
 
@@ -357,16 +395,36 @@ the paste menu (move, copy, force copy/move, symlink, clear marks);
 overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 `remove_origin_files` deletes sources after a move.
 
-**`key_event/shell/`** — `types.rs` defines `CommandStr` (`Str` /
-`SelectedItem`, where `$.` expands to the selected file) and `ShellCommand`
-(`Shell` or `Command(shell, args)`). `utils.rs` implements `shell_process`
-(temporarily leaves the alternate screen, runs the process, restores the TUI,
-optionally refreshes the file list), `fetch_output` (capture stdout),
-`execute_command` (run a command with the target path appended and ignore its
-output), `open_file_in_shell` (image viewer or configured file reader), and the
-working-directory cache (`fetch_working_directory`, `set_working_directory`,
-`load_working_directory`) used by `--working-directory` and the state-line
-working-directory indicator.
+**`key_event/shell/`** — two kinds of shell work.
+
+*One-shot foreground programs.* `ShellCommand` now only has the
+`Command(shell, args)` variant; `shell_process` temporarily leaves the alternate
+screen, runs the program on the real terminal and restores the TUI (optionally
+refreshing the file list). It is used by `:!`, `shell_command`,
+`open_file_in_shell` and `vim_diff`. `fetch_output` captures stdout,
+`execute_command` appends the target path, and the working-directory cache
+(`fetch_working_directory`, `set_working_directory`, `load_working_directory`)
+serves `--working-directory` and the state-line indicator.
+
+*Mounted sessions.* `view.rs`'s `open_shell` spawns `default_shell` into the
+`ShellSessions` registry (`session.rs`), pushes the id onto
+`Tab.shells` and attaches it. `attach`/`detach` only flip `Block::Shell` and
+`Tab.active_shell`; the session keeps running while detached. `handle_view_key`
+implements the attached-view state machine: the prefix chord (`C-s`, from
+`shell_prefix`), detach/switch/create/kill, and the numbered selection
+(0-based; with more than ten shells the digits are accumulated and committed on
+`Enter`, when no longer ambiguous, or after a 450 ms timeout). `handle_shell_events`
+reaps exited sessions and attaches the next shell of the tab (or returns to the
+browser), `tick_shell_digits` performs the timeout commit, and
+`remove_shell_from_tab` keeps the tab's shell list consistent.
+
+`pty.rs`'s `PtyProcess` owns the PTY master and the reader thread; the thread
+parses every chunk into the shared `vt100::Parser` behind a `Mutex`, so a
+background shell keeps consuming output even while hire runs a foreground
+program. Only exits travel through a channel. `input.rs` translates crossterm
+`KeyEvent`s back into terminal bytes, following the child's DECCKM state for
+the arrow keys and Home/End (`ESC O A` versus `ESC [ A`). `menu.rs` is the `T` page listing the
+tab's shells. The screen is rendered by `ui/shell_block.rs`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
 file's full path in a read-only page), `output_path` (run the configured
@@ -383,7 +441,9 @@ directory, leaves the TUI and runs
 terminal. The new process reads `--sudo-session` at startup
 (`App::apply_session_tabs`) and runs with the temporary config
 (`--config-dir`). Quitting the root instance returns to the original,
-unprivileged one — there is no euid juggling in either process.
+unprivileged one — there is no euid juggling in either process. Mounted shell
+sessions are **not** transferred (they live in the parent process); they keep
+running while the root instance is open and are still mounted when it returns.
 
 **`key_event/switch/`** — the generic menu framework. `SwitchCase::new` installs
 a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;
@@ -391,11 +451,16 @@ a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;
 page when the handler returns `true`. `traits.rs` lets arbitrary structs
 (`TabState`) travel through `SwitchCaseData::Struct` as `Box<dyn SwitchStruct>`.
 
-**`key_event/tab/`** — multi-tab support. `TabList` stores each tab's path,
-hidden-file flag and remembered selection. `tab_operation` opens the tab page;
-`switch` handles create/next/prev/close/close-others and numeric selection;
-`save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage named tab
-groups persisted in `auto_config.toml`; `read_config` restores them.
+**`key_event/tab/`** — multi-tab support. `TabList` stores one `Tab` per open
+tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
+`shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab page;
+`switch` handles create/next/prev/close/close-others and numeric selection
+(1-based; multi-digit when there are more than nine tabs); closing a tab closes
+its shells. `save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage
+named tab groups persisted in `auto_config.toml`; applying a group closes the
+shells of the tabs it replaces, because sessions cannot be persisted.
+`read_config` restores the groups. `SessionTabs` (sudo) snapshots only path,
+hidden flag and selection, never shells.
 
 ### `src/ui/` — rendering
 
@@ -408,6 +473,7 @@ groups persisted in `auto_config.toml`; `read_config` restores them.
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
+| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen and its status line. |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
@@ -415,7 +481,10 @@ or title + expanded command line), renders the title bar
 (`user@host`, shortened path, selected file name) and the item statistics,
 calls `check_app_error` (turns `app.app_error` into a red command-line message),
 then lays out and draws the parent/current/child blocks, the command line and
-the completion popup.
+the completion popup. When `selected_block` is `Block::Shell`, it short-circuits
+to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
+shell screen and the bottom band is the shell status line. The title's tab badge
+shows the mounted shell count (`|1:2|`).
 
 **`ui/list.rs`** — the reusable `List` / `Item` widgets. `Item` renders a left
 line plus an optional right sidebar; `List` handles the visible window, selection
@@ -429,10 +498,20 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
 state line.
 
+**`ui/shell_block.rs`** — `render_shell` resizes the parser and the PTY to the
+drawn area and copies every `vt100::Cell` into the ratatui buffer (fg/bg
+colours, bold/italic/underline/inverse; wide-cell continuations are skipped).
+A blank cell is written as a real space: `vt100::Cell::contents()` is empty for
+cleared cells and an empty symbol would not erase the old character on the
+outer terminal. The cursor is placed with `Frame::set_cursor_position`. `shell_status_lines`
+builds the shell's left/right status text (title, start directory, position,
+prefix hint, pending kill prompt, typed shell number, or `shell_notice`).
+
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
 line (permission/owner/size/link info on the left and, on the right, the
 working directory path when set plus the status labels
-`WD EXPAND -- RECORDING -- QUIT`) or the editable command line;
+`WD EXPAND -- RECORDING -- QUIT`) or the editable command line; the
+`Block::Shell` arm reuses `StateLine` for `shell_status_lines`;
 `state_labels` builds the status label row; `get_command_line_span_list`
 produces the character spans with the block cursor highlighted, comparing the
 cursor byte offset with `char_indices()` so multi-byte characters are
@@ -480,8 +559,11 @@ command line; the layout arithmetic saturates instead of overflowing.
   `End` means after the last character and `None` means no editable cursor.
 - `CmdContent` (`String` / `Text`) — editable command-line content vs.
   styled, read-only messages.
-- `Block` (`Browser(bool)` / `CommandLine(CmdContent, CursorPos)`) — which
-  block currently owns input.
+- `ShellId(u64)` — the opaque identity of a shell session, also carried by
+  `Block::Shell`.
+- `Block` (`Browser(bool)` / `CommandLine(CmdContent, CursorPos)` /
+  `Shell(ShellId)`) — which block currently owns input. `Block::shell_id()` and
+  `Block::is_shell()` are the small helpers used by the view and the UI.
 - `MarkedFiles` — marked names per directory.
 - `ItemIndex` — the three `ListState`s (parent/current/child) plus accessors.
 - `SearchFile` — which list a lookup refers to.
@@ -495,8 +577,11 @@ command line; the layout arithmetic saturates instead of overflowing.
 
 ```
 crossterm KeyEvent
-  └─ main.rs: quit shortcut / macro recording
+  └─ main.rs: quit shortcut (skipped in the shell view) / macro recording
        └─ key_event::handle_event
+            ├─ Block::Shell?       → shell::handle_view_key
+            │                         ├─ prefix chord? → detach/switch/create/kill/number
+            │                         └─ otherwise → encode_key → write to the PTY
             ├─ modifier chords (Ctrl-…)
             ├─ special keys: Backspace, Esc, Enter, ↑/↓/←/→, Tab
             ├─ active SwitchCase?  → switch_match → handler
@@ -519,6 +604,34 @@ metadata shown in the state line and preview.
 `key_event::command_line::completion`, which completes builtin commands, file
 names, or the selected browser item (when the cursor is right after a space) and
 shows a candidate popup (`ui/cmdline_popup.rs`).
+
+### Shell sessions
+
+```
+spawn_shell (`S`) / --working-directory
+  └─ shell::open_shell
+       ├─ ShellSessions::open → PtyProcess::spawn
+       │    ├─ openpty + spawn `default_shell` (cwd = app.path)
+       │    ├─ reader thread: PTY bytes → Arc<Mutex<vt100::Parser>>
+       │    └─ exit channel
+       ├─ Tab.shells.push(id); Tab.active_shell = Some(id)
+       └─ attach → Block::Shell(id), clear_screen
+            └─ main loop: 16 ms poll, handle_view_key forwards keys
+                 ├─ `C-s d` → detach: Block::Browser, session still mounted
+                 ├─ `C-s n/p`, `C-s <number>` → attach another shell
+                 ├─ `C-s c` → open another shell on the same tab
+                 ├─ `C-s x` → prompt; `y` kills it and attaches the next
+                 └─ shell exits → handle_shell_events reaps it, removes the id
+                      from the tab and attaches the next live shell (or the browser)
+
+shell_menu (`T`)
+  └─ list the tab's shells (0-based); digits attach, `n` new, `x` + digits kill
+```
+
+`ui/shell_block.rs` renders the attached screen into the middle band, and
+`render_command_line`'s `Block::Shell` arm renders its status line. Quitting
+hire confirms when mounted shells are alive; `PtyProcess::drop` kills and reaps
+them.
 
 ### Sudo session
 
@@ -568,6 +681,7 @@ when files are marked, execution is repeated for every marked target.
 | `install.sh` | Builds the release binary and installs the binary, keymap and scripts. |
 | `README.md` | User documentation (configuration, features, keybindings). |
 | `docs/ARCHITECTURE.md` | This document. |
+| `docs/SHELL_SESSIONS.md` | Design record for the implemented mountable (tmux-like) shell sessions: PTY/session model, key handling, numbered selection and edge cases. |
 
 ---
 
@@ -601,6 +715,17 @@ rm -rf "$tmp"
 With the isolated config, `Enter` in the browser writes the path into the output
 file (`--output-file`, or `/tmp/hire.tmp` when it isn't given) instead of
 starting a GUI program, so an e2e harness can check the result safely.
+
+A pty harness has one more trap: at startup `ratatui-image`'s
+`Picker::from_query_stdio` writes a capability query and waits one second for
+`ESC[6;<h>;<w>t` (cell size) and `ESC[0n` (status). A bare pty never answers, and
+the query's reader thread keeps reading stdin afterwards, eating whatever keys
+the harness sends. Reply with e.g. `\x1b[6;20;10t\x1b[0n` before typing. A real
+terminal answers immediately, so interactive use is unaffected.
+
+For shell sessions, a pty harness also needs a real window size: set
+`TIOCSWINSZ` on the pty (e.g. 40x120). A 0x0 pty makes `WINDOW_HEIGHT` zero and
+the list renderer underflows.
 
 The shipped keymaps don't bind `:`; use the configured `create_file`,
 `create_dir` or `search` key (e.g. `=` in `keymap_config/default.toml`) to reach

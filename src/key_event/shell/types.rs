@@ -9,9 +9,10 @@ pub enum CommandStr<'a> {
     Str(&'a str)
 }
 
+/// A one-shot command run in the foreground.
+///
+/// Interactive shells are `ShellSession`s instead.
 pub enum ShellCommand<'a> {
-    Shell,
-
     /// The first element is the shell that command runs on;
     /// The second one is the program & its arguments.
     Command(

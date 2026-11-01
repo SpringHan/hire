@@ -21,6 +21,17 @@ use crate::config::{Config, ConfigValue};
 
 use super::{CommandStr, ShellCommand};
 
+/// The shell program used for new shell sessions and one-shot shells.
+pub fn default_shell(app: &App) -> AppResult<String> {
+    if let ConfigValue::String(shell) =
+        Config::get_value(&app.config, "default_shell")
+    {
+        Ok(shell.as_ref().to_owned())
+    } else {
+        Ok(std::env::var("SHELL")?)
+    }
+}
+
 /// Start a shell process.
 pub fn shell_process(
     app: &mut App,
@@ -29,14 +40,7 @@ pub fn shell_process(
     refresh: bool
 ) -> AppResult<()>
 {
-    let shell_program = if let ConfigValue::String(
-        _shell
-    ) = Config::get_value(&app.config, "default_shell")
-    {
-        _shell.as_ref().to_owned()
-    } else {
-        std::env::var("SHELL")?
-    };
+    let shell_program = default_shell(app)?;
 
     // For restore the original state
     let current_file = if let Some(file) = app.get_file_saver() {
@@ -45,36 +49,33 @@ pub fn shell_process(
         None
     };
 
-    let mut wait_for_press = false;
+    let mut wait_for_press = true;
     let mut process = Command::new(&shell_program);
 
-    if let ShellCommand::Command(shell_type, args) = command {
-        let program: &str = args[0].into();
+    let ShellCommand::Command(shell_type, args) = command;
+    let program: &str = args[0].into();
 
-        if let Some(_type) = shell_type {
-            // Change shell program
-            if _type != &shell_program {
-                process = Command::new(_type)
-            }
+    if let Some(_type) = shell_type {
+        // Change shell program
+        if _type != &shell_program {
+            process = Command::new(_type)
         }
+    }
 
-        // Add process arguments
-        process.arg("-c").arg(
-            CommandStr::join_from_keymap(args, app)?
-        );
+    // Add process arguments
+    process.arg("-c").arg(
+        CommandStr::join_from_keymap(args, app)?
+    );
 
-        // Check whether current command needs to wait for user's key press
-        wait_for_press = true;
-
-        if let ConfigValue::Vec(
-            cmds
-        ) = Config::get_value(&app.config, "gui_commands")
-        {
-            for cmd in cmds.iter() {
-                if *cmd == program {
-                    wait_for_press = false;
-                    break;
-                }
+    // Check whether current command needs to wait for user's key press
+    if let ConfigValue::Vec(
+        cmds
+    ) = Config::get_value(&app.config, "gui_commands")
+    {
+        for cmd in cmds.iter() {
+            if *cmd == program {
+                wait_for_press = false;
+                break;
             }
         }
     }
@@ -125,27 +126,24 @@ pub fn fetch_output<P: AsRef<Path>>(
     command: ShellCommand
 ) -> anyhow::Result<String>
 {
-    if let ShellCommand::Command(_, mut args) = command {
-        let program: &str = args.remove(0).into();
-        let mut _command = Command::new(program);
+    let ShellCommand::Command(_, mut args) = command;
+    let program: &str = args.remove(0).into();
+    let mut _command = Command::new(program);
 
-        _command.current_dir(current_path).stdout(Stdio::piped());
-        _command.args(CommandStr::str_vec(args));
+    _command.current_dir(current_path).stdout(Stdio::piped());
+    _command.args(CommandStr::str_vec(args));
 
 
-        disable_raw_mode()?;
-        execute!(stdout(), LeaveAlternateScreen, Show)?;
+    disable_raw_mode()?;
+    execute!(stdout(), LeaveAlternateScreen, Show)?;
 
-        let output = _command.spawn()?.wait_with_output()?;
+    let output = _command.spawn()?.wait_with_output()?;
 
-        enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, Hide)?;
-        terminal.clear()?;
+    enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen, Hide)?;
+    terminal.clear()?;
 
-        return Ok(String::from_utf8(output.stdout)?)
-    }
-
-    rt_error!("Cannot get the program that needs a output")
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 /// Run a shell command without taking the output of it.

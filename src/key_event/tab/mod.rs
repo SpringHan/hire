@@ -9,7 +9,7 @@ use toml_edit::DocumentMut;
 
 use crate::{app::App, option_get};
 
-pub use types::TabList;
+pub use types::{Tab, TabId, TabList};
 pub use utils::{tab_operation, quick_switch, prev, next, update_current_tab};
 
 pub fn read_config(app: &mut App, document: &DocumentMut) -> anyhow::Result<()> {

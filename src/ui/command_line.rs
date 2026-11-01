@@ -134,6 +134,16 @@ pub fn render_command_line<'a>(
             .block(block);
 
             frame.render_widget(para, area);
+        },
+
+        AppBlock::Shell(_) => {
+            let lines = super::shell_block::shell_status_lines(app);
+
+            if lines.is_empty() {
+                return
+            }
+
+            frame.render_widget(StateLine::new(lines), area);
         }
     }
 }

@@ -7,6 +7,7 @@ mod command_line;
 mod parent_block;
 mod current_block;
 mod cmdline_popup;
+mod shell_block;
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -96,6 +97,17 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .alignment(Alignment::Right)
         .block(item_info_block);
 
+    // Attached shell view
+    if app.selected_block.is_shell() {
+        frame.render_widget(computer_info, title_layout[0]);
+        frame.render_widget(item_num_info, title_layout[1]);
+
+        shell_block::render_shell(app, frame, chunks[1])?;
+        render_command_line(app, frame, chunks[2]);
+
+        return Ok(());
+    }
+
     // Expanded Commandline
     if app.command_expand {
         let command_block = Block::default();
@@ -182,6 +194,14 @@ fn check_app_error(app: &mut App) {
     if !app.app_error.is_empty() {
         let err_msg = app.app_error.to_string();
 
+        // The shell view must not be replaced by the command line: show the
+        // error in its status line instead.
+        if app.selected_block.is_shell() {
+            app.shell_notice = Some(err_msg);
+            app.app_error.clear();
+            return ()
+        }
+
         if let SBlock::CommandLine(ref mut _msg, ref mut _cursor) = app.selected_block {
             if *_cursor != CursorPos::None {
                 app.command_history.push(_msg.get_str().to_owned());
@@ -212,7 +232,18 @@ fn check_app_error(app: &mut App) {
 
 #[inline(always)]
 fn get_title_right_info(app: &App) -> (Paragraph<'static>, usize) {
-    let item_index = if app.path.to_string_lossy() == "/" {
+    let current_tab = app.tab_list.current_tab();
+
+    let item_index = if let Some(id) = app.selected_block.shell_id() {
+        let pos = current_tab
+            .shells
+            .iter()
+            .position(|shell| *shell == id)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+
+        format!("SH {}/{}", pos, current_tab.shells.len())
+    } else if app.path.to_string_lossy() == "/" {
         format!(
             "{}/{}",
             app.selected_item.parent_selected().unwrap() + 1,
@@ -231,9 +262,17 @@ fn get_title_right_info(app: &App) -> (Paragraph<'static>, usize) {
         }
     };
 
+    // A tab with mounted shells shows their count next to its number.
+    let shell_badge = if current_tab.shells.is_empty() {
+        String::new()
+    } else {
+        format!(":{}", current_tab.shells.len())
+    };
+
     let tab_index = format!(
-        "|{}{} ",
+        "|{}{}{} ",
         app.tab_list.current() + 1,
+        shell_badge,
         if app.tab_list.current() == app.tab_list.len() - 1 {
             "|"
         } else {

@@ -1,0 +1,862 @@
+# Mountable Shell Sessions (tmux-like)
+
+**Status:** implemented. This document is the design record for the feature;
+the code below matches the current tree. The only parts still unimplemented
+are marked in §17 (phase 3).
+
+---
+
+## 1. Goal
+
+`spawn_shell` (`AppCommand::Shell`) currently runs a shell in the foreground:
+`shell_process` leaves the alternate screen, disables raw mode and blocks in
+`wait()` (`src/key_event/shell/utils.rs`). Hire owns nothing while the shell
+runs, so the shell cannot be moved to the background, and a tab can only ever
+have the one shell that is currently running.
+
+Target behaviour:
+
+- `spawn_shell` starts a **shell session** owned by hire and shows it in the
+  current tab (the *shell view*).
+- One key chord detaches the session: the file browser comes back, the shell
+  keeps running in the background, and it stays **mounted on the current tab**.
+- A tab owns an ordered list of shells; at most one is attached (visible) at a
+  time. A shell menu lists the tab's shells and attaches / creates / kills them.
+- `spawn_shell` again creates a *new* shell on the same tab, so a tab can hold
+  several background shells, like tmux windows.
+- Closing a tab kills its shells; quitting hire kills every mounted shell.
+
+Non-goals (explicitly out of scope for this plan):
+
+- Sessions surviving a hire restart (PTYs die with the process).
+- Split panes / several shells visible at once.
+- Transferring shells to the sudo session.
+- Persisting shells in stored tab groups (`storage_tabs`).
+
+---
+
+## 2. Why the existing shell cannot simply be detached
+
+`shell_process` hands the real terminal to the child:
+
+```rust
+disable_raw_mode()?;
+execute!(stdout(), LeaveAlternateScreen, Show)?;
+process.spawn()?.wait()?;          // hire is blocked here
+enable_raw_mode()?;
+execute!(stdout(), EnterAlternateScreen, Hide)?;
+```
+
+Three consequences:
+
+1. Hire reads no key while the shell runs, so there is no key that could mean
+   "detach": the bytes go straight to the child.
+2. The child has no terminal of its own. If hire took the screen back, the
+   child would keep writing escape sequences to the same terminal.
+3. Nothing records what the shell drew, so a later re-attach could not restore
+   the screen.
+
+A detachable shell therefore needs, per session:
+
+- a **PTY** (the child gets a private terminal; hire keeps the real one),
+- a **reader thread** pumping the PTY master,
+- a **VT parser / screen buffer** to replay the output into ratatui,
+- a **key encoder** turning crossterm events back into terminal bytes,
+- a **prefix key** so one chord can be intercepted while every other key is
+  forwarded to the child.
+
+---
+
+## 3. Dependencies
+
+```toml
+portable-pty = "0.9"
+
+# 0.15 is the newest vt100 line that does not conflict with ratatui 0.29's
+# `unicode-width = "=0.2.0"` pin.
+vt100 = "0.15"
+```
+
+- `portable-pty` — PTY creation, spawning, resize (`ioctl(TIOCSWINSZ)`, which
+  also sends `SIGWINCH`), child kill/wait. Cross-platform, but this project is
+  Unix-only anyway.
+- `vt100` — byte-stream → screen (`Cell`s with contents, fg/bg colour, bold,
+  italic, underline, inverse, wide-cell flags). It also models the alternate
+  screen, so full-screen programs (vim, htop, lazygit) work.
+
+Both are available on the configured mirror (`portable-pty 0.9.0`,
+`vt100 0.15.2`). `vt100 0.15` uses plain `u16` sizes:
+
+```rust
+let parser = vt100::Parser::new(rows.max(1), cols.max(1), SCROLLBACK_ROWS);
+parser.set_size(rows.max(1), cols.max(1));
+parser.process(&bytes);
+```
+
+`vt100::Parser` is `Send` (no `Rc`/`RefCell` inside), so the reader thread can
+own a clone of it behind a `Mutex`.
+
+---
+
+## 4. Data model
+
+```
+App
+ ├─ tab_list: TabList
+ │    └─ Tab {
+ │         id: TabId,                 // stable across removals
+ │         path: PathBuf,
+ │         hide_files: bool,
+ │         selected: Option<usize>,
+ │         shells: Vec<ShellId>,      // ordered, like tmux windows
+ │         active_shell: Option<ShellId>,
+ │       }
+ ├─ shell_sessions: ShellSessions
+ │    ├─ sessions: HashMap<ShellId, ShellSession>
+ │    ├─ next_id: u64
+ │    ├─ exit_tx / exit_rx: Sender/Receiver<ShellId>
+ │    └─ ShellSession {
+ │         id: ShellId,
+ │         tab: TabId,
+ │         meta: ShellMeta { title, cwd, started_at },
+ │         screen: Arc<Mutex<vt100::Parser>>,
+ │         pty: PtyProcess,
+ │         alive: bool,
+ │       }
+ ├─ shell_prefix: ShellPrefix,       // parsed from `shell_prefix` config
+ ├─ shell_prefix_active: bool,       // next key is a prefix command
+ ├─ shell_pending_kill: Option<ShellId>,
+ └─ selected_block: Block::Browser(bool)
+                  | Block::CommandLine(CmdContent, CursorPos)
+                  | Block::Shell(ShellId)      // NEW
+```
+
+Why this shape:
+
+- `ShellId` is an opaque, `Copy` id (`utils/types.rs`) so `Block::Shell` can
+  carry it without creating a `utils -> key_event` dependency cycle.
+- `TabId` is stable. `TabList` is positional today; shells must keep their
+  owner when tabs before them are removed, so an id is needed.
+- The screen is shared with the reader thread, not streamed through a channel:
+  a background shell keeps consuming and parsing output even while hire is
+  blocked in another foreground process (`:!vim`, `shell_command lazygit`,
+  `open_file_in_shell`). No unbounded channel, no backpressure on a build that
+  keeps printing while the user is elsewhere.
+- Only **exit** events travel through a channel (small and rare).
+
+---
+
+## 5. Tab refactor (preparatory, no behaviour change)
+
+`TabList` currently keeps three parallel vectors that must be kept in sync by
+hand (`list: Vec<(PathBuf, bool)>`, `selected_file`, `current`). Adding two more
+(`shells`, `active_shell`) would make four. Replace them with one `Tab` struct:
+
+```rust
+// src/key_event/tab/types.rs
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct TabId(pub u64);
+
+#[derive(Clone)]
+pub struct Tab {
+    pub id: TabId,
+    pub path: PathBuf,
+    pub hide_files: bool,
+    pub selected: Option<usize>,
+    pub shells: Vec<ShellId>,
+    pub active_shell: Option<ShellId>,
+}
+
+pub struct TabList<'a> {
+    current: usize,
+    list: Vec<Tab>,
+    storage: Vec<Rc<[Cow<'a, str>]>>,
+    next_id: u64,
+}
+```
+
+Accessors to add (all mutation of `list` goes through them):
+
+```rust
+impl<'a> TabList<'a> {
+    pub fn new(path: PathBuf) -> Self;
+    pub fn current(&self) -> usize;
+    pub fn len(&self) -> usize;
+    pub fn tabs(&self) -> &[Tab];
+    pub fn current_tab(&self) -> &Tab;
+    pub fn current_tab_mut(&mut self) -> &mut Tab;
+    pub fn tab_by_id_mut(&mut self, id: TabId) -> Option<&mut Tab>;
+    pub fn push(&mut self, path: PathBuf, hide_files: bool) -> TabId;
+    pub fn remove(&mut self, idx: usize) -> Option<Tab>;
+    pub fn set_tabs(&mut self, tabs: Vec<Tab>); // clamps `current`, always non-empty
+}
+```
+
+Call sites to migrate:
+
+| Site | Change |
+| --- | --- |
+| `TabList::new` | one `Tab` with `id = 0` |
+| `snapshot` | **delete**; `SessionTabs::from_app` reads `tabs()` |
+| `set_snapshot` | **rename** to `set_tabs(Vec<Tab>)`; sudo restore builds fresh `Tab`s (empty shells) |
+| `create` | `push(path, hide)`; new `TabId` |
+| `remove_base` | clone the tab's `shells`, close them, then `remove(idx)` |
+| `delete_other_tabs` | keep the current `Tab` (id and shells), close the others |
+| `handle_tabs` / `select_new` | use `current_tab().path/hide_files/selected` |
+| `apply_storage_tabs` | close **all** current shells, then `set_tabs(...)` |
+| `update_current_tab` | write `path/hide_files/selected` into `current_tab_mut()` |
+| `generate_msg` / `tab_string_list` | render path + `shells.len()` badge |
+| `sudo_session.rs` | build `SessionTab`s from `tabs()`; build `Tab`s on restore |
+| `ui/mod.rs` title | unchanged (`current()`, `len()`) |
+
+`Tab` never goes into the session TOML: `sudo_session` can only transfer path,
+hidden-file flag and selected index.
+
+---
+
+## 6. PTY process wrapper
+
+New file `src/key_event/shell/pty.rs`:
+
+```rust
+pub struct PtyProcess {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send + Sync>,
+    size: (u16, u16),
+}
+
+impl PtyProcess {
+    pub fn spawn(
+        program: &str,
+        cwd: &Path,
+        rows: u16,
+        cols: u16,
+        screen: Arc<Mutex<vt100::Parser>>,
+        exited: Sender<ShellId>,
+        id: ShellId,
+    ) -> AppResult<Self>;
+
+    pub fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
+    pub fn resize(&mut self, rows: u16, cols: u16) -> AppResult<()>;
+    pub fn kill(&mut self);
+    pub fn try_wait(&mut self) -> io::Result<Option<portable_pty::ExitStatus>>;
+}
+```
+
+Implementation notes:
+
+- `native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })`.
+- `CommandBuilder::new(program)`, `.cwd(cwd)`; the base environment is inherited,
+  so `TERM`, `COLORTERM`, `SSH_*` etc. are already correct. Keep the current
+  non-login shell behaviour.
+- `slave.spawn_command(cmd)`, then `drop(slave)`. The master stays alive for the
+  lifetime of the session.
+- `master.try_clone_reader()` + `master.take_writer()`; the writer is used by the
+  main thread for key forwarding.
+- Reader thread:
+
+```rust
+let mut buf = [0u8; 8192];
+loop {
+    match reader.read(&mut buf) {
+        Ok(0) | Err(_) => break,
+        Ok(n) => {
+            if let Ok(mut parser) = screen.lock() {
+                parser.process(&buf[..n]);
+            }
+        }
+    }
+}
+let _ = exited.send(id);   // main loop reaps the child and cleans the tab
+```
+
+- Closing the master (dropping the session) sends `SIGHUP` to the session's
+  process group, so children of the shell do not survive. `kill()` is still
+  called explicitly, and `process_group_leader()` may be used with
+  `libc::killpg(pgid, SIGHUP)` for a hard cleanup.
+- Convert `portable_pty::Error` at the boundary (`anyhow::anyhow!("pty: {e}")` or
+  `.map_err(anyhow::Error::from)`); no new `ErrorType` variant is needed.
+
+---
+
+## 7. Session registry
+
+New file `src/key_event/shell/session.rs`:
+
+```rust
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+// ShellId lives in utils/types.rs
+
+pub struct ShellMeta {
+    pub title: String,          // "bash", basename of the shell program
+    pub cwd: PathBuf,           // directory the shell was started in
+}
+
+pub struct ShellSession {
+    pub tab: TabId,
+    pub meta: ShellMeta,
+    pub alive: bool,
+    screen: Arc<Mutex<vt100::Parser>>,
+    pty: PtyProcess,
+}
+
+pub struct ShellSessions {
+    sessions: HashMap<ShellId, ShellSession>,
+    next_id: u64,
+    exit_tx: Sender<ShellId>,
+    exit_rx: Receiver<ShellId>,
+}
+
+impl ShellSession {
+    pub fn parser(&self) -> MutexGuard<'_, vt100::Parser>;
+    pub fn write(&mut self, bytes: &[u8]) -> AppResult<()>;
+    pub fn resize(&mut self, rows: u16, cols: u16) -> AppResult<()>;
+}
+
+impl ShellSessions {
+    pub fn new() -> Self;
+    pub fn open(&mut self, tab: TabId, program: &str, cwd: &Path) -> AppResult<ShellId>;
+    pub fn get(&self, id: ShellId) -> Option<&ShellSession>;
+    pub fn get_mut(&mut self, id: ShellId) -> Option<&mut ShellSession>;
+    pub fn is_alive(&self, id: ShellId) -> bool;
+    pub fn drain_exits(&mut self) -> Vec<ShellId>;
+    pub fn close(&mut self, id: ShellId);          // kill + reap + drop
+    pub fn close_many(&mut self, ids: &[ShellId]);
+    pub fn alive_count(&self) -> usize;
+}
+```
+
+- `open` creates the parser (`Parser::new(24, 80, SCROLLBACK_ROWS)`; the first
+  draw resizes it), spawns the PTY, registers the session under a fresh
+  `ShellId` and returns it. Registration into `Tab.shells` is done by the caller
+  (`App::open_shell`), because only `App` can touch `TabList`.
+- `drain_exits` is called once per main-loop iteration; the caller removes the
+  id from the owning tab, reaps the child with `close`, and fixes the view if
+  the exited session was attached.
+- `Drop for PtyProcess` kills and reaps the child, so dropping `ShellSessions`
+  (which happens when `App` is dropped on quit) never leaves orphans.
+
+---
+
+## 8. Input: prefix key and key encoding
+
+New file `src/key_event/shell/input.rs`.
+
+### 8.1 Prefix
+
+```rust
+#[derive(Clone, Copy)]
+pub struct ShellPrefix {
+    code: KeyCode,
+    modifiers: KeyModifiers,
+}
+
+impl Default for ShellPrefix {
+    fn default() -> Self { Self { code: KeyCode::Char('b'), modifiers: KeyModifiers::CONTROL } }
+}
+
+impl ShellPrefix {
+    pub fn parse(spec: &str) -> anyhow::Result<Self>; // "C-s", "M-x", "C-M-x", "F12", "b"
+    pub fn matches(&self, event: &KeyEvent) -> bool;
+}
+```
+
+Default `C-s` (the user's choice, not tmux's `C-b`). It is configurable because
+hire is often run *inside* tmux, whose own prefix would swallow `C-b`; `C-s`
+also has to be remapped inside some terminals. `C-s` is normally XOFF, but hire
+reads the real terminal in raw mode (IXON disabled) and intercepts the chord
+before forwarding anything, so the shell never sees it.
+
+### 8.2 Encoding
+
+```rust
+pub fn encode_key(event: &KeyEvent) -> Option<Vec<u8>>;
+```
+
+Cover the keys a terminal application can receive:
+
+| crossterm | bytes |
+| --- | --- |
+| `Char(c)` (none / shift) | UTF-8 of `c` |
+| `Char(c)` + `Ctrl` | `c & 0x1f` (`Ctrl-Space` = NUL, `Ctrl-[` = ESC, …) |
+| `Char(c)` + `Alt` | `ESC` + UTF-8 of `c` |
+| `Enter` / `Tab` | `\r` / `\t` |
+| `BackTab` | `ESC [ Z` |
+| `Backspace` | `0x7f` |
+| `Esc` | `ESC` |
+| Arrows | `ESC O A/B/C/D` when the child enabled application cursor mode (DECCKM), otherwise `ESC [ A/B/C/D` |
+| `Home` / `End` | `ESC O H` / `ESC O F` in application mode, otherwise `ESC [ H` / `ESC [ F` |
+| `PageUp` / `PageDown` | `ESC [ 5~` / `ESC [ 6~` |
+| `Insert` / `Delete` | `ESC [ 2~` / `ESC [ 3~` |
+| `F1..F4` / `F5..F12` | `ESC O P..S` / `ESC [ 15~,17~,18~,19~,20~,21~,23~,24~` |
+| anything else | `None` (ignored) |
+
+Only `KeyEventKind::Press` is forwarded (the main loop already drops releases).
+Paste arrives as a burst of `Char` events (bracketed paste is not enabled), so
+a per-frame drain loop (see §10) is enough to keep it responsive.
+
+`encode_key` takes the child's DECCKM state as a second argument;
+`write_key` reads it from `parser().screen().application_cursor()` before
+locking the session for writing. Curses programs (vim, less, htop, …) enable
+application cursor mode and expect `ESC O A`, not `ESC [ A`; sending the
+normal-mode form is why arrow keys used to do nothing in those programs.
+
+### 8.3 Key dispatch while attached
+
+`handle_event` gets an early branch, before its existing `match key.code`:
+
+```rust
+if app.selected_block.is_shell() {
+    return shell::handle_view_key(key, app)
+}
+```
+
+`handle_view_key` is a small state machine:
+
+```text
+pending_kill = Some(id)?
+  ├─ 'y' → kill id, show the next shell of the tab or the browser
+  └─ other → cancel the prompt (the key is swallowed)
+shell_digits not empty?
+  ├─ '0'..'9' → append a digit, commit when it can no longer grow
+  ├─ Enter → commit the typed number
+  ├─ Esc → cancel
+  └─ other → cancel the number, then forward the key
+prefix_active?
+  ├─ 'd' → detach (browser comes back, session stays mounted)
+  ├─ 'n' / 'p' → attach next / previous shell of the tab
+  ├─ '0'..'9' → start typing a shell number (0-based)
+  ├─ 'c' → create a new shell on this tab and attach it
+  ├─ 'x' → ask to kill the attached shell (prompt in the status line)
+  ├─ the prefix chord again → send a literal prefix byte
+  └─ other → cancel the prefix, then forward the key (do not swallow typing)
+prefix matches?
+  └─ prefix_active = true (nothing is forwarded)
+otherwise
+  └─ write encode_key(key) to the PTY
+```
+
+`Esc` is **forwarded** to the shell (programs need it); detaching is `C-s d`.
+
+### 8.4 Selecting a shell by number when a tab holds more than 10
+
+Shells are numbered from **0** (tmux-style), and a tab may hold more than ten
+of them, so a single digit is not always enough. The number is accumulated:
+
+- `C-s 0` … `C-s 9` attach immediately when the tab has at most 10 shells.
+- With more shells, the digits are collected in `app.shell_digits` and shown in
+  the status line (`Shell #12  (Enter: attach, Esc: cancel)`). The number is
+  committed when
+  1. enough digits have been typed to cover the largest valid index
+     (`(len - 1).to_string().len()`),
+  2. appending another digit could not produce a valid index (e.g. `2` with 11
+     shells), or
+  3. `Enter` is pressed, or 450 ms pass without another digit.
+- An out-of-range number clears the buffer instead of attaching the wrong
+  shell.
+- `tick_shell_digits` (called from the main loop) performs the timeout commit;
+  the 450 ms constant is `DIGIT_COMMIT_DELAY` in `view.rs`.
+
+The shell menu uses the same 0-based numbering and the same accumulation rule,
+so `[10]` selects the eleventh shell of the tab.
+
+---
+
+## 9. Actions: open / attach / detach / kill
+
+New file `src/key_event/shell/view.rs`.
+
+```rust
+pub fn open_shell(app: &mut App) -> AppResult<()>;
+pub fn attach(app: &mut App, id: ShellId) -> AppResult<()>;
+pub fn detach(app: &mut App);
+pub fn next_shell(app: &mut App, forward: bool) -> AppResult<()>;
+pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()>;
+
+impl App<'_> {
+    pub fn handle_shell_events(&mut self);
+    pub fn tick_shell_digits(&mut self);
+    pub fn commit_shell_digits(&mut self);
+    pub fn clear_shell_digits(&mut self);
+    pub fn remove_shell_from_tab(&mut self, tab_id: TabId, id: ShellId) -> Option<ShellId>;
+}
+```
+
+- `open_shell`: resolve `default_shell` (or `$SHELL`), `shell_sessions.open(...)`,
+  push the new id onto `current_tab().shells`, set `active_shell`, then
+  `attach`.
+- `attach`: fail if the session is missing or dead; clear `switch_case`, command
+  line/expand/completion state, `shell_prefix_active`, `shell_pending_kill`; set
+  `selected_block = Block::Shell(id)`; set `active_shell`; set
+  `app.clear_screen = true`.
+- `detach`: clear the prefix/pending state, set
+  `selected_block = Block::Browser(app.root())`, set `clear_screen`. The session
+  is **not** touched — it keeps running and keeps parsing output.
+- `next_shell`: cycle `current_tab().shells` among alive sessions; no-op when
+  there is only one.
+- `x` (inside the prefix) requests a kill confirmation through
+  `shell_pending_kill` (drawn in the status line, y/N), never through
+  `SwitchCase` — a `SwitchCase` would replace the shell view and lose the
+  terminal area until dismissed.
+
+`AppCommand::Shell` and `--working-directory` both call `open_shell`, so the
+`-w` mode becomes "open hire with a mounted shell": the user can still detach
+and browse, and `exit` drops back to the browser exactly as today.
+
+The existing `shell_process` stays untouched for everything that must remain a
+one-shot foreground program: `:!<cmd>` (`command/cmd_utils.rs`),
+`shell_command` from the keymap, `open_file_in_shell` (the file reader), and
+`vim_diff`.
+
+---
+
+## 10. Main loop (`src/main.rs`)
+
+Changes:
+
+1. Drain exits and commit a timed-out shell number before drawing:
+   ```rust
+   app.handle_shell_events();          // drain_exits + reaping + view fix-up
+   app.tick_shell_digits();            // commit a partial number after 450 ms
+   if app.clear_screen {
+       terminal.clear()?;
+       app.clear_screen = false;
+   }
+   ```
+2. Poll timeout: `16 ms` while a shell is attached, `200 ms` otherwise.
+   PTY output is parsed by the reader thread; the short poll only makes hire
+   repaint promptly and keeps typed input latency low.
+3. Per-frame event drain: while a shell is attached, read up to N queued events
+   per iteration (`while event::poll(Duration::ZERO)?`), otherwise keep the
+   current one-event behaviour. Otherwise a paste would be limited to one key
+   per 16 ms.
+4. Never treat `q` as "quit hire" while a shell is attached:
+   ```rust
+   let in_shell = matches!(app.selected_block, utils::Block::Shell(_));
+   if !in_shell && key.code == KeyCode::Char('q') && key.modifiers.is_empty() { … }
+   ```
+   Recompute `in_shell` after each handled event, because the event may change
+   the block.
+5. Do not record macro keys while a shell is attached (they belong to the
+   child).
+6. Quit confirmation: also warn when mounted shells exist, e.g.
+   `There're other tabs opened and 2 mounted shells will be killed, are you sure to quit? (y for yes)`.
+7. `shell_in_workdir` calls `shell::open_shell(app)` instead of
+   `shell_process(...)`. No terminal handle is needed: the session starts at
+   24×80 and the first draw resizes it (the shell receives `SIGWINCH`).
+
+`handle_shell_events` lives on `App` (`key_event/shell/view.rs`):
+
+```rust
+impl App<'_> {
+    pub fn handle_shell_events(&mut self) {
+        for id in self.shell_sessions.drain_exits() {
+            let tab_id = self.shell_sessions.get(id).map(|s| s.tab);
+            let was_attached = self.selected_block.shell_id() == Some(id);
+
+            self.shell_sessions.close(id);
+
+            let next = tab_id
+                .and_then(|tab_id| self.remove_shell_from_tab(tab_id, id));
+
+            if was_attached {
+                match next {
+                    Some(next) => {
+                        if attach(self, next).is_err() {
+                            detach(self);
+                        }
+                    },
+                    None => detach(self),
+                }
+            }
+        }
+    }
+}
+```
+
+View fix-up: if the attached shell exited, attach the tab's next live shell
+(tmux closes a window and focuses the next one); if none is left, return to the
+file browser.
+
+---
+
+## 11. Rendering
+
+New file `src/ui/shell_block.rs`.
+
+`ui::ui` gets a branch after `check_app_error` and before the
+expanded-command-line handling and the browser layout:
+
+```rust
+if let Block::Shell(_) = app.selected_block {
+    frame.render_widget(computer_info, title_layout[0]);
+    frame.render_widget(item_num_info, title_layout[1]);
+    render_shell(app, frame, chunks[1])?;       // the shell area
+    render_command_line(app, frame, chunks[2]); // shell status line
+    return Ok(());
+}
+```
+
+The shell keeps hire's title bar and state line; the PTY is sized to the middle
+band, so full-screen programs lay out correctly.
+
+### 11.1 Screen renderer
+
+```rust
+pub fn render_shell(app: &mut App, frame: &mut Frame, area: Rect) -> anyhow::Result<()> {
+    let Some(id) = app.selected_block.shell_id() else { return Ok(()) };
+    let Some(session) = app.shell_sessions.get_mut(id) else { return Ok(()) };
+
+    // Only resizes when the size changed (parser.set_size + PTY ioctl).
+    session
+        .resize(area.height, area.width)
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+    let parser = session.parser();              // MutexGuard<vt100::Parser>
+    let screen = parser.screen();
+
+    {
+        let buf = frame.buffer_mut();
+
+        for row in 0..area.height {
+            for col in 0..area.width {
+                let Some(cell) = screen.cell(row, col) else { continue };
+                if cell.is_wide_continuation() {
+                    continue;                   // the wide glyph covers this cell
+                }
+
+                if let Some(target) = buf.cell_mut((area.x + col, area.y + row)) {
+                    // `contents()` is "" for a cleared cell; a real space must
+                    // be written or crossterm prints nothing and the old
+                    // character survives on the outer terminal.
+                    if cell.has_contents() {
+                        target.set_symbol(&cell.contents());
+                    } else {
+                        target.set_symbol(" ");
+                    }
+                    target.set_style(style_of(cell));
+                }
+            }
+        }
+    }
+
+    if !screen.hide_cursor() {
+        let (row, col) = screen.cursor_position();
+        frame.set_cursor_position((area.x + col, area.y + row));
+    }
+    Ok(())
+}
+```
+
+`style_of` maps `vt100::Color::{Default, Idx, Rgb}` to
+`ratatui::style::Color::{Reset, Indexed, Rgb}` and the cell's
+bold/italic/underline/inverse flags to `Modifier`s. `Cell::is_wide()` /
+`is_wide_continuation()` are provided by `vt100`; no extra crate is needed to
+handle CJK.
+
+**Blank cells must be written as a space.** `vt100::Cell::contents()` returns
+`""` for a cleared cell (`Cell::clear` sets `len = 0`). Setting a ratatui cell's
+symbol to `""` makes crossterm print nothing, so the character that used to be
+at that position stays on the outer terminal — the "old content is not erased"
+bug. The renderer therefore checks `Cell::has_contents()` and writes `" "` for
+blank cells; the cell style is still applied so background colours survive.
+
+### 11.2 Status line
+
+`render_command_line` gains the arm
+
+```rust
+AppBlock::Shell(_) => {
+    let lines = shell_status_lines(app);        // left + right
+    if lines.is_empty() {
+        return
+    }
+    frame.render_widget(StateLine::new(lines), area);
+}
+```
+
+Left: shell title, start directory, tab ordinal (`[2/3]`), `RUNNING`/exit code.
+Right: the hint `prefix d: detach  n/p: switch  c: new  x: kill  prefix x2:
+literal`; `PREFIX ...` while `shell_prefix_active` is set; `Shell #N` while
+digits are being typed; `Kill shell "bash"? (y/N)` while
+`shell_pending_kill` is set; and an application error while `shell_notice` is
+set.
+
+`StateLine` (`ui/command_line.rs`) is already public and reusable.
+
+### 11.3 Title bar
+
+`get_title_right_info` keeps `|tab>|` and appends a shell badge when the current
+tab has shells, e.g. `|1:2>|` (tab 1 has 2 mounted shells), and `SH 2/3` while a
+shell is attached.
+
+---
+
+## 12. Shell menu
+
+New file `src/key_event/shell/menu.rs`, following the `SwitchCase` pattern used
+by the tab menu.
+
+- `shell_operation(app)` opens the page with
+  `SwitchCaseData::Struct(ShellMenuState)` (`{ deleting: bool, selecting:
+  String }`).
+- Message: one line per shell of the current tab, numbered from **0**:
+  `[0] bash  ~/project`; `*` marks the active shell, `!` marks an exited one.
+- Keys:
+  - `0..9` — attach that shell. A number is accumulated exactly like the
+    prefix's digits (0-based, width of the largest index); the page is
+    re-rendered while the number is incomplete. Attaching clears the switch
+    case and returns `false`, so `switch_match` does not overwrite the block
+    with `quit_command_mode`.
+  - `n` — `open_shell` on this tab and attach it.
+  - `x` then the number — kill that shell (two-step; no modal confirm needed).
+  - `Esc` — close (handled by the existing `Esc` path).
+- Rebuilding the page after a kill reuses `generate_msg`; when the tab has no
+  shells left, return `true` to close the menu.
+
+Add the command to `AppCommand` (`ShellMenu`), parse `"shell_menu"` in
+`AppCommand::from_str`, dispatch it in `AppCommand::execute`
+(`shell::menu::shell_operation(app)?`), and bind it in both shipped keymaps:
+
+```toml
+{ key = "T", run = "shell_menu" },   # List / attach / kill shells of this tab
+```
+
+`T` is free in `default.toml` and `colemak.toml`. `spawn_shell` (`S`) keeps its
+current key and now creates + attaches a new session.
+
+---
+
+## 13. Configuration
+
+New `user_config.toml` option:
+
+```toml
+# The prefix chord used inside an attached shell. Default: "C-s".
+shell_prefix = "C-s"
+```
+
+Wiring:
+
+- `config/types.rs`: `default_value` → `"shell_prefix" => "C-s"`; `value_from`
+  treats it like the other string options.
+- `config/mod.rs`: add `"shell_prefix"` to the `configs` array; after
+  `init_user_config`, parse it into `app.shell_prefix` and report a bad value
+  through the existing `AppError` collection (keep the default).
+- `App::default` initialises `ShellPrefix::default()` so a broken user config
+  never prevents startup.
+
+No other configuration is required: shell program, GUI commands and file reader
+keep their existing options.
+
+---
+
+## 14. File-by-file change list
+
+| File | Change |
+| --- | --- |
+| `Cargo.toml` | `portable-pty = "0.9"`, `vt100 = "0.15"` |
+| `src/utils/types.rs` | `ShellId`; `Block::Shell(ShellId)`; `Block::is_shell()` / `Block::shell_id()` |
+| `src/key_event/shell/pty.rs` *(new)* | `PtyProcess` (spawn, reader thread, write, resize, kill + reap) |
+| `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions` |
+| `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell`, `attach`, `detach`, `next_shell`, `handle_view_key`; the `App` methods `handle_shell_events`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab` |
+| `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message |
+| `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
+| `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
+| `src/key_event/tab/types.rs` | `TabId`, `Tab`, `TabList` rewrite (§5) |
+| `src/key_event/tab/utils.rs` | migrate every mutation site; kill shells on tab close; show shell counts |
+| `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
+| `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice` |
+| `src/main.rs` | drain exits + `tick_shell_digits`, `clear_screen`, poll timeout, event drain, `q` guard, quit warning, `-w` mode |
+| `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
+| `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
+| `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
+| `src/ui/mod.rs` | shell-view branch; title badge |
+| `src/ui/shell_block.rs` *(new)* | screen renderer + status line (prefix/digits/kill prompt/notice) |
+| `src/ui/command_line.rs` | `Block::Shell` arm (reuses `StateLine`) |
+| `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding |
+| `README.md`, `docs/ARCHITECTURE.md` | user docs and architecture docs (§16) |
+
+Exhaustive `match` sites the compiler will point at when `Block::Shell` is
+added (all are unreachable after the early dispatch; `Esc` already has a `_`
+arm, `Up` / `Down` in `key_event/mod.rs` need one): `key_event/mod.rs`
+(`Up`, `Down`) and `ui/command_line.rs` (`render_command_line`, which renders
+the shell status line). Everything else matches with `if let` or `_`.
+
+---
+
+## 15. Edge cases
+
+| Situation | Behaviour |
+| --- | --- |
+| Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser; tab list updated |
+| Shell exits while detached | remove it from `shells`; clear `active_shell` if it pointed at the shell; no view change |
+| Close a tab with shells | kill every shell of that tab (the tab menu is the only way to close one) |
+| `delete_other_tabs` | closes the shells of every removed tab |
+| Apply stored tabs (`storage_tabs`) | kills all mounted shells first; sessions are never persisted |
+| Quit hire | warn when live shells exist; dropping `ShellSessions` drops every `PtyProcess`, which kills and reaps the children |
+| Sudo session | tabs are handed over without shells; the parent's shells keep running while the root instance is open, and are restored on return; the root instance cannot see or attach them |
+| Terminal resize | `render_shell` compares the shell area with the PTY size and calls `Parser::set_size` + `MasterPty::resize` (which raises `SIGWINCH`) |
+| Error while attached | show it in the shell status line instead of `check_app_error` hijacking the block to `CommandLine` (small guard in `check_app_error`) |
+| Prefix inside tmux | outer tmux may swallow `C-b`, and some terminals use `C-s` for flow control; the option exists so the user can set another chord |
+| Background output while a foreground process runs (`:!vim`) | reader threads keep parsing into the shared screen; only exit ids travel through a channel, so no unbounded buffering |
+| Shell program missing | `AppError` from `open_shell`, shown in the browser; no session is registered |
+| Blank / cleared shells cells | written as a real space, so erases reach the outer terminal (see §11.1) |
+| Curses program in the shell | arrows/Home/End follow the child's DECCKM state, so vim/less/htop receive the form they expect |
+
+---
+
+## 16. Documentation updated with the implementation
+
+- `README.md`: new "Shell Sessions" section (spawn → detach → menu → quota of
+  shells per tab), `shell_prefix`, the prefix table, and the fact that quitting
+  kills the shells.
+- `docs/ARCHITECTURE.md`:
+  - §1 event-loop step: drain shell exits, `clear_screen`, variable poll.
+  - §3 module table: the five new `key_event/shell/*` files and `ui/shell_block.rs`.
+  - §3 `Block` description: add `Shell(ShellId)`.
+  - §3 `App` field list: `shell_sessions`, `shell_prefix`, `shell_prefix_active`,
+    `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`,
+    `clear_screen`, `shell_notice`.
+  - §3 `key_event/tab/types.rs`: `Tab` / `TabId`.
+  - §4: a "Shell session" flow (spawn → attach → detach → menu → exit/close).
+  - §5: this document.
+- `keymap_config/{default,colemak}.toml`: `shell_menu` line.
+- `Cargo.toml` dependency list in §1 of `ARCHITECTURE.md` (`portable-pty`,
+  `vt100`).
+
+---
+
+## 17. Phases
+
+| Phase | Content | Status |
+| --- | --- | --- |
+| 0 | `Tab`/`TabId` refactor, no behaviour change | done |
+| 1 | PTY + reader + screen renderer + `Block::Shell` + prefix + attach/detach + `spawn_shell` / `-w` wiring | done |
+| 2 | Shell menu, tab badges, kill/quit confirmations, `shell_prefix` config, sudo/storage/quit edge cases | done |
+| 3 | Scroll mode (`C-s [`), rename, activity notification, optional split panes | not implemented |
+
+Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the
+background, `C-s n/p` cycles the tab's shells, `S` from the browser opens
+another one. Phases 0–2 are implemented; phase 3 is not.
+
+---
+
+## 18. Alternatives considered
+
+1. **Shell out to tmux.** `spawn_shell` would run
+   `tmux new-session -d -s hire-<pid>-<n> -c <cwd>` and store the session name
+   in the tab; attach with `tmux attach-session`; tmux's own `C-b d` detaches.
+   This is far less code (~250 lines) and gives perfect terminal fidelity, but
+   adds a runtime dependency on tmux, breaks when hire itself runs inside tmux,
+   and makes hire a launcher rather than the multiplexer. It is a viable
+   fallback if the native work is rejected.
+2. **Suspend/resume with `SIGTSTP` + `tcsetpgrp`.** The shell cannot keep
+   running while detached (it would hit `SIGTTIN`/`SIGTTOU` as a background
+   process group), so this does not satisfy "keeps running in the background".
+3. **`tui-term` for rendering.** `tui-term 0.2` is pinned to ratatui 0.29 +
+   vt100 0.15; the renderer above is ~100 lines and keeps us on current vt100
+   without another dependency.

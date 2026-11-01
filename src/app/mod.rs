@@ -6,6 +6,7 @@ mod macro_utils;
 mod image_preview;
 
 use std::{env, fs, io};
+use std::time::Instant;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -17,13 +18,17 @@ use ratatui::widgets::ListState;
 
 use crate::config::{AppConfig, Keymap};
 use crate::error::{AppError, AppResult};
-use crate::key_event::{AppCompletion, EditMode, FileSearcher, NaviIndex, SwitchCase};
+use crate::key_event::{
+    AppCompletion, EditMode, FileSearcher, NaviIndex, ShellPrefix, ShellSessions,
+    SwitchCase,
+};
 use crate::utils::{
     read_to_text,
     MarkedFiles,
     FileContent,
     SearchFile,
     ItemIndex,
+    ShellId,
     Block,
 };
 
@@ -86,6 +91,32 @@ pub struct App<'a> {
     // Tab
     pub tab_list: crate::key_event::TabList<'a>,
 
+    // Shell sessions
+    pub shell_sessions: ShellSessions,
+
+    /// The chord which gives hire a command while a shell is attached.
+    pub shell_prefix: ShellPrefix,
+
+    /// The prefix chord has been pressed; the next key is a shell command.
+    pub shell_prefix_active: bool,
+
+    /// A kill confirmation is waiting for `y`.
+    pub shell_pending_kill: Option<ShellId>,
+
+    /// Digits typed after the prefix, used to select a shell by number.
+    pub shell_digits: String,
+
+    /// When the typed digits are committed automatically.
+    pub shell_digit_deadline: Option<Instant>,
+
+    /// The whole terminal must be repainted on the next draw (after attaching
+    /// or detaching a shell).
+    pub clear_screen: bool,
+
+    /// An error shown in the shell status line instead of replacing the shell
+    /// view with the command line.
+    pub shell_notice: Option<String>,
+
     // Image Preview
     pub image_preview: ImagePreview,
 
@@ -144,6 +175,14 @@ impl<'a> Default for App<'a> {
 
             // Operations
             tab_list,
+            shell_sessions: ShellSessions::default(),
+            shell_prefix: ShellPrefix::default(),
+            shell_prefix_active: false,
+            shell_pending_kill: None,
+            shell_digits: String::new(),
+            shell_digit_deadline: None,
+            clear_screen: false,
+            shell_notice: None,
             switch_case: None,
             mark_expand: false,
             command_scroll: None,

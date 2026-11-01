@@ -45,7 +45,7 @@ use crate::utils::{
 };
 
 // Export
-pub use tab::TabList;
+pub use tab::{Tab, TabId, TabList};
 pub use file_search::FileSearcher;
 pub use sudo_session::SessionTabs;
 pub use macro_page::execute_macro;
@@ -54,7 +54,15 @@ pub use simple_operations::output_path;
 pub use switch::{SwitchCase, SwitchCaseData};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
-pub use shell::{ShellCommand, CommandStr, shell_process, fetch_working_directory};
+pub use shell::{
+    ShellCommand,
+    CommandStr,
+    ShellPrefix,
+    ShellSessions,
+    open_shell,
+    shell_process,
+    fetch_working_directory,
+};
 
 // Export for auto config
 pub use tab::read_config as tab_read_config;
@@ -70,6 +78,11 @@ pub fn handle_event(
     terminal: &mut DefaultTerminal
 ) -> AppResult<()>
 {
+    // The attached shell owns every key except its prefix chord.
+    if app.selected_block.is_shell() {
+        return shell::handle_view_key(key, app)
+    }
+
     match key.code {
         KeyCode::Char(c) => {
             // Handle keys with modifiers
@@ -370,6 +383,7 @@ pub fn handle_event(
                     }
                 },
                 Block::Browser(_) => enter_command_history(app, false),
+                Block::Shell(_) => (),
             }
         },
 
@@ -382,6 +396,7 @@ pub fn handle_event(
                     }
                 },
                 Block::Browser(_) => enter_command_history(app, true),
+                Block::Shell(_) => (),
             }
         },
 
@@ -476,6 +491,7 @@ impl AppCommand {
             AppCommand::FzfJump         => fzf_jump(app, terminal)?,
             AppCommand::VimDiff         => vim_diff(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
+            AppCommand::ShellMenu       => shell::shell_operation(app)?,
             AppCommand::PathHistory     => path_history_operation(app),
             AppCommand::MacroPage       => macro_page::macro_operation(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),
@@ -535,12 +551,7 @@ impl AppCommand {
                 Some(app.hide_files)
             )?,
 
-            AppCommand::Shell => shell_process(
-                app,
-                terminal,
-                ShellCommand::Shell,
-                true
-            )?,
+            AppCommand::Shell => shell::open_shell(app)?,
 
             AppCommand::ItemMove(direction) => directory_movement(
                 direction,

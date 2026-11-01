@@ -30,20 +30,26 @@ impl<'a> Config<'a> {
             "default_shell" => ConfigValue::String(Cow::Borrowed("bash")),
             "file_read_program" => ConfigValue::String(Cow::Borrowed("vim")),
             "gui_file_open_cmd" => ConfigValue::String(Cow::Borrowed("")),
+            "shell_prefix" => ConfigValue::String(Cow::Borrowed("C-s")),
             _ => panic!("Unknow error occurred at default_value fn in types.rs.")
         }
     }
 
-    pub fn get_value(configs: &'a Vec<Self>, prop: &str) -> &'a ConfigValue<'a> {
-        for conf in configs.iter() {
-            if &conf.name == prop {
-                return &conf.value
-            }
-        }
+    pub fn find_value<'b>(
+        configs: &'b Vec<Self>,
+        prop: &str
+    ) -> Option<&'b ConfigValue<'a>>
+    {
+        configs.iter()
+            .find(|conf| conf.name == prop)
+            .map(|conf| &conf.value)
+    }
 
-        // NOTE: There's no possibility that this function cannot find value.
-        // The only cause is typo error.
-        panic!("Error in code at get_value fn in config/types.rs!")
+    pub fn get_value(configs: &'a Vec<Self>, prop: &str) -> &'a ConfigValue<'a> {
+        match Self::find_value(configs, prop) {
+            Some(value) => value,
+            None => panic!("Error in code at get_value fn in config/types.rs!"),
+        }
     }
 
     pub fn generate_default(prop: &'a str) -> Self {
@@ -57,7 +63,8 @@ impl<'a> Config<'a> {
         let err_msg = format!("The type of config property {} is error", self.name);
 
         match self.name.as_str() {
-            "default_shell" | "file_read_program" | "gui_file_open_cmd" =>
+            "default_shell" | "file_read_program" | "gui_file_open_cmd" |
+            "shell_prefix" =>
                 self.value = Self::get_str(value, err_msg)?,
 
             "gui_commands" => {

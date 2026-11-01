@@ -4,6 +4,13 @@ use std::collections::HashMap;
 
 use ratatui::{text::Text, widgets::ListState};
 
+/// The identity of a shell session mounted on a tab.
+///
+/// The value is opaque: it is only used to look the session up in
+/// `ShellSessions`, and it stays valid while the session is alive.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ShellId(pub u64);
+
 /// The cursor position inside a piece of editable text.
 ///
 /// `Index` is a **byte offset** into the UTF-8 text and always lies on a
@@ -33,7 +40,25 @@ pub enum CmdContent {
 /// The boolean from Browser indicates whether current dir is the root directory.
 pub enum Block {
     Browser(bool),
-    CommandLine(CmdContent, CursorPos)
+    CommandLine(CmdContent, CursorPos),
+
+    /// The attached shell view owns the input; the value is the shell id.
+    Shell(ShellId),
+}
+
+impl Block {
+    /// The attached shell id, if the shell view owns the input.
+    pub fn shell_id(&self) -> Option<ShellId> {
+        if let Self::Shell(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_shell(&self) -> bool {
+        matches!(self, Self::Shell(_))
+    }
 }
 
 /// Store file's name and whether it's a directory.

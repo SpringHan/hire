@@ -31,7 +31,7 @@ use ratatui::{
 
 use crate::{app::App, config::get_conf_file, error::AppResult, rt_error};
 
-use super::{move_cursor, tab::update_current_tab, Goto};
+use super::{move_cursor, tab::update_current_tab, Goto, Tab};
 
 /// The tabs handed over from one hire instance to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,14 +58,15 @@ impl SessionTabs {
     pub fn from_app(app: &mut App) -> AppResult<Self> {
         update_current_tab(app);
 
-        let (current, list, selected) = app.tab_list.snapshot();
-        let tabs = list
-            .into_iter()
-            .enumerate()
-            .map(|(idx, (path, hide_files))| SessionTab {
-                path,
-                hide_files,
-                selected: selected.get(idx).copied().flatten(),
+        let current = app.tab_list.current();
+        let tabs = app
+            .tab_list
+            .tabs()
+            .iter()
+            .map(|tab| SessionTab {
+                path: tab.path.to_owned(),
+                hide_files: tab.hide_files,
+                selected: tab.selected,
             })
             .collect::<Vec<_>>();
 
@@ -178,16 +179,16 @@ impl<'a> App<'a> {
 
         let current = session.current.min(session.tabs.len() - 1);
 
-        let list = session.tabs
-            .iter()
-            .map(|tab| (tab.path.to_owned(), tab.hide_files))
-            .collect::<Vec<_>>();
-        let selected = session.tabs
-            .iter()
-            .map(|tab| tab.selected)
-            .collect::<Vec<_>>();
+        let mut tabs = Vec::new();
+        for tab in session.tabs.iter() {
+            let id = self.tab_list.next_tab_id();
+            let mut new_tab = Tab::new(id, tab.path.to_owned(), tab.hide_files);
+            new_tab.selected = tab.selected;
+            tabs.push(new_tab);
+        }
 
-        self.tab_list.set_snapshot(current, list, selected);
+        self.tab_list.set_tabs(tabs);
+        self.tab_list.set_current(current);
 
         let tab = &session.tabs[current];
         self.goto_dir(&tab.path, Some(tab.hide_files))?;
@@ -461,11 +462,13 @@ mod test {
         fs::write(second.join("file"), "").unwrap();
 
         let mut app = App::default();
-        app.tab_list.set_snapshot(
-            1,
-            vec![(first.to_owned(), true), (second.to_owned(), false)],
-            vec![None, None]
-        );
+        let first_tab = app.tab_list.next_tab_id();
+        let second_tab = app.tab_list.next_tab_id();
+        app.tab_list.set_tabs(vec![
+            Tab::new(first_tab, first.to_owned(), true),
+            Tab::new(second_tab, second.to_owned(), false),
+        ]);
+        app.tab_list.set_current(1);
         app.goto_dir(&second, Some(false)).unwrap();
 
         let session = SessionTabs::from_app(&mut app).unwrap();

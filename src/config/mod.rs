@@ -14,7 +14,7 @@ use toml_edit::DocumentMut;
 
 use keymap::init_keymap;
 
-use crate::{app::App, error::{AppError, AppResult}};
+use crate::{app::App, error::{AppError, AppResult}, key_event::ShellPrefix};
 
 pub use types::*;
 pub use keymap::Keymap;
@@ -60,6 +60,17 @@ pub fn init_config(app: &mut App) -> AppResult<()> {
         errors.append_errors(err.iter());
     }
 
+    // The prefix chord is stored as text, so it is parsed into the typed form
+    // once here instead of on every key press.
+    if let Some(ConfigValue::String(spec)) =
+        Config::find_value(&app.config, "shell_prefix")
+    {
+        match ShellPrefix::parse(spec) {
+            Ok(prefix) => app.shell_prefix = prefix,
+            Err(err) => errors.add_error(err),
+        }
+    }
+
     if !errors.is_empty() {
         return Err(errors)
     }
@@ -89,7 +100,7 @@ fn init_auto_config(app: &mut App, path: String) -> AppResult<()> {
 fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
     let configs = [
         "default_shell", "gui_commands", "file_read_program",
-        "gui_file_open_cmd"
+        "gui_file_open_cmd", "shell_prefix"
     ];
     let mut errors = AppError::new();
 
