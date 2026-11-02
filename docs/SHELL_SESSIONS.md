@@ -587,8 +587,13 @@ impl App<'_> {
   `selected_block = Block::Shell(id)`; set `active_shell`; set
   `app.clear_screen = true`.
 - `detach`: clear the prefix/pending state, set
-  `selected_block = Block::Browser(app.root())`, set `clear_screen`. The session
-  is **not** touched — it keeps running and keeps parsing output.
+  `selected_block = Block::Browser(app.root())`, set `clear_screen`, then
+  `refresh_after_shell`: re-read the current directory (the shell may have
+  created, renamed or deleted files) and select the previously selected file
+  again when it still exists. Errors are reported through the error banner —
+  note that a removed current directory is handled by `init_parent_files`,
+  which moves the browser to an existing sibling. The session is **not**
+  touched — it keeps running and keeps parsing output.
 - `next_shell`: cycle `current_tab().shells` among alive sessions; no-op when
   there is only one.
 - `x` (inside the prefix) requests a kill confirmation through
@@ -994,7 +999,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 
 | Situation | Behaviour |
 | --- | --- |
-| Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser; tab list updated |
+| Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser and refresh the current directory; tab list updated |
+| Detach (`C-s d`) | return to the browser and re-read the current directory, keeping the selected file selected |
+| Shell killed (`C-s x`, no shell left) | same as detaching: back to the browser, refreshed |
 | Shell exits while detached | remove it from `shells`; clear `active_shell` if it pointed at the shell; no view change |
 | Close a tab with shells | the tab menu asks first; `y` closes the tab and kills every shell of it (`close_tab_shells`) |
 | `delete_other_tabs` | asks first when a removed tab has shells; `close_tab_shells` on every removed tab |

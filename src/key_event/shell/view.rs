@@ -96,6 +96,36 @@ pub fn detach(app: &mut App) {
     app.clear_shell_digits();
     app.selected_block = Block::Browser(in_root);
     app.clear_screen = true;
+
+    // The shell may have created, renamed or deleted files while it was in
+    // front, so the browser's lists are stale.
+    refresh_after_shell(app);
+}
+
+/// Re-read the current directory after leaving the shell view.
+///
+/// The selected file is selected again when it still exists. Errors are
+/// reported through the usual error banner instead of being dropped: the
+/// directory may have been removed from inside the shell.
+fn refresh_after_shell(app: &mut App) {
+    let selected = app.get_file_saver().map(|file| file.name.to_owned());
+    // Re-read the directory the browser shows, not `current_path()`: at the
+    // root directory the latter is the selected parent entry, and refreshing
+    // must not navigate into it.
+    let dir = app.path.to_owned();
+
+    if let Err(err) = app.goto_dir(dir, Some(app.hide_files)) {
+        app.app_error.append_errors(err.iter());
+        return
+    }
+
+    let Some(name) = selected else {
+        return
+    };
+
+    if let Err(err) = app.file_search_sync(name, true) {
+        app.app_error.append_errors(err.iter());
+    }
 }
 
 /// Attach the next/previous live shell of the same tab.
@@ -693,11 +723,32 @@ impl App<'_> {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
+    use std::{
+        fs,
+        path::Path,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use ratatui::crossterm::event::KeyModifiers;
 
     use super::*;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!(
+            "hire-shell-{}-{}-{}",
+            std::process::id(),
+            tag,
+            nanos
+        ));
+
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         handle_view_key(KeyEvent::new(code, modifiers), app).unwrap();
@@ -769,5 +820,47 @@ mod test {
         assert!(app.selected_block.is_shell());
         assert_eq!(app.tab_list.current_tab().shells.len(), 1);
         assert_eq!(app.shell_sessions.alive_count(), 1);
+    }
+
+    /// Leaving the shell view re-reads the directory, so files the shell
+    /// created appear at once, and the selected file stays selected.
+    #[test]
+    fn test_detach_refreshes_the_browser() {
+        let dir = temp_dir("detach-refresh");
+        fs::write(dir.join("a.txt"), "").unwrap();
+        fs::write(dir.join("b.txt"), "").unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        app.file_search_sync(String::from("b.txt"), true).unwrap();
+
+        assert_eq!(
+            app.get_file_saver().map(|file| file.name.as_str()),
+            Some("b.txt"),
+        );
+
+        // The shell creates a file while it is in front.
+        fs::write(dir.join("c.txt"), "").unwrap();
+        app.selected_block = Block::Shell(ShellId(0));
+
+        detach(&mut app);
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(app.current_files.iter().any(|file| file.name == "c.txt"));
+        assert_eq!(
+            app.get_file_saver().map(|file| file.name.as_str()),
+            Some("b.txt"),
+            "the selected file is kept across the refresh",
+        );
+
+        // A file deleted in the shell disappears as well.
+        fs::remove_file(dir.join("a.txt")).unwrap();
+        app.selected_block = Block::Shell(ShellId(0));
+
+        detach(&mut app);
+
+        assert!(!app.current_files.iter().any(|file| file.name == "a.txt"));
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

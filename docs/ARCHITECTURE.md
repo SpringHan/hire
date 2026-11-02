@@ -334,7 +334,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells), `graphics_support` and `App::handle_shell_graphics`. |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. |
 | `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
@@ -675,7 +675,8 @@ spawn_shell (`S`) / --working-directory
        ├─ Tab.shells.push(id); Tab.active_shell = Some(id)
        └─ attach → Block::Shell(id), clear_screen
             └─ main loop: 16 ms poll, handle_view_key forwards keys
-                 ├─ `C-s d` → detach: Block::Browser, session still mounted
+                 ├─ `C-s d` → detach: Block::Browser + refresh the current
+                 │    directory, session still mounted
                  ├─ `C-s n/p`, `C-s <number>` → attach another shell
                  ├─ `C-s c` → open another shell on the same tab
                  ├─ `C-s x` → prompt; `y` kills it and attaches the next
@@ -686,7 +687,8 @@ spawn_shell (`S`) / --working-directory
                  ├─ sync_terminal_modes: outer mouse capture + bracketed paste
                  │    are enabled only while this shell asks for them
                  └─ shell exits → handle_shell_events reaps it, removes the id
-                      from the tab and attaches the next live shell (or the browser)
+                      from the tab and attaches the next live shell; when there
+                      is none it detaches, which also refreshes the browser
 
 shell_menu (`T`)
   └─ list the tab's shells (0-based); digits attach, `n` new, `x` + digits kill

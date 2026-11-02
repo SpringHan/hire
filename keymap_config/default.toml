@@ -24,6 +24,11 @@ keymap = [
     { key = "2", run = "switch_tab 2" }, # Switch 2nd tab
     { key = "3", run = "switch_tab 3" }, # Switch 3rd tab
     { key = "4", run = "switch_tab 4" }, # Switch 4th tab
+    { key = "5", run = "switch_tab 5" }, # Switch 5th tab
+    { key = "6", run = "switch_tab 6" }, # Switch 6th tab
+    { key = "7", run = "switch_tab 7" }, # Switch 7th tab
+    { key = "8", run = "switch_tab 8" }, # Switch 8th tab
+    { key = "9", run = "switch_tab 9" }, # Switch 9th tab
 
     # Search
     { key = "/", run = "search"              },  # Start to search file in command line
