@@ -101,3 +101,43 @@ keymap = [
     { key = "v", run = "edit_list_scroll next" },  # Scroll down in edit mode
     { key = "V", run = "edit_list_scroll prev" },  # Scroll up in edit mode
 ]
+
+# Shell scrollback
+#
+# These two arrays are only used while a shell is attached to the current tab;
+# they are independent of `keymap` (which only binds single characters for the
+# browser). Keys are written like `shell_prefix`: `M-u`, `C-b`, `PageUp`, `q`.
+#
+# `shell_scroll` is checked while the shell is live: a matching key scrolls the
+# shell's history instead of being sent to it. The defaults below let the
+# history be browsed without entering the scroll mode first.
+shell_scroll = [
+    { key = "M-u", run = "scroll up"   },  # Scroll the shell history up
+    { key = "M-e", run = "scroll down" },  # Scroll the shell history down
+]
+
+# `shell_scroll_mode` is checked after `C-s [` (the prefix + `[`), and while the
+# history is being browsed: every key is then owned by hire, so the shell does
+# not receive it. `scroll quit` (q/Esc/Enter) returns to the live screen, and
+# scrolling back to the bottom leaves the mode automatically.
+shell_scroll_mode = [
+    { key = "u",        run = "scroll up"        },
+    { key = "k",        run = "scroll up"        },
+    { key = "Up",       run = "scroll up"        },
+    { key = "C-p",      run = "scroll up"        },
+    { key = "e",        run = "scroll down"      },
+    { key = "j",        run = "scroll down"      },
+    { key = "Down",     run = "scroll down"      },
+    { key = "C-n",      run = "scroll down"      },
+    { key = "PageUp",   run = "scroll page up"   },
+    { key = "C-b",      run = "scroll page up"   },
+    { key = "PageDown", run = "scroll page down" },
+    { key = "C-f",      run = "scroll page down" },
+    { key = "g",        run = "scroll top"       },
+    { key = "Home",     run = "scroll top"       },
+    { key = "G",        run = "scroll bottom"    },
+    { key = "End",      run = "scroll bottom"    },
+    { key = "q",        run = "scroll quit"      },
+    { key = "Esc",      run = "scroll quit"      },
+    { key = "Enter",    run = "scroll quit"      },
+]

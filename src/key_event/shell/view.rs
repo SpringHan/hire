@@ -11,7 +11,7 @@ use std::{
 use ratatui_image::picker::ProtocolType;
 
 use ratatui::crossterm::{
-    event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind},
+    event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind},
     execute,
     style::Print,
 };
@@ -33,6 +33,7 @@ use super::{
     encode_paste,
     graphics::GraphicsEvent,
     inside as mouse_inside,
+    scroll,
     GraphicsSupport,
 };
 
@@ -74,6 +75,7 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     app.command_scroll = None;
     app.command_completion.reset();
     app.shell_prefix_active = false;
+    app.shell_scroll_mode = false;
     app.shell_pending_kill = None;
     app.shell_pending_kill_others = None;
     app.shell_pending_kill_all = None;
@@ -83,6 +85,11 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     app.selected_block = Block::Shell(id);
     app.clear_screen = true;
 
+    // A shell is always attached at the live screen.
+    if let Some(session) = app.shell_sessions.get(id) {
+        session.parser().screen_mut().set_scrollback(0);
+    }
+
     Ok(())
 }
 
@@ -90,6 +97,7 @@ pub fn detach(app: &mut App) {
     let in_root = app.root();
 
     app.shell_prefix_active = false;
+    app.shell_scroll_mode = false;
     app.shell_pending_kill = None;
     app.shell_pending_kill_others = None;
     app.shell_pending_kill_all = None;
@@ -210,6 +218,29 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
     }
 
+    // In scroll mode hire owns the keyboard: configured scroll bindings run,
+    // everything else is swallowed (never forwarded to the child). The prefix
+    // chord is the exception: it leaves the mode and arms the usual prefix
+    // command, so `C-s d`, `C-s x`, … still work after scrolling.
+    if app.shell_scroll_mode {
+        if app.shell_prefix.matches(&key) {
+            scroll::leave(app, id);
+            app.shell_prefix_active = true;
+            return Ok(())
+        }
+
+        let command = app
+            .keymap
+            .shell_scroll_mode_get(&key)
+            .or_else(|| app.keymap.shell_scroll_get(&key));
+
+        if let Some(command) = command {
+            scroll::apply(app, id, command);
+        }
+
+        return Ok(())
+    }
+
     if app.shell_prefix_active {
         app.shell_prefix_active = false;
 
@@ -236,11 +267,21 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
                     app.shell_pending_kill_others = Some(id);
                 }
             },
+            // Browse the shell's history. The configured `shell_scroll_mode`
+            // keys then scroll; `q`/`Esc` returns to the live screen.
+            KeyCode::Char('[') => scroll::enter(app, id),
             KeyCode::Char(c) if c.is_ascii_digit() => push_digit(app, c),
             KeyCode::Esc => (),
             _ => return write_key(app, id, &key),
         }
 
+        return Ok(())
+    }
+
+    // Scrolling without entering the mode first (default `M-u`/`M-e`). A
+    // matching key is consumed instead of being sent to the shell.
+    if let Some(command) = app.keymap.shell_scroll_get(&key) {
+        scroll::apply(app, id, command);
         return Ok(())
     }
 
@@ -272,6 +313,40 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
     let area = app.shell_area;
     let inside_area = mouse_inside(area, mouse.column, mouse.row);
 
+    // The wheel belongs to the child (`vim`, `less`, …), so its own mouse
+    // scrolling keeps working. `Shift` + wheel is hire's instead: it enters
+    // the scroll mode (or scrolls it) and swallows the event.
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) {
+        if !inside_area {
+            return Ok(())
+        }
+
+        let shift = mouse.modifiers.contains(KeyModifiers::SHIFT);
+
+        if app.shell_scroll_mode || shift {
+            scroll::handle_wheel(
+                app,
+                id,
+                matches!(mouse.kind, MouseEventKind::ScrollUp),
+            );
+
+            return Ok(())
+        }
+
+        // Fall through: `encode_mouse` forwards it to the child when it asked
+        // for mouse reporting. Without that reporting hire never receives the
+        // event, so the terminal handles it (native scrolling/selection).
+    }
+
+    // Scroll mode owns the mouse too: a click must not reach the child while
+    // the user is reading the history.
+    if app.shell_scroll_mode {
+        return Ok(())
+    }
+
     match mouse.kind {
         MouseEventKind::Down(button) => {
             if !inside_area {
@@ -301,6 +376,8 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
             }
         },
 
+        // Shift+wheel and the scroll mode are handled before this match;
+        // otherwise the wheel is forwarded to the child like any other event.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown |
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
             if !inside_area {
@@ -337,7 +414,8 @@ pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
 
     if app.shell_pending_kill.is_some() ||
         app.shell_pending_kill_others.is_some() ||
-        app.shell_pending_kill_all.is_some()
+        app.shell_pending_kill_all.is_some() ||
+        app.shell_scroll_mode
     {
         return Ok(())
     }
@@ -498,10 +576,10 @@ impl App<'_> {
 
         // The view is supposed to point at `keep`, but never keep it pointing
         // at a session which is about to be dropped.
-        if let Some(attached) = self.selected_block.shell_id() {
-            if others.contains(&attached) {
-                detach(self);
-            }
+        if let Some(attached) = self.selected_block.shell_id()
+            && others.contains(&attached)
+        {
+            detach(self);
         }
 
         self.shell_sessions.close_many(&others);
@@ -561,7 +639,7 @@ impl App<'_> {
     /// the attached shell. Called once per main-loop iteration: the child may
     /// enable or disable them at any time.
     pub fn sync_terminal_modes(&mut self) {
-        let (mouse, paste) = match self
+        let (child_mouse, paste) = match self
             .selected_block
             .shell_id()
             .and_then(|id| self.shell_sessions.get(id))
@@ -573,6 +651,8 @@ impl App<'_> {
             },
             None => (MouseProtocolMode::None, false),
         };
+
+        let mouse = outer_mouse_mode(child_mouse, self.shell_scroll_mode);
 
         if mouse != self.outer_mouse_mode {
             let _ = set_outer_mouse_mode(mouse);
@@ -699,6 +779,24 @@ fn push_digit(app: &mut App, digit: char) {
     // produce a valid index.
     if app.shell_digits.len() >= width || value.saturating_mul(10) > max {
         app.commit_shell_digits();
+    }
+}
+
+/// Which mouse mode hire asks the outer terminal for.
+///
+/// The child's mode is kept as it is: when it enables mouse tracking its own
+/// wheel/clicks work (hire forwards them), and when it does not, hire captures
+/// nothing so the terminal's native wheel and text selection keep working.
+/// Only the scroll mode needs the wheel for hire itself, and then it asks for
+/// at least press reporting (a richer mode the child asked for is kept).
+fn outer_mouse_mode(
+    child: MouseProtocolMode,
+    scroll_mode: bool,
+) -> MouseProtocolMode {
+    if scroll_mode && child == MouseProtocolMode::None {
+        MouseProtocolMode::Press
+    } else {
+        child
     }
 }
 
@@ -969,6 +1067,124 @@ mod test {
         assert!(app.shell_pending_kill_others.is_none());
         assert!(app.selected_block.is_shell());
         assert_eq!(app.tab_list.current_tab().shells, vec![id]);
+    }
+
+    /// The prefix chord still works while the scroll mode is open: it leaves
+    /// the mode and arms the usual prefix command.
+    #[test]
+    fn test_prefix_leaves_the_scroll_mode() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('['), KeyModifiers::SHIFT);
+
+        assert!(app.shell_scroll_mode);
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+
+        assert!(!app.shell_scroll_mode);
+        assert!(app.shell_prefix_active);
+
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::empty());
+
+        assert!(!app.selected_block.is_shell());
+    }
+
+    /// hire only asks for the mouse when the child did, or while the history
+    /// is open (the wheel then belongs to hire).
+    #[test]
+    fn test_outer_mouse_mode_policy() {
+        use MouseProtocolMode::{AnyMotion, None as NoMouse, Press};
+
+        assert_eq!(outer_mouse_mode(NoMouse, false), NoMouse);
+        assert_eq!(outer_mouse_mode(NoMouse, true), Press);
+        assert_eq!(outer_mouse_mode(Press, false), Press);
+        assert_eq!(outer_mouse_mode(AnyMotion, true), AnyMotion);
+    }
+
+    fn wheel(up: bool, shift: bool) -> MouseEvent {
+        MouseEvent {
+            kind: if up {
+                MouseEventKind::ScrollUp
+            } else {
+                MouseEventKind::ScrollDown
+            },
+            column: 2,
+            row: 2,
+            modifiers: if shift {
+                KeyModifiers::SHIFT
+            } else {
+                KeyModifiers::empty()
+            },
+        }
+    }
+
+    fn feed(app: &App, id: ShellId, text: &str) {
+        let session = app.shell_sessions.get(id).unwrap();
+        session.parser().process(text.as_bytes());
+    }
+
+    /// A plain wheel is the child's when it enabled mouse tracking; `Shift`
+    /// gives it to hire and opens the scroll mode.
+    #[test]
+    fn test_wheel_goes_to_the_child_unless_shift() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+        app.shell_area = ratatui::layout::Rect::new(0, 0, 40, 10);
+        app.shell_sessions.get_mut(id).unwrap().resize(4, 20).unwrap();
+        feed(&app, id, "\x1b[?1000h");
+        feed(&app, id, "1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n");
+
+        // The child asked for the mouse: a plain wheel is forwarded, not
+        // scrolled by hire.
+        handle_view_mouse(wheel(true, false), &mut app).unwrap();
+
+        assert!(!app.shell_scroll_mode);
+        assert_eq!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback(), 0);
+
+        // Shift + wheel is hire's: it scrolls and opens the mode.
+        handle_view_mouse(wheel(true, true), &mut app).unwrap();
+
+        assert!(app.shell_scroll_mode);
+        assert!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback() > 0);
+    }
+
+    /// Without a mouse mode the child never gets the wheel, and with the
+    /// scroll mode open hire keeps it for itself.
+    #[test]
+    fn test_wheel_needs_shift_or_the_scroll_mode() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+        app.shell_area = ratatui::layout::Rect::new(0, 0, 40, 10);
+        app.shell_sessions.get_mut(id).unwrap().resize(4, 20).unwrap();
+        feed(&app, id, "1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n");
+
+        // No mouse mode, no scroll mode: the event is dropped (in a real
+        // terminal it never reaches hire).
+        handle_view_mouse(wheel(true, false), &mut app).unwrap();
+        assert!(!app.shell_scroll_mode);
+
+        // Open the mode: the wheel now scrolls freely, with or without Shift.
+        scroll::enter(&mut app, id);
+        handle_view_mouse(wheel(true, false), &mut app).unwrap();
+        assert!(app.shell_scroll_mode);
+        assert!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback() > 0);
     }
 
     /// Leaving the shell view re-reads the directory, so files the shell

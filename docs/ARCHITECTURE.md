@@ -4,12 +4,15 @@
 spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
 
 - **Language / edition:** Rust 2024 (`Cargo.toml`, package `hire`).
-- **TUI stack:** [`ratatui`](https://crates.io/crates/ratatui) 0.29 with
-  `crossterm` as the backend, plus `ratatui-image` for inline image preview.
+- **TUI stack:** [`ratatui`](https://crates.io/crates/ratatui) 0.30 with
+  `crossterm` as the backend, plus `ratatui-image` 10 for inline image preview
+  (built without the default `chafa` feature, so no system library is needed;
+  halfblocks fall back to the primitive renderer).
 - **Shell sessions:** `portable-pty` 0.9 (PTY, spawning, resize) and `vt100`
-  0.15 (parsing the shell's output into a screen buffer). `vt100` is held at
-  0.15 because 0.16+ requires `unicode-width 0.2.2`, while ratatui 0.29 pins
-  `unicode-width = "=0.2.0"`.
+  0.16 (parsing the shell's output into a screen buffer, including a scrollback
+  that can be paged through). `vt100` 0.16 requires `unicode-width 0.2.1+`,
+  which is why ratatui is 0.30 (`ratatui` 0.29 pinned `unicode-width = "=0.2.0"`
+  and `vt100` 0.15's scrollback could only show one screen of history).
 - **Supporting crates:** `clap` (CLI args), `toml_edit` (config files),
   `thiserror` + `anyhow` (errors), `chrono` (timestamps), `file-size`,
   `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`, `libc`
@@ -186,7 +189,9 @@ Responsibilities:
   preview; edit mode; keymap; loaded config; error queue; output settings;
   host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
-  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill` (one shell),
+  (`ShellPrefix`), `shell_prefix_active`, `shell_scroll_mode` (the viewport is
+  scrolled back, so the scroll bindings own the keys and the mouse),
+  `shell_pending_kill` (one shell),
   `shell_pending_kill_others` (the shell which stays, every other one of its tab
   is killed) and `shell_pending_kill_all` (a tab id; every shell of that tab),
   `shell_digits` and `shell_digit_deadline` (numbered selection), `clear_screen`
@@ -223,7 +228,18 @@ Responsibilities:
 **`app/image_preview.rs`** — wraps `ratatui-image`'s `Picker` and
 `ThreadProtocol`; spawns a decode thread and a resize/encode thread and returns
 receivers to the main loop. `ImagePreview::useless` tells the loop whether there
-is anything to render.
+is anything to render. The picker is queried once at startup (`CSI 16t` gives the
+cell size used both for the preview and for the shells' kitty pixel size);
+`Picker` is not `Copy`, so the accessors borrow it.
+
+The preview itself is drawn by `ui/child_block.rs`: `StatefulImage` (the
+replacement of the old `ThreadImage`) renders into `block.inner(layout)`, and
+`pin_image_cells` then marks every cell whose symbol contains an escape
+sequence with `CellDiffOption::ForcedWidth(1)`. This is required on ratatui
+0.30: `Buffer::diff` derives a cell's width from its symbol, and a kitty/iTerm2/
+sixel row symbol embeds the whole image row, so without the forced width the
+diff skips the rest of the screen (only part of the image is drawn and the
+following cells/layout are not updated).
 
 **`app/macro_utils.rs`** — `Macro` keeps the recorded `KeyEvent` sequence, an
 optional list of `MacroTarget { dir, name }` (used to apply a macro to every
@@ -264,7 +280,7 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 | --- | --- |
 | `config/mod.rs` | Locate/read/write `auto_config.toml` and `user_config.toml`, `init_config`, and the `option_get!` macro. |
 | `config/types.rs` | `Config` / `ConfigValue` / `AppConfig`: typed user settings and defaults. |
-| `config/keymap.rs` | `Keymap` (normal/edit/navi maps) and `keymap.toml` loading. |
+| `config/keymap.rs` | `Keymap` (normal/edit/navi maps plus the shell scroll bindings) and `keymap.toml` loading. |
 
 **`config/mod.rs`** — config lives in `~/.config/springhan/hire/` (override it
 with the `HIRE_CONFIG_DIR` environment variable, which keeps tests and
@@ -294,9 +310,16 @@ create the matching file names; see §6, "Dev config filenames".
 `Item`. `AppConfig` is the collection stored on `App`.
 
 **`config/keymap.rs`** — `Keymap` keeps three `HashMap<char, AppCommand>`
-(normal, edit, navi index). `init_keymap` reads `keymap.toml`; `insert_keybinding`
+(normal, edit, navi index) and two ordered `Vec<(KeySpec, ScrollCommand)>` for the
+attached shell view. `init_keymap` reads `keymap.toml`; `insert_keybinding`
 routes each command into the correct map(s) (e.g. navi-input keys, edit-mode-only
-keys, commands available everywhere).
+keys, commands available everywhere). The optional `shell_scroll` and
+`shell_scroll_mode` arrays put a small DSL of scroll commands (`scroll up`,
+`scroll page down`, `scroll top`, `scroll quit`, …) on full key specs
+(`M-u`, `C-b`, `PageUp`, …); they start from built-in defaults (`M-u`/`M-e`,
+`k`/`j`/`PgUp`/`PgDn`/`g`/`G`/`q`/…), and a file entry replaces the binding of
+the same key so a single key can be remapped. `shell_scroll_label` exposes the
+first binding of each command for the status-line hint.
 
 ### `src/error/` — errors
 
@@ -333,9 +356,10 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries and forwards placeholder image transmissions to the real terminal. |
 | `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter, write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
-| `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
-| `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. |
+| `key_event/shell/input.rs` | `KeySpec` (key + modifiers parsed from `C-s`/`M-u`/`PageUp`/…), `ShellPrefix` (built on `KeySpec`), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
+| `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s [` scroll mode), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
+| `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
 | `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create and kill the shells of the current tab; `D` clears every shell of the tab after a y/N confirmation. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
@@ -520,11 +544,11 @@ hidden flag and selection, never shells.
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
 | `ui/parent_block.rs` | Renders the parent-directory column. |
 | `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list). |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview; image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
-| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen and its status line; the right-hand key hint is only shown while the prefix is active (or a prompt/notice needs it). |
+| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line; the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
@@ -554,11 +578,15 @@ drawn area and copies every `vt100::Cell` into the ratatui buffer (fg/bg
 colours, bold/italic/underline/inverse; wide-cell continuations are skipped).
 A blank cell is written as a real space: `vt100::Cell::contents()` is empty for
 cleared cells and an empty symbol would not erase the old character on the
-outer terminal. The cursor is placed with `Frame::set_cursor_position`. `shell_status_lines`
-builds the shell's left/right status text (the program running in the shell —
-`vim` while vim is open, the shell's own name at its prompt — its start
-directory, position, prefix hint, the pending single-shell/kill-all prompt,
-typed shell number, or `shell_notice`).
+outer terminal. `screen.cell()` follows the scrollback offset set by
+`key_event/shell/scroll.rs`, so the same loop renders the history; the child's
+cursor is only placed with `Frame::set_cursor_position` while the offset is 0.
+`shell_status_lines` builds the shell's left/right status text (the program
+running in the shell — `vim` while vim is open, the shell's own name at its
+prompt — its start directory, position, prefix hint, the scroll-mode hint
+`SCROLL n` with the configured key labels, the pending
+single-shell/kill-all/kill-others prompt, typed shell number, or
+`shell_notice`).
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
 line (permission/owner/size/link info on the left and, on the right, the
@@ -684,10 +712,20 @@ spawn_shell (`S`) / --working-directory
                  │    (App::close_tab_shells) and returns to the browser
                  ├─ `C-s o` → prompt; `y` kills the tab's other shells and
                  │    keeps the attached one (App::close_other_shells)
-                 ├─ mouse events → encode_mouse (child's mode/encoding) → PTY
+                 ├─ `C-s [` → scroll mode: the `shell_scroll_mode` bindings
+                 │    (k/j, PgUp/PgDn, g/G, q/Esc…) move vt100's scrollback
+                 │    offset; scrolling back to the bottom leaves the mode
+                 ├─ `M-u` / `M-e` (shell_scroll) → scroll without the mode;
+                 │    scrolling up enters it
+                 ├─ wheel events → forwarded to the child (vim/less keep
+                 │    their own mouse scrolling) unless `Shift` is held or
+                 │    the scroll mode is open: then they scroll hire's history
+                 ├─ mouse events → encode_mouse (child's mode/encoding) → PTY;
+                 │    ignored while the scroll mode is open
                  ├─ paste events → encode_paste (bracketed if the child asked) → PTY
                  ├─ sync_terminal_modes: outer mouse capture + bracketed paste
-                 │    are enabled only while this shell asks for them
+                 │    are enabled only while this shell asks for them; the
+                 │    scroll mode asks for press reporting so its wheel works
                  └─ shell exits → handle_shell_events reaps it, removes the id
                       from the tab and attaches the next live shell; when there
                       is none it detaches, which also refreshes the browser
@@ -810,10 +848,13 @@ binary) and return early when `/bin/sh` does not exist; they need no network and
 no installed binary. They are
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
-kill-all, `C-s o` kill-others, detach refresh), `key_event::shell::menu::test::*`
-(the shell menu's `D` confirmation), `ui::shell_block::test::*` (the idle status
-line and the prefix hint) and `key_event::tab::utils::test::*` (tab-removal
-confirmations).
+kill-all, `C-s o` kill-others, detach refresh), `key_event::shell::scroll::test::*`
+(scrolling, paging, top/bottom, wheel, leaving at the bottom),
+`key_event::shell::input::test::*` (`KeySpec` parsing/labels, `shell_prefix`),
+`config::keymap::test::*` (the default scroll bindings and the `keymap.toml`
+sections), `key_event::shell::menu::test::*` (the shell menu's `D`
+confirmation), `ui::shell_block::test::*` (the idle status line and the prefix
+hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

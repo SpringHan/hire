@@ -75,6 +75,39 @@ keymap = [
 ]
 ```
 
+#### Shell scroll keys
+
+Two extra arrays bind the keys of the attached shell view (see "Shell Sessions").
+Unlike `keymap`, their `key` values are full key specs: a single character, an
+optional modifier (`C-`, `M-`, `S-`) and a named key (`Up`, `PageUp`, `Esc`,
+`Enter`, `F5`, …), e.g. `"M-u"`, `"C-b"`, `"PageUp"`.
+
+```toml
+# Keys which scroll the shell history instead of being sent to the shell.
+shell_scroll = [
+    { key = "M-u", run = "scroll up"   },
+    { key = "M-e", run = "scroll down" },
+]
+
+# Keys of the scroll mode (`C-s [`).
+shell_scroll_mode = [
+    { key = "k",        run = "scroll up"        },
+    { key = "j",        run = "scroll down"      },
+    { key = "PageUp",   run = "scroll page up"   },
+    { key = "PageDown", run = "scroll page down" },
+    { key = "g",        run = "scroll top"       },
+    { key = "G",        run = "scroll bottom"    },
+    { key = "q",        run = "scroll quit"      },
+]
+```
+
+The commands are `scroll up`, `scroll down`, `scroll page up`,
+`scroll page down`, `scroll top`, `scroll bottom` and `scroll quit`. The
+defaults listed above (plus the arrow keys, `C-p`/`C-n`/`C-b`/`C-f`,
+`Home`/`End`, `Esc` and `Enter`) stay in place when a section is missing; an
+entry for a key which already has a default replaces that binding, so a single
+key can be remapped without repeating the whole list.
+
 ## Shell arguments
 
 You can get the arguments by:
@@ -168,17 +201,25 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 | `C-s x` | Kill the attached shell (press `y` to confirm) |
 | `C-s D` | Kill every shell mounted on the current tab (press `y` to confirm) |
 | `C-s o` | Kill every **other** shell of the tab and keep the attached one (press `y` to confirm) |
+| `C-s [` | Enter the scroll mode: browse the shell's output history |
 | `C-s C-s` | Send a literal `C-s` to the shell |
+
+- **Scrollback.** Commands which print more than one screen (`ls -la`, `tree`, build logs, …) stay readable:
+  - `C-s [` enters the scroll mode. The status line then shows `SCROLL <n>` and the configured keys; `PageUp`/`PageDown` (or `C-b`/`C-f`) page, `k`/`j` (or `↑`/`↓`, `C-p`/`C-n`) move one line, `g`/`Home` jumps to the oldest line and `G`/`End` returns to the bottom. `q`, `Esc` or `Enter` also return to the live screen. Scrolling back to the bottom leaves the mode automatically.
+  - The prefix chord still works while scrolled: `C-s` leaves the mode and arms the prefix, so `C-s d`, `C-s x`, … behave as usual.
+  - Without entering the mode, `Alt+u` scrolls up and `Alt+e` scrolls down. Scrolling up enters the mode (so the keys no longer reach the shell); scrolling down to the bottom leaves it.
+  - Both key sets are configurable in `keymap.toml` (`shell_scroll` and `shell_scroll_mode`, see below); the defaults are `M-u`/`M-e` and the keys listed above. The status-line hint is built from the configured bindings.
+- Mouse and pasted text:
+  - **The wheel belongs to the program in the shell by default.** When it enabled mouse tracking (`vim`, `less`, `htop`, …) hire forwards wheel, click and drag events to it, so its own mouse scrolling keeps working; when it did not, hire does not capture the mouse at all, so the terminal's native wheel and drag-selection work as usual (no `Shift` needed).
+  - **`Shift` + wheel is hire's**: it enters the scroll mode (or scrolls it when it is already open). This needs hire to receive the wheel, i.e. either the program enabled mouse tracking or the scroll mode is open; with no mouse reporting the terminal handles the wheel itself, so use `C-s [` or `Alt+u` instead.
+  - **In the scroll mode hire captures the mouse**, so the wheel scrolls the history freely regardless of the program's mouse mode; leaving the mode (or reaching the bottom) releases the mouse again. Drag-selection needs `Shift` only while a program inside the shell has asked for the mouse (the terminal's usual override).
+  - When the program enables bracketed paste (`ESC[?2004h`), a paste arrives as a single bracketed paste, preserving newlines and CJK text. A paste while the scroll mode is open is ignored (press `q` first).
+  - Focus events are not forwarded.
 
 - Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.
 - The title bar shows how many shells the current tab has (`|1:2|` means tab 1 has two shells) and the attached shell's position (`SH 2/3`).
 - Leaving the shell view — `C-s d` or the shell exiting — returns to the browser and re-reads the current directory, so files the shell created, renamed or deleted show up immediately (the selected file is kept). The same happens when a shell is killed and there is no shell left to attach.
 - Images painted by a TUI inside a mounted shell (for example `yazi` previews) are shown when the terminal speaks the **kitty graphics protocol**: hire answers the program's terminal queries and forwards the image data, and the program's own unicode placeholders place it on screen. Programmes that fall back to sixel/iTerm2 images, and hire running inside tmux, keep the old behaviour (the image is not shown inside the shell).
-- Mouse and pasted text are forwarded like a normal terminal:
-  - When the program inside the shell enables mouse tracking, hire captures the mouse and forwards clicks, drags and the wheel (in the protocol/encoding the program asked for). Hold `Shift` while dragging to use your terminal's own text selection.
-  - When the program enables bracketed paste (`ESC[?2004h`), a paste arrives as a single bracketed paste, preserving newlines and CJK text.
-  - Focus events are not forwarded.
-
 `default_shell` selects the program, and `shell_prefix` changes the prefix chord:
 
 ```toml

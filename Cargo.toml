@@ -7,9 +7,9 @@ edition = "2024"
 
 [dependencies]
 # Core Basic deps
-ratatui = "0.29"
-ratatui-image = "5"
-ansi-to-tui = "7"
+ratatui = "0.30"
+ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }  # no libchafa
+ansi-to-tui = "8"
 chrono = { version = "0.4.31", features = ["alloc", "std"] }
 clap = { version = "~4.5", features = ["derive"]}
 thiserror = "~2.0"
@@ -26,9 +26,9 @@ image = "0.25.5"
 
 # Shell sessions
 portable-pty = "0.9"
-# 0.15 is the newest line that does not conflict with ratatui 0.29's
-# `unicode-width = "=0.2.0"` pin.
-vt100 = "0.15"
+# 0.16 is the first line with a working scrollback (offset > rows no longer
+# underflows); it needs unicode-width 0.2.1+, which is why ratatui is 0.30.
+vt100 = "0.16"
 
 [profile.release]
 opt-level = 's'

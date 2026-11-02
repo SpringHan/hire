@@ -57,6 +57,8 @@ pub use cursor_movement::{move_cursor, Goto, NaviIndex};
 pub use shell::{
     ShellCommand,
     CommandStr,
+    KeySpec,
+    ScrollCommand,
     ShellPrefix,
     ShellSessions,
     handle_view_mouse,

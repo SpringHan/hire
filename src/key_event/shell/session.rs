@@ -101,7 +101,7 @@ impl ShellSession {
             let mut parser = self.parser();
 
             if parser.screen().size() != (rows, cols) {
-                parser.set_size(rows, cols);
+                parser.screen_mut().set_size(rows, cols);
             }
         }
 

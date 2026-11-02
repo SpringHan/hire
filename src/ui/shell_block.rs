@@ -11,7 +11,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::{
+    app::App,
+    key_event::ScrollCommand,
+    utils::ShellId,
+};
 
 use super::utils::shorten_path;
 
@@ -62,7 +66,7 @@ pub fn render_shell(
                     // character which used to be there would stay on screen.
                     // A real space must be written to erase it.
                     if cell.has_contents() {
-                        target.set_symbol(&cell.contents());
+                        target.set_symbol(cell.contents());
                     } else {
                         target.set_symbol(" ");
                     }
@@ -73,7 +77,9 @@ pub fn render_shell(
         }
     }
 
-    if !screen.hide_cursor() {
+    // While the history is shown the child's cursor is somewhere on the live
+    // screen, not in the viewport; drawing it there would be wrong.
+    if !screen.hide_cursor() && screen.scrollback() == 0 {
         let (row, col) = screen.cursor_position();
 
         if row < area.height && col < area.width {
@@ -158,11 +164,16 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
             ),
             Style::default().yellow().add_modifier(Modifier::BOLD),
         ))
+    } else if app.shell_scroll_mode {
+        Some((
+            scroll_hint(app, session_offset(app, id)),
+            Style::default().yellow().add_modifier(Modifier::BOLD),
+        ))
     } else if app.shell_prefix_active {
         Some((
             String::from(
                 "PREFIX  d: detach  n/p: switch  c: new  x: kill  \
-                 D: kill all  o: kill others",
+                 D: all  o: others  [: scroll",
             ),
             Style::default().cyan().add_modifier(Modifier::BOLD),
         ))
@@ -184,6 +195,45 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+/// How many lines above the live screen the attached shell is scrolled.
+fn session_offset(app: &App, id: ShellId) -> usize {
+    app.shell_sessions
+        .get(id)
+        .map(|session| session.parser().screen().scrollback())
+        .unwrap_or(0)
+}
+
+/// The scroll mode's status hint, built from the configured bindings so a
+/// remapped key is shown instead of the default one.
+fn scroll_hint(app: &App, offset: usize) -> String {
+    let label = |command| app.keymap.shell_scroll_label(command);
+    let mut parts = vec![format!("SCROLL {offset}")];
+
+    if let (Some(up), Some(down)) =
+        (label(ScrollCommand::Up), label(ScrollCommand::Down))
+    {
+        parts.push(format!("{up}/{down}: line"));
+    }
+
+    if let (Some(up), Some(down)) =
+        (label(ScrollCommand::PageUp), label(ScrollCommand::PageDown))
+    {
+        parts.push(format!("{up}/{down}: page"));
+    }
+
+    if let (Some(top), Some(bottom)) =
+        (label(ScrollCommand::Top), label(ScrollCommand::Bottom))
+    {
+        parts.push(format!("{top}/{bottom}: top/bottom"));
+    }
+
+    if let Some(quit) = label(ScrollCommand::Quit) {
+        parts.push(format!("{quit}: back"));
+    }
+
+    parts.join("  ")
 }
 
 fn cell_style(cell: &vt100::Cell) -> Style {
@@ -269,6 +319,7 @@ mod test {
             .collect::<String>();
 
         assert!(hint.contains("d: detach"));
-        assert!(hint.contains("o: kill others"));
+        assert!(hint.contains("o: others"));
+        assert!(hint.contains("[: scroll"));
     }
 }

@@ -101,6 +101,10 @@ pub struct App<'a> {
     /// The prefix chord has been pressed; the next key is a shell command.
     pub shell_prefix_active: bool,
 
+    /// The attached shell's scrollback owns the keys: the configured
+    /// `shell_scroll_mode` bindings scroll instead of being forwarded.
+    pub shell_scroll_mode: bool,
+
     /// A kill confirmation is waiting for `y`.
     pub shell_pending_kill: Option<ShellId>,
 
@@ -202,6 +206,7 @@ impl<'a> Default for App<'a> {
             shell_sessions: ShellSessions::default(),
             shell_prefix: ShellPrefix::default(),
             shell_prefix_active: false,
+            shell_scroll_mode: false,
             shell_pending_kill: None,
             shell_pending_kill_others: None,
             shell_pending_kill_all: None,

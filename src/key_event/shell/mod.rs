@@ -9,6 +9,7 @@ mod session;
 mod view;
 mod menu;
 mod mouse;
+mod scroll;
 
 pub use types::*;
 pub use utils::*;
@@ -18,6 +19,7 @@ pub use session::*;
 pub use view::*;
 pub use menu::*;
 pub use mouse::*;
+pub use scroll::ScrollCommand;
 
 use crate::{
     config::{Config, ConfigValue},

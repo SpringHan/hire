@@ -72,9 +72,13 @@ A detachable shell therefore needs, per session:
 ```toml
 portable-pty = "0.9"
 
-# 0.15 is the newest vt100 line that does not conflict with ratatui 0.29's
-# `unicode-width = "=0.2.0"` pin.
-vt100 = "0.15"
+# 0.16 is the first vt100 line whose scrollback works for offsets larger than
+# one screen; it needs unicode-width 0.2.1+, hence ratatui 0.30 below.
+vt100 = "0.16"
+
+ratatui = "0.30"
+ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }
+ansi-to-tui = "8"
 ```
 
 - `portable-pty` — PTY creation, spawning, resize (`ioctl(TIOCSWINSZ)`, which
@@ -84,14 +88,22 @@ vt100 = "0.15"
   italic, underline, inverse, wide-cell flags). It also models the alternate
   screen, so full-screen programs (vim, htop, lazygit) work.
 
-Both are available on the configured mirror (`portable-pty 0.9.0`,
-`vt100 0.15.2`). `vt100 0.15` uses plain `u16` sizes:
+`vt100 0.16.2` uses plain `u16` sizes but moved `set_size`/`set_scrollback`
+onto `Screen` (hence `parser.screen_mut()`), and `Cell::contents` returns
+`&str`:
 
 ```rust
-let parser = vt100::Parser::new(rows.max(1), cols.max(1), SCROLLBACK_ROWS);
-parser.set_size(rows.max(1), cols.max(1));
+let mut parser = vt100::Parser::new(rows.max(1), cols.max(1), SCROLLBACK_ROWS);
+parser.screen_mut().set_size(rows.max(1), cols.max(1));
 parser.process(&bytes);
+parser.screen_mut().set_scrollback(offset);      // scrollback, 0 = live
+parser.screen().cell(row, col);                  // follows the offset
 ```
+
+`ratatui` 0.30 is required because 0.29 pins `unicode-width = "=0.2.0"` while
+`vt100` 0.16 needs 0.2.1+; `ratatui-image` 10 is the line which supports
+ratatui 0.30 (built without its default `chafa` feature), and `ansi-to-tui` 8
+is the matching release.
 
 `vt100::Parser` is `Send` (no `Rc`/`RefCell` inside), so the reader thread can
 own a clone of it behind a `Mutex`.
@@ -583,8 +595,9 @@ impl App<'_> {
   push the new id onto `current_tab().shells`, set `active_shell`, then
   `attach`.
 - `attach`: fail if the session is missing or dead; clear `switch_case`, command
-  line/expand/completion state, `shell_prefix_active`, `shell_pending_kill`,
-  `shell_pending_kill_others`, `shell_pending_kill_all`; set
+  line/expand/completion state, `shell_prefix_active`, `shell_scroll_mode`,
+  `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`;
+  reset the shell's scrollback offset to the live screen; set
   `selected_block = Block::Shell(id)`; set `active_shell`; set
   `app.clear_screen = true`.
 - `detach`: clear the prefix/pending state, set
@@ -613,6 +626,38 @@ impl App<'_> {
   `App::close_other_shells(tab_id, keep)`, which closes the other sessions,
   leaves `Tab.shells == [keep]` and keeps the view attached to it. With a single
   shell the key is a no-op (there is nothing to kill), so no prompt appears.
+- `[` (inside the prefix) enters the **scroll mode** (`scroll::enter`): the
+  viewport moves to the live screen and `shell_scroll_mode` is set, so the keys
+  come from `keymap.toml`'s `shell_scroll_mode` (default `k`/`j`, `↑`/`↓`,
+  `C-p`/`C-n`, `PageUp`/`PageDown`, `C-b`/`C-f`, `g`/`Home`, `G`/`End`,
+  `q`/`Esc`/`Enter`) and every key is swallowed instead of being forwarded. The
+  prefix chord is the one exception: it leaves the mode and arms
+  `shell_prefix_active`, so the next key is the usual prefix command (`C-s d`,
+  `C-s x`, … keep working after scrolling). The mode is not a separate buffer:
+  `scroll::apply` only moves `vt100`'s scrollback offset
+  (`Screen::set_scrollback`) and `set_mode` derives `shell_scroll_mode` from it,
+  so new output keeps the viewport anchored (`vt100` increments the offset on
+  scroll while it is non-zero) and reaching the bottom leaves the mode
+  automatically.
+- `scroll.rs` exposes `ScrollCommand` (`up`, `down`, `page up`, `page down`,
+  `top`, `bottom`, `quit`), `enter`, `leave`, `apply` and `handle_wheel`. The
+  page size is `shell_area.height - 1`; a wheel notch is three lines.
+- `M-u` / `M-e` (the `shell_scroll` keys, checked before forwarding but after
+  the prefix) scroll without entering the mode first; scrolling up enters it.
+- `sync_terminal_modes` asks the outer terminal for exactly the child's mouse
+  mode (via `outer_mouse_mode`), so a plain shell keeps the terminal's native
+  wheel and drag-selection and a program which enabled mouse tracking gets its
+  events forwarded. The only exception is the scroll mode: while it is open
+  hire asks for at least `Press` reporting (a richer child mode is kept) so the
+  wheel reaches it. Leaving the mode restores the child's mode/none, which
+  gives the mouse back to the terminal.
+- The wheel is part of the child's input by default: `handle_view_mouse`
+  forwards it through `encode_mouse` like any other event, so `vim`, `less` and
+  `htop` keep their own mouse scrolling. `Shift`+wheel (the terminal's modifier
+  is kept in `MouseEvent::modifiers`) and every wheel while the scroll mode is
+  open are hire's instead: they call `scroll::handle_wheel` and are not
+  forwarded. With no mouse reporting the terminal never sends the wheel, so
+  Shift+wheel cannot arrive; `C-s [` or `M-u` is the way in.
 - `close_tab_shells` is the single place which clears a tab's shells: it
   detaches when the attached shell belongs to the tab, closes every session and
   clears `Tab.shells` / `Tab.active_shell`. The shell menu's `D`, the shell
@@ -759,7 +804,7 @@ pub fn render_shell(app: &mut App, frame: &mut Frame, area: Rect) -> anyhow::Res
                     // be written or crossterm prints nothing and the old
                     // character survives on the outer terminal.
                     if cell.has_contents() {
-                        target.set_symbol(&cell.contents());
+                        target.set_symbol(cell.contents());
                     } else {
                         target.set_symbol(" ");
                     }
@@ -769,13 +814,19 @@ pub fn render_shell(app: &mut App, frame: &mut Frame, area: Rect) -> anyhow::Res
         }
     }
 
-    if !screen.hide_cursor() {
+    // The child's cursor belongs to the live screen; while the history is
+    // shown it is not part of the viewport.
+    if !screen.hide_cursor() && screen.scrollback() == 0 {
         let (row, col) = screen.cursor_position();
         frame.set_cursor_position((area.x + col, area.y + row));
     }
     Ok(())
 }
 ```
+
+`Screen::cell()` follows the scrollback offset (`vt100` 0.16's
+`visible_cell`), so the same loop draws the history; only the cursor needs the
+guard above.
 
 `style_of` maps `vt100::Color::{Default, Idx, Rgb}` to
 `ratatui::style::Color::{Reset, Indexed, Rgb}` and the cell's
@@ -809,14 +860,18 @@ while vim owns the terminal, `bash` at the prompt), start directory, tab
 ordinal (`[2/3]`). Right: **nothing at all in the idle state** — the hint is
 only rendered once `shell_prefix` has been pressed, so an attached shell looks
 like a plain terminal and the bottom-right corner stays free. The right line is
-`PREFIX d: detach  n/p: switch  c: new  x: kill  D: kill all  o: kill others`
-while `shell_prefix_active` is set; `Shell #N` while digits are being typed;
-`Kill shell "vim"? (y/N)` while `shell_pending_kill` is set (the same display
-name); `Kill all N shell(s) of this tab? (y/N)` while `shell_pending_kill_all`
-is set; `Kill N other shell(s)? (y/N)` while `shell_pending_kill_others` is
-set; and an application error while `shell_notice` is set. `shell_status_lines`
-returns a one-element vector when there is no hint, which `StateLine` renders
-as a left-only line.
+`PREFIX d: detach  n/p: switch  c: new  x: kill  D: all  o: others  [: scroll`
+while `shell_prefix_active` is set; `SCROLL n  k/j: line  PgUp/PgDn: page
+g/G: top/bottom  q: back` while `shell_scroll_mode` is set — the key labels are
+taken from the configured `shell_scroll_mode` bindings
+(`Keymap::shell_scroll_label`), so a remapped key is shown instead of the
+default one; `Shell #N` while digits are being typed; `Kill shell "vim"?
+(y/N)` while `shell_pending_kill` is set (the same display name); `Kill all N
+shell(s) of this tab? (y/N)` while `shell_pending_kill_all` is set; `Kill N
+other shell(s)? (y/N)` while `shell_pending_kill_others` is set; and an
+application error while `shell_notice` is set. `shell_status_lines` returns a
+one-element vector when there is no hint, which `StateLine` renders as a
+left-only line.
 
 `StateLine` (`ui/command_line.rs`) is already public and reusable.
 
@@ -967,6 +1022,36 @@ Wiring:
 - `App::default` initialises `ShellPrefix::default()` so a broken user config
   never prevents startup.
 
+### Scroll keys (`keymap.toml`)
+
+The two arrays live in `keymap.toml`, not in `user_config.toml`, because they
+are key bindings like the rest of that file:
+
+```toml
+# Keys which scroll while the shell is live (defaults shown).
+shell_scroll = [
+    { key = "M-u", run = "scroll up"   },
+    { key = "M-e", run = "scroll down" },
+]
+
+# Keys of the scroll mode (since `vt100` 0.16 can page the whole history).
+shell_scroll_mode = [
+    { key = "k",      run = "scroll up"        },
+    ...
+    { key = "q",      run = "scroll quit"      },
+]
+```
+
+- `KeySpec` (`key_event/shell/input.rs`) parses the `key` value: a character, an
+  optional `C-`/`M-`/`S-` prefix and a named key (`Up`, `PageUp`, `Esc`,
+  `Enter`, `F5`, …). An uppercase character implies `SHIFT`, matching what the
+  terminal reports.
+- `ScrollCommand::from_str` accepts `scroll up`, `scroll down`, `scroll page
+  up`, `scroll page down`, `scroll top`, `scroll bottom` and `scroll quit`.
+- The defaults are built into `Keymap::default()`, so an older `keymap.toml`
+  without the sections keeps working; a file entry replaces the binding of the
+  same key and leaves the other defaults in place.
+
 No other configuration is required: shell program, GUI commands and file reader
 keep their existing options.
 
@@ -985,14 +1070,15 @@ Do not flip the block back just to run a harness.
 
 | File | Change |
 | --- | --- |
-| `Cargo.toml` | `portable-pty = "0.9"`, `vt100 = "0.15"` |
+| `Cargo.toml` | `portable-pty = "0.9"`, `vt100 = "0.16"`, `ratatui = "0.30"`, `ratatui-image = "10"` (no default features: no `chafa`), `ansi-to-tui = "8"` |
 | `src/utils/types.rs` | `ShellId`; `Block::Shell(ShellId)`; `Block::is_shell()` / `Block::shell_id()` |
 | `src/key_event/shell/pty.rs` *(new)* | `PtyProcess` (spawn with the pixel size, reader thread through the graphics filter, write, resize, kill + reap) |
 | `src/key_event/shell/graphics.rs` *(new)* | `GraphicsSupport`, `GraphicsEvent`, `GraphicsFilter` (kitty APC splitting, query answers, image forwarding and delete translation) |
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions`; the graphics event channel and `drain_graphics` |
-| `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key`, `encode_paste` |
+| `src/key_event/shell/input.rs` *(new)* | `KeySpec` (key + modifiers, parsed from `M-u`/`C-b`/`PageUp`/…), `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach` (resets the scrollback), `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`, `C-s [`, the `shell_scroll` keys), `handle_view_mouse` (wheel forwarded by default, `Shift`+wheel and the scroll mode scroll the history; `outer_mouse_mode` capture policy), `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/scroll.rs` *(new)* | `ScrollCommand`, `enter`, `leave`, `apply`, `handle_wheel`: moves `vt100`'s scrollback offset and derives `shell_scroll_mode` from it |
 | `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message; `n`/`x`/digits and `D` (clear every shell of the tab, with a y/N confirmation) |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
@@ -1000,16 +1086,17 @@ Do not flip the block back just to run a harness.
 | `src/key_event/tab/utils.rs` | migrate every mutation site; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts. Clearing the shells of a tab without removing it is not a tab action anymore: it lives in the shell menu (`T`, `D`) |
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
-| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_scroll_mode`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
 | `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes` + `handle_shell_graphics`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/app/image_preview.rs` | `protocol_type` / `font_size` accessors (the shell graphics support is derived from the detected protocol and cell size) |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
 | `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
 | `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
+| `src/config/keymap.rs` | the `shell_scroll` / `shell_scroll_mode` arrays, their defaults, `ScrollCommand` parsing and `shell_scroll_label` |
 | `src/ui/mod.rs` | shell-view branch; title badge; records `shell_area` |
-| `src/ui/shell_block.rs` *(new)* | screen renderer + status line (prefix hint only while the prefix is active; digits/kill prompt/notice) |
+| `src/ui/shell_block.rs` *(new)* | screen renderer (scrollback-aware, cursor only on the live screen) + status line (prefix hint only while the prefix is active; scroll-mode hint built from the configured keys; digits/kill prompt/notice) |
 | `src/ui/command_line.rs` | `Block::Shell` arm (reuses `StateLine`) |
-| `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding |
+| `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding; `shell_scroll` and `shell_scroll_mode` sections |
 | `README.md`, `docs/ARCHITECTURE.md` | user docs and architecture docs (§16) |
 
 Exhaustive `match` sites the compiler will point at when `Block::Shell` is
@@ -1054,11 +1141,20 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Clear a tab's shells from the shell menu (`T`, `D`) | the menu asks (`Kill all N shell(s) of this tab? (y/N)`); `y` keeps the tab and empties its shell list, then shows the shell menu again |
 | Idle shell view | the status line's right side is empty; the prefix hint appears only after `shell_prefix` is pressed |
 | Close/delete a tab, close other tabs, restore a stored group | asks first only when the tabs which would lose shells actually have some; `y` performs it, any other key returns to the tab menu |
-| Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; events are re-encoded for the child's mode/encoding |
-| Mouse disabled by the child / detach / quit | outer capture is disabled; a half-tracked drag is reset |
+| Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; wheel, clicks and drags are re-encoded for the child's mode/encoding (its own wheel scrolling keeps working) |
+| Mouse disabled by the child | no mouse reporting is enabled, so the terminal's wheel and drag-selection work natively; hire never sees those events |
+| `Shift` + wheel | hire's: it scrolls the history (entering the scroll mode) instead of forwarding, when the event reaches hire (child mouse mode or scroll mode open) |
+| Scroll mode open | `Press` reporting is enabled even if the child did not ask, so the wheel scrolls the history freely; clicks are ignored; leaving the mode restores the child's mode |
+| Detach / quit | outer capture is disabled; a half-tracked drag is reset |
 | Mouse press on title or status line | ignored; a drag/release which started inside is clamped to the shell area |
 | Child enables bracketed paste | outer `?2004h` is set; a paste is forwarded as one bracketed paste |
-| Focus events | not enabled and not forwarded |
+| Paste while the scroll mode is open | ignored; the keys are hire's until `q`/`Esc` (or scrolling to the bottom) |
+| Scroll up (`M-u`, `Shift`+wheel, `C-s [` + `k`) | the viewport moves into `vt100`'s scrollback; `shell_scroll_mode` is on, so the keys no longer reach the shell |
+| New output while scrolled back | `vt100` keeps the viewport on the same lines (the offset grows), so the history does not jump |
+| Scrolling down to the bottom | the offset reaches 0 and the mode closes on its own; the keys and the wheel are the shell's again |
+| Resize while scrolled back | `Screen::set_size` keeps the offset; the renderer shows the history at the new width |
+| Full-screen program (`vim`, `htop`) | it runs on `vt100`'s alternate screen, which has no history: `C-s [` shows `SCROLL 0` and `q` returns |
+| `C-s d`/`C-s x`… while scrolled back | the prefix chord leaves the scroll mode and arms the prefix, so the next key runs the usual prefix command |
 
 ---
 
@@ -1083,9 +1179,13 @@ the shell status line). Everything else matches with `if let` or `_`.
     and an "Images inside a shell" flow.
   - §5: this document.
   - §6 test notes: the in-memory graphics filter tests.
-- `keymap_config/{default,colemak}.toml`: `shell_menu` line.
+- `keymap_config/{default,colemak}.toml`: `shell_menu` line, and the
+  `shell_scroll` / `shell_scroll_mode` arrays with comments.
+- `README.md`: the scrollback keys, the `shell_scroll`/`shell_scroll_mode`
+  sections of `keymap.toml`, and the mouse-capture/`Shift` note.
 - `Cargo.toml` dependency list in §1 of `ARCHITECTURE.md` (`portable-pty`,
-  `vt100`).
+  `vt100` 0.16, `ratatui` 0.30, `ratatui-image` 10, `ansi-to-tui` 8) and the
+  reason for the ratatui upgrade (`unicode-width`).
 
 ---
 
@@ -1098,11 +1198,12 @@ the shell status line). Everything else matches with `if let` or `_`.
 | 2 | Shell menu, tab badges, kill/quit confirmations, `shell_prefix` config, sudo/storage/quit edge cases | done |
 | 2b | Mouse forwarding (4 tracking modes × 3 encodings) and bracketed paste; outer mode sync | done |
 | 2c | Images painted by a TUI inside a shell: kitty query answers, placeholder image passthrough, pixel size in the PTY | done (kitty terminals only) |
-| 3 | Scroll mode (`C-s [`), rename, activity notification, optional split panes | not implemented |
+| 2d | Scrollback: `vt100` 0.16, `C-s [` scroll mode with configurable keys, `M-u`/`M-e`, wheel, status hint | done |
+| 3 | Rename, activity notification, optional split panes | not implemented |
 
 Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the
 background, `C-s n/p` cycles the tab's shells, `S` from the browser opens
-another one. Phases 0–2c are implemented; phase 3 is not.
+another one. Phases 0–2d are implemented; phase 3 is not.
 
 ---
 
@@ -1120,4 +1221,4 @@ another one. Phases 0–2c are implemented; phase 3 is not.
    process group), so this does not satisfy "keeps running in the background".
 3. **`tui-term` for rendering.** `tui-term 0.2` is pinned to ratatui 0.29 +
    vt100 0.15; the renderer above is ~100 lines and keeps us on current vt100
-   without another dependency.
+   without another dependency (and it also gives the scrollback for free).

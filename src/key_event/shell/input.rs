@@ -3,32 +3,27 @@
 // The shell owns every key except the prefix chord. Keys are translated back
 // into the byte sequences a terminal emulator would send to the child.
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-/// The chord which gives hire a command while a shell is attached.
-#[derive(Clone, Copy, Debug)]
-pub struct ShellPrefix {
-    code: KeyCode,
-    modifiers: KeyModifiers,
+/// A key together with its modifiers.
+///
+/// Parsed from the same specs the `shell_prefix` option uses: `C-s`, `M-u`,
+/// `C-M-s`, `F12`, `PageUp`, `b`, … The keymap's shell sections use this so
+/// that chords such as `Alt+u` can be bound from `keymap.toml`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct KeySpec {
+    pub code: KeyCode,
+    pub modifiers: KeyModifiers,
 }
 
-impl Default for ShellPrefix {
-    fn default() -> Self {
-        Self {
-            code: KeyCode::Char('s'),
-            modifiers: KeyModifiers::CONTROL,
-        }
-    }
-}
-
-impl ShellPrefix {
+impl KeySpec {
     /// Parse a spec such as `C-s`, `M-x`, `C-M-s`, `F12` or `b`.
     pub fn parse(spec: &str) -> anyhow::Result<Self> {
         let spec = spec.trim();
 
         if spec.is_empty() {
-            bail!("`shell_prefix` is empty")
+            bail!("empty key spec")
         }
 
         let mut parts = spec.split('-').collect::<Vec<_>>();
@@ -40,7 +35,7 @@ impl ShellPrefix {
                 "C" | "CTRL" => modifiers |= KeyModifiers::CONTROL,
                 "M" | "ALT" => modifiers |= KeyModifiers::ALT,
                 "S" | "SHIFT" => modifiers |= KeyModifiers::SHIFT,
-                _ => bail!("Unknown modifier `{part}` in `shell_prefix`"),
+                _ => bail!("unknown modifier `{part}`"),
             }
         }
 
@@ -76,22 +71,98 @@ impl ShellPrefix {
                 let mut chars = key_part.chars();
                 let key = match chars.next() {
                     Some(key) => key,
-                    None => bail!("`shell_prefix` has no key"),
+                    None => bail!("key spec has no key"),
                 };
 
                 if chars.next().is_some() {
-                    bail!("Unknown key `{key_part}` in `shell_prefix`")
+                    bail!("unknown key `{key_part}`")
                 }
 
                 KeyCode::Char(key)
             },
         };
 
+        // A terminal reports `G` as `Char('G')` + SHIFT; an uppercase spec has
+        // to mean the same thing, otherwise the binding could never match.
+        if let KeyCode::Char(c) = code
+            && c.is_uppercase()
+            && !modifiers.contains(KeyModifiers::SHIFT)
+        {
+            modifiers |= KeyModifiers::SHIFT;
+        }
+
         Ok(Self { code, modifiers })
     }
 
     pub fn matches(&self, event: &KeyEvent) -> bool {
         event.code == self.code && event.modifiers == self.modifiers
+    }
+
+    /// The spec in the short form the status line shows, e.g. `M-u`, `PgUp`.
+    pub fn label(&self) -> String {
+        let mut label = String::new();
+        // An uppercase character already implies SHIFT: `S-G` is just `G`.
+        let shift_implied = matches!(self.code, KeyCode::Char(c) if c.is_uppercase());
+
+        if self.modifiers.contains(KeyModifiers::CONTROL) {
+            label.push_str("C-");
+        }
+        if self.modifiers.contains(KeyModifiers::ALT) {
+            label.push_str("M-");
+        }
+        if self.modifiers.contains(KeyModifiers::SHIFT) && !shift_implied {
+            label.push_str("S-");
+        }
+
+        let key = match self.code {
+            KeyCode::Char(' ') => String::from("Space"),
+            KeyCode::Char(c) => c.to_string(),
+            KeyCode::Enter => String::from("Enter"),
+            KeyCode::Tab => String::from("Tab"),
+            KeyCode::BackTab => String::from("BackTab"),
+            KeyCode::Esc => String::from("Esc"),
+            KeyCode::Up => String::from("Up"),
+            KeyCode::Down => String::from("Down"),
+            KeyCode::Left => String::from("Left"),
+            KeyCode::Right => String::from("Right"),
+            KeyCode::Home => String::from("Home"),
+            KeyCode::End => String::from("End"),
+            KeyCode::PageUp => String::from("PgUp"),
+            KeyCode::PageDown => String::from("PgDn"),
+            KeyCode::Insert => String::from("Ins"),
+            KeyCode::Delete => String::from("Del"),
+            KeyCode::F(n) => format!("F{n}"),
+            _ => String::from("?"),
+        };
+
+        label.push_str(&key);
+        label
+    }
+}
+
+/// The chord which gives hire a command while a shell is attached.
+#[derive(Clone, Copy, Debug)]
+pub struct ShellPrefix(KeySpec);
+
+impl Default for ShellPrefix {
+    fn default() -> Self {
+        Self(KeySpec {
+            code: KeyCode::Char('s'),
+            modifiers: KeyModifiers::CONTROL,
+        })
+    }
+}
+
+impl ShellPrefix {
+    /// Parse a spec such as `C-s`, `M-x`, `C-M-s`, `F12` or `b`.
+    pub fn parse(spec: &str) -> anyhow::Result<Self> {
+        KeySpec::parse(spec)
+            .map(Self)
+            .map_err(|err| anyhow!("invalid `shell_prefix`: {err}"))
+    }
+
+    pub fn matches(&self, event: &KeyEvent) -> bool {
+        self.0.matches(event)
     }
 }
 
@@ -265,6 +336,28 @@ mod tests {
     fn test_ctrl_s_byte() {
         let ctrl_s = key(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert_eq!(encode_key(&ctrl_s, false).unwrap(), vec![0x13]);
+    }
+
+    #[test]
+    fn test_key_spec_parse_and_label() {
+        let alt_u = KeySpec::parse("M-u").unwrap();
+        assert!(alt_u.matches(&key(KeyCode::Char('u'), KeyModifiers::ALT)));
+        assert!(!alt_u.matches(&key(KeyCode::Char('u'), KeyModifiers::empty())));
+        assert_eq!(alt_u.label(), "M-u");
+
+        // An uppercase spec carries the SHIFT the terminal reports.
+        let shift_g = KeySpec::parse("G").unwrap();
+        assert!(shift_g.matches(&key(KeyCode::Char('G'), KeyModifiers::SHIFT)));
+        assert!(!shift_g.matches(&key(KeyCode::Char('g'), KeyModifiers::empty())));
+        assert_eq!(shift_g.label(), "G");
+
+        assert_eq!(KeySpec::parse("PageUp").unwrap().label(), "PgUp");
+        assert_eq!(KeySpec::parse("C-b").unwrap().label(), "C-b");
+        assert_eq!(KeySpec::parse("Esc").unwrap().label(), "Esc");
+
+        assert!(KeySpec::parse("").is_err());
+        assert!(KeySpec::parse("C-").is_err());
+        assert!(KeySpec::parse("C-Unknown").is_err());
     }
 
     #[test]

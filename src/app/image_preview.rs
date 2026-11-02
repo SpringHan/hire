@@ -39,12 +39,12 @@ impl ImagePreview {
 
     /// The image protocol chosen for the real terminal, if it supports images.
     pub fn protocol_type(&self) -> Option<ratatui_image::picker::ProtocolType> {
-        self.picker.map(|picker| picker.protocol_type())
+        self.picker.as_ref().map(|picker| picker.protocol_type())
     }
 
     /// The size of one terminal cell in pixels `(width, height)`.
     pub fn font_size(&self) -> Option<(u16, u16)> {
-        self.picker.map(|picker| picker.font_size())
+        self.picker.as_ref().map(|picker| picker.font_size())
     }
 
     pub fn make_protocol(&mut self, image: DynamicImage) -> Result<()> {
@@ -61,7 +61,7 @@ impl ImagePreview {
 
         self.protocol = Some(ThreadProtocol::new(
             rtx,
-            Some(self.picker.unwrap().new_resize_protocol(image))
+            Some(self.picker.as_ref().unwrap().new_resize_protocol(image))
         ));
 
         Ok(())

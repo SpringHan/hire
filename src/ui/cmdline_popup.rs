@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, StatefulWidget, Widget},
-    style::{Style, Stylize},
+    style::Style,
     layout::Rect,
     Frame
 };
