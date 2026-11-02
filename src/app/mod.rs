@@ -104,6 +104,10 @@ pub struct App<'a> {
     /// A kill confirmation is waiting for `y`.
     pub shell_pending_kill: Option<ShellId>,
 
+    /// A confirmation to kill every *other* shell of the attached shell's tab
+    /// is waiting for `y`; the value is the shell which is kept.
+    pub shell_pending_kill_others: Option<ShellId>,
+
     /// A confirmation to kill every shell of this tab is waiting for `y`.
     ///
     /// The tab id is remembered instead of a boolean so the shells of the tab
@@ -199,6 +203,7 @@ impl<'a> Default for App<'a> {
             shell_prefix: ShellPrefix::default(),
             shell_prefix_active: false,
             shell_pending_kill: None,
+            shell_pending_kill_others: None,
             shell_pending_kill_all: None,
             shell_digits: String::new(),
             shell_digit_deadline: None,

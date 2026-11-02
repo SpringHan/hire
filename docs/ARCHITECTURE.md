@@ -186,11 +186,12 @@ Responsibilities:
   preview; edit mode; keymap; loaded config; error queue; output settings;
   host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
-  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill` (one shell) and
-  `shell_pending_kill_all` (a tab id; every shell of that tab), `shell_digits`
-  and `shell_digit_deadline` (numbered selection), `clear_screen` (full repaint
-  after attaching/detaching) and `shell_notice` (an error shown in the shell
-  status line instead of replacing the view).
+  (`ShellPrefix`), `shell_prefix_active`, `shell_pending_kill` (one shell),
+  `shell_pending_kill_others` (the shell which stays, every other one of its tab
+  is killed) and `shell_pending_kill_all` (a tab id; every shell of that tab),
+  `shell_digits` and `shell_digit_deadline` (numbered selection), `clear_screen`
+  (full repaint after attaching/detaching) and `shell_notice` (an error shown in
+  the shell status line instead of replacing the view).
 - Outer-terminal state for the shell view: `outer_mouse_mode` and
   `outer_bracketed_paste` (what hire has enabled on the real terminal),
   `mouse_buttons` (buttons currently held, used to end a drag cleanly) and
@@ -334,15 +335,15 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `ShellPrefix` (parse/match a chord), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create, kill the shells of the current tab. |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell, the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create and kill the shells of the current tab; `D` clears every shell of the tab after a y/N confirmation. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
 | `key_event/tab/types.rs` | `TabId`, `Tab` (path, hidden flag, selection, mounted shells) and `TabList`; `TabState` (tab menu state) and `TabAction` (the destructive operation waiting for confirmation). |
-| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; `D` clears the current tab's shells; every removal (`c`, `d` + number, `o`, restoring a stored group) asks first when mounted shells would be killed. |
+| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; every removal (`c`, `d` + number, `o`, restoring a stored group) asks first when mounted shells would be killed. |
 
 **`key_event/mod.rs`** — the input dispatcher.
 
@@ -500,9 +501,8 @@ page when the handler returns `true`. `traits.rs` lets arbitrary structs
 tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
 `shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab page;
 `switch` handles create/next/prev/close/close-others and numeric selection
-(1-based; multi-digit when there are more than nine tabs); `D` kills every shell
-of the current tab and keeps the tab. Every removal (`c`, `d` + number, `o`, and
-applying a stored group) checks the affected tabs first: a mounted shell turns
+(1-based; multi-digit when there are more than nine tabs). Every removal (`c`,
+`d` + number, `o`, and applying a stored group) checks the affected tabs first: a mounted shell turns
 the action into a `SwitchCase` confirmation (`TabAction` in `TabState`, drawn
 like the other y/N pages, `expand: false`), and only `y` runs it — any other key
 returns to the tab menu. Confirmed removals call `App::close_tab_shells`, which
@@ -524,7 +524,7 @@ hidden flag and selection, never shells.
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
-| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen and its status line. |
+| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen and its status line; the right-hand key hint is only shown while the prefix is active (or a prompt/notice needs it). |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
@@ -682,6 +682,8 @@ spawn_shell (`S`) / --working-directory
                  ├─ `C-s x` → prompt; `y` kills it and attaches the next
                  ├─ `C-s D` → prompt; `y` kills every shell of the tab
                  │    (App::close_tab_shells) and returns to the browser
+                 ├─ `C-s o` → prompt; `y` kills the tab's other shells and
+                 │    keeps the attached one (App::close_other_shells)
                  ├─ mouse events → encode_mouse (child's mode/encoding) → PTY
                  ├─ paste events → encode_paste (bracketed if the child asked) → PTY
                  ├─ sync_terminal_modes: outer mouse capture + bracketed paste
@@ -691,7 +693,9 @@ spawn_shell (`S`) / --working-directory
                       is none it detaches, which also refreshes the browser
 
 shell_menu (`T`)
-  └─ list the tab's shells (0-based); digits attach, `n` new, `x` + digits kill
+  ├─ list the tab's shells (0-based); digits attach, `n` new, `x` + digits kill
+  └─ `D` → prompt; `y` kills every shell of the tab and keeps the tab open
+       (App::close_tab_shells); the menu is shown again
 ```
 
 `ui/shell_block.rs` renders the attached screen into the middle band, and
@@ -726,22 +730,23 @@ never remove hire's own preview image.
 
 ```
 tab menu (`t`)
-  ├─ `c`                  → remove the current tab
-  ├─ `d` + number         → remove that tab
-  ├─ `o`                  → remove every other tab
-  ├─ `s` + number         → replace every open tab with a stored group
-  └─ `D`                  → kill every shell of the current tab (tab stays)
-       └─ mounted shells on the affected tabs?
-            ├─ no  → run it at once
-            └─ yes → confirmation page ("... will kill N shells ...")
-                 ├─ `y` → run it (`close_tab_shells`, then remove/replace)
-                 └─ any other key → back to the tab menu, nothing changed
+  ├─ `c`            → remove the current tab
+  ├─ `d` + number   → remove that tab
+  ├─ `o`            → remove every other tab
+  ├─ `s` + number   → replace every open tab with a stored group
+  └─ mounted shells on the affected tabs?
+       ├─ no  → run it at once
+       └─ yes → confirmation page ("... will kill N shells ...")
+            ├─ `y` → run it (`close_tab_shells`, then remove/replace)
+            └─ any other key → back to the tab menu, nothing changed
 ```
 
-All four removals go through `App::close_tab_shells`, so they detach first when
-the attached shell belongs to a removed tab, kill its sessions and clear
+Every removal goes through `App::close_tab_shells`, so it detaches first when
+the attached shell belongs to a removed tab, kills its sessions and clears
 `Tab.shells` / `Tab.active_shell` before the tab (or the whole list) is
 dropped. Restoring a stored group asks too, because it replaces every open tab.
+Clearing a tab's shells without removing the tab lives in the **shell** menu
+(`T`, then `D`), not in the tab menu.
 
 ### Sudo session
 
@@ -805,7 +810,10 @@ binary) and return early when `/bin/sh` does not exist; they need no network and
 no installed binary. They are
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
-kill-all) and `key_event::tab::utils::test::*` (tab-removal confirmations).
+kill-all, `C-s o` kill-others, detach refresh), `key_event::shell::menu::test::*`
+(the shell menu's `D` confirmation), `ui::shell_block::test::*` (the idle status
+line and the prefix hint) and `key_event::tab::utils::test::*` (tab-removal
+confirmations).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

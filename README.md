@@ -144,7 +144,6 @@ Whenever a working directory has been set, its path is shown on the right side o
 | `f` / `b` | Switch to the next / previous tab |
 | `c` | Close the current tab |
 | `d` then a number | Delete the tab with that number |
-| `D` | Clear every shell mounted on the current tab (the tab stays open) |
 | `o` | Close every other tab |
 | `s` then a number | Open a stored tab group |
 | `S` | Store the currently open tabs as a group |
@@ -156,9 +155,9 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 `spawn_shell` (default `S`) opens a shell that hire owns and shows it in the current tab. The shell is a real PTY session: it keeps running after it is detached, and one tab can hold several of them (like tmux windows).
 
 - `S` — create a new shell on the current tab and attach it.
-- `T` (`shell_menu`) — list the shells mounted on the current tab; digits attach one, `n` creates a new one, `x` followed by a number kills one. Shells are numbered from `0`.
+- `T` (`shell_menu`) — list the shells mounted on the current tab; digits attach one, `n` creates a new one, `x` followed by a number kills one, and `D` kills every shell of the tab (the tab stays open; press `y` to confirm). Shells are numbered from `0`.
 - The shell menu and the attached shell's status line name the program **currently running** in the shell (`vim`, `htop`, `nvim`, …), not just the shell program it was started with. A shell sitting at its prompt shows its own name (`bash`, `zsh`), so several shells started with the same `default_shell` can be told apart at a glance.
-- While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command:
+- While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command. The status line only lists the prefix commands after `C-s` has been pressed, so the bottom of the screen stays clean while the shell is used normally:
 
 | Key | Action |
 | --- | --- |
@@ -168,6 +167,7 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 | `C-s c` | Create a new shell on this tab and attach it |
 | `C-s x` | Kill the attached shell (press `y` to confirm) |
 | `C-s D` | Kill every shell mounted on the current tab (press `y` to confirm) |
+| `C-s o` | Kill every **other** shell of the tab and keep the attached one (press `y` to confirm) |
 | `C-s C-s` | Send a literal `C-s` to the shell |
 
 - Numbers are 0-based and may have more than one digit: with 11 shells, `C-s 1 0` attaches shell 10. A partial number is committed on `Enter`, when no further digit could still be valid, or after a short timeout; the status line shows the digits while they are being typed.

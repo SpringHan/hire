@@ -74,9 +74,6 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         '0'..='9' => return Ok(handle_tabs(app, key, &mut data)?),
         'c'       => return request_remove(app, app.tab_list.current(), &mut data),
 
-        // Kill every shell mounted on the current tab; the tab stays open.
-        'D' => return request_clear_shells(app, &mut data),
-
         'S' => {
             data.set_saving();
             SwitchCase::new(
@@ -137,19 +134,6 @@ fn confirm_action(
     let confirmed = matches!(key, 'y' | 'Y');
 
     match action {
-        // Clearing the shells keeps the tab, so the menu comes back with the
-        // updated shell counts.
-        TabAction::ClearShells(tab_id) => {
-            if confirmed {
-                app.close_tab_shells(tab_id);
-            }
-
-            data.selecting.clear();
-            open_tab_menu(app, &data)?;
-
-            return Ok(false)
-        },
-
         TabAction::Remove(index) => {
             if confirmed {
                 return remove_base(app, index)
@@ -310,29 +294,6 @@ fn request_apply_storage(app: &mut App, index: usize, data: &mut TabState) -> Ap
     );
 
     request_confirm(app, data, TabAction::ApplyStorage(index), message)
-}
-
-/// Kill every shell mounted on the current tab, asking first.
-fn request_clear_shells(app: &mut App, data: &mut TabState) -> AppResult<bool> {
-    let index = app.tab_list.current();
-    let tab = app.tab_list.current_tab();
-
-    if tab.shells.is_empty() {
-        // Nothing to kill; the menu stays as it is.
-        return Ok(false)
-    }
-
-    let tab_id = tab.id;
-    let shells = tab.shells.len();
-
-    let message = format!(
-        "Tab [{}] has {}; clearing the shells will kill {}. Are you sure? (y for yes)",
-        index + 1,
-        shells_text(shells),
-        shells_pronoun(shells)
-    );
-
-    request_confirm(app, data, TabAction::ClearShells(tab_id), message)
 }
 
 pub fn next(app: &mut App) -> AppResult<bool> {
@@ -647,7 +608,7 @@ fn select_new(app: &mut App) -> AppResult<()> {
 
 fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<CmdContent> {
     let mut text = Text::raw("[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
-[d] delete tab with number  [D] clear shells of current tab  [o] delete other tabs
+[d] delete tab with number  [o] delete other tabs
 [s] open tabs from storage  [S] store opening tabs\n\n");
 
     if data.delete {
@@ -886,39 +847,5 @@ mod test {
 
         assert_eq!(app.tab_list.len(), 1);
         assert_eq!(app.shell_sessions.alive_count(), 0);
-    }
-
-    #[test]
-    fn test_clear_shells_keeps_the_tab() {
-        if !Path::new("/bin/sh").exists() {
-            return
-        }
-
-        let mut app = App::default();
-        let id = mount_shell(&mut app, 0);
-
-        menu(&mut app, &['D']);
-
-        assert!(app.switch_case.is_some());
-        assert_eq!(app.shell_sessions.alive_count(), 1);
-
-        let case = app.switch_case.take().unwrap();
-        switch_match(&mut app, case, 'y').unwrap();
-
-        // The tab survives, its shell is gone and the menu is shown again.
-        assert_eq!(app.tab_list.len(), 1);
-        assert!(app.tab_list.current_tab().shells.is_empty());
-        assert!(!app.shell_sessions.is_alive(id));
-        assert!(app.switch_case.is_some());
-    }
-
-    #[test]
-    fn test_clear_shells_without_shells_does_not_ask() {
-        let mut app = App::default();
-
-        menu(&mut app, &['D']);
-
-        assert!(app.switch_case.is_some());
-        assert!(app.tab_list.current_tab().shells.is_empty());
     }
 }

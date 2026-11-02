@@ -1,8 +1,8 @@
 // The shell menu.
 //
 // Lists the shells mounted on the current tab. Numbers attach a shell; `x`
-// switches to kill mode. The menu follows the `SwitchCase` convention used by
-// the tab menu.
+// switches to kill mode and `D` clears every shell of the tab. The menu
+// follows the `SwitchCase` convention used by the tab menu.
 
 use ratatui::{
     style::{Modifier, Stylize},
@@ -12,7 +12,7 @@ use ratatui::{
 use crate::{
     app::App,
     error::AppResult,
-    key_event::{SwitchCase, SwitchCaseData},
+    key_event::{SwitchCase, SwitchCaseData, TabId},
     utils::{CmdContent, ShellId},
 };
 
@@ -26,6 +26,12 @@ pub struct ShellMenuState {
 
     /// Digits typed so far.
     selecting: String,
+
+    /// The tab whose shells are about to be cleared; waits for `y`.
+    ///
+    /// The id is remembered instead of a boolean so the confirmation clears
+    /// the tab it was opened for even when the tab list changed meanwhile.
+    clear_pending: Option<TabId>,
 }
 
 impl SwitchStruct for ShellMenuState {
@@ -63,6 +69,20 @@ fn shell_switch(
         _ => ShellMenuState::default(),
     };
 
+    // A "clear every shell of this tab" request waits for `y`. Any other key
+    // cancels it and brings the menu back.
+    if let Some(tab_id) = state.clear_pending.take() {
+        if matches!(key, 'y' | 'Y') {
+            app.close_tab_shells(tab_id);
+        }
+
+        state.deleting = false;
+        state.selecting.clear();
+        reopen(app, state);
+
+        return Ok(false)
+    }
+
     match key {
         // Create a new shell on this tab and attach it. `open_shell` clears the
         // switch case itself, so this must not report `true`.
@@ -73,6 +93,25 @@ fn shell_switch(
 
         'x' => {
             state.deleting = true;
+            state.selecting.clear();
+            reopen(app, state);
+            return Ok(false)
+        },
+
+        // Kill every shell mounted on the current tab and keep the tab open.
+        // This is the tab-level action; `C-s D` in the attached view does the
+        // same thing while a shell owns the input.
+        'D' => {
+            let tab = app.tab_list.current_tab();
+
+            if tab.shells.is_empty() {
+                // Nothing to clear; the page already says so.
+                reopen(app, state);
+                return Ok(false)
+            }
+
+            state.clear_pending = Some(tab.id);
+            state.deleting = false;
             state.selecting.clear();
             reopen(app, state);
             return Ok(false)
@@ -171,9 +210,31 @@ fn selected_index(
 }
 
 fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
-    let mut text = Text::raw(
-        "[n] new shell  [x] kill shell  [0-9] attach shell  [Esc] close\n",
-    );
+    // While a confirmation is open the key list is irrelevant: every key either
+    // confirms (`y`) or cancels.
+    let mut text = if state.clear_pending.is_some() {
+        Text::default()
+    } else {
+        Text::raw(
+            "[n] new shell  [x] kill shell  [D] clear shells of this tab  \
+             [0-9] attach shell  [Esc] close\n",
+        )
+    };
+
+    if let Some(tab_id) = state.clear_pending {
+        let count = app
+            .tab_list
+            .tab_by_id(tab_id)
+            .map(|tab| tab.shells.len())
+            .unwrap_or(0);
+
+        text.push_line(
+            Line::raw(format!(
+                "Kill all {count} shell(s) of this tab? (y/N)"
+            ))
+            .red(),
+        );
+    }
 
     if state.deleting {
         text.push_line(Line::raw("Delete mode: type the shell number!").red());
@@ -229,4 +290,126 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
     }
 
     CmdContent::Text(text)
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::Path;
+
+    use crate::{
+        key_event::{shell::GraphicsSupport, switch::switch_match},
+        utils::Block,
+    };
+
+    use super::*;
+
+    /// Mount a `/bin/sh` session on the current tab, without attaching it.
+    fn mount_shell(app: &mut App) -> ShellId {
+        let tab_id = app.tab_list.current_tab().id;
+        let id = app
+            .shell_sessions
+            .open(
+                tab_id,
+                "/bin/sh",
+                Path::new("/"),
+                GraphicsSupport::disabled(),
+            )
+            .unwrap();
+
+        let tab = app.tab_list.current_tab_mut();
+        tab.shells.push(id);
+        tab.active_shell = Some(id);
+
+        id
+    }
+
+    /// Open the shell menu and press `keys` one after another.
+    fn menu(app: &mut App, keys: &[char]) {
+        shell_operation(app).unwrap();
+
+        for key in keys {
+            // The dispatcher clones the active case and leaves it stored while
+            // the handler returns `false`.
+            let case = app.switch_case.clone().expect("the shell menu is open");
+            switch_match(app, case, *key).unwrap();
+        }
+    }
+
+    /// The text the menu page currently shows.
+    fn menu_text(app: &App) -> String {
+        let Block::CommandLine(CmdContent::Text(text), _) = &app.selected_block
+        else {
+            return String::new()
+        };
+
+        text.lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    /// `D` asks before clearing every shell; `y` then kills them all and keeps
+    /// the tab (and the menu) open.
+    #[test]
+    fn test_clear_shells_asks_before_killing_every_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        mount_shell(&mut app);
+        let last = mount_shell(&mut app);
+
+        menu(&mut app, &['D']);
+
+        assert!(app.switch_case.is_some());
+        assert!(menu_text(&app).contains("Kill all 2 shell(s)"));
+
+        // Nothing is killed before the confirmation.
+        assert_eq!(app.tab_list.current_tab().shells.len(), 2);
+        assert_eq!(app.shell_sessions.alive_count(), 2);
+
+        let case = app.switch_case.clone().unwrap();
+        switch_match(&mut app, case, 'y').unwrap();
+
+        // The tab survives, its shells are gone and the menu stays open.
+        assert_eq!(app.tab_list.len(), 1);
+        assert!(app.tab_list.current_tab().shells.is_empty());
+        assert_eq!(app.shell_sessions.alive_count(), 0);
+        assert!(!app.shell_sessions.is_alive(last));
+        assert!(app.switch_case.is_some());
+    }
+
+    /// Any other key cancels the confirmation.
+    #[test]
+    fn test_clear_shells_cancel_keeps_them() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        mount_shell(&mut app);
+
+        menu(&mut app, &['D', 'n']);
+
+        assert!(app.switch_case.is_some());
+        assert!(!menu_text(&app).contains("Kill all"));
+        assert_eq!(app.tab_list.current_tab().shells.len(), 1);
+        assert_eq!(app.shell_sessions.alive_count(), 1);
+    }
+
+    /// `D` on a tab without shells does not ask, it just says there is nothing
+    /// to clear.
+    #[test]
+    fn test_clear_shells_without_shells_does_not_ask() {
+        let mut app = App::default();
+
+        menu(&mut app, &['D']);
+
+        assert!(app.switch_case.is_some());
+        assert!(!menu_text(&app).contains("Kill all"));
+        assert!(app.tab_list.current_tab().shells.is_empty());
+    }
 }

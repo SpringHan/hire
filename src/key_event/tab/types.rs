@@ -48,8 +48,7 @@ impl Tab {
 ///
 /// Every one of them is destructive: removing tabs (or replacing the whole tab
 /// list) kills the shells mounted on them, so the tab menu asks first whenever
-/// there is a mounted shell to lose. `ClearShells` kills the shells but keeps
-/// the tab itself.
+/// there is a mounted shell to lose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TabAction {
     /// Close the tab at this index.
@@ -60,9 +59,6 @@ pub(super) enum TabAction {
 
     /// Replace every open tab with the stored group at this index.
     ApplyStorage(usize),
-
-    /// Kill every shell mounted on this tab; the tab stays open.
-    ClearShells(TabId),
 }
 
 #[derive(Clone)]

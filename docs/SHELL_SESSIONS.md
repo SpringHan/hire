@@ -575,6 +575,7 @@ impl App<'_> {
     pub fn clear_shell_digits(&mut self);
     pub fn remove_shell_from_tab(&mut self, tab_id: TabId, id: ShellId) -> Option<ShellId>;
     pub fn close_tab_shells(&mut self, tab_id: TabId) -> usize;
+    pub fn close_other_shells(&mut self, tab_id: TabId, keep: ShellId) -> usize;
 }
 ```
 
@@ -583,7 +584,7 @@ impl App<'_> {
   `attach`.
 - `attach`: fail if the session is missing or dead; clear `switch_case`, command
   line/expand/completion state, `shell_prefix_active`, `shell_pending_kill`,
-  `shell_pending_kill_all`; set
+  `shell_pending_kill_others`, `shell_pending_kill_all`; set
   `selected_block = Block::Shell(id)`; set `active_shell`; set
   `app.clear_screen = true`.
 - `detach`: clear the prefix/pending state, set
@@ -604,11 +605,21 @@ impl App<'_> {
   the attached shell's tab through `shell_pending_kill_all: Option<TabId>`; the
   tab id is remembered instead of a boolean so the right tab is cleared even if
   the view changes while the prompt is open. Confirming calls
-  `App::close_tab_shells(tab_id)`.
+  `App::close_tab_shells(tab_id)` and leaves the browser behind (the view was
+  pointing at a shell which no longer exists).
+- `o` (inside the prefix) requests a confirmation to kill every **other** shell
+  of the tab through `shell_pending_kill_others: Option<ShellId>` (the shell
+  which is kept). The prompt reads `Kill N other shell(s)? (y/N)`; `y` calls
+  `App::close_other_shells(tab_id, keep)`, which closes the other sessions,
+  leaves `Tab.shells == [keep]` and keeps the view attached to it. With a single
+  shell the key is a no-op (there is nothing to kill), so no prompt appears.
 - `close_tab_shells` is the single place which clears a tab's shells: it
   detaches when the attached shell belongs to the tab, closes every session and
-  clears `Tab.shells` / `Tab.active_shell`. The tab menu's `D`, the shell view's
-  `C-s D`, closing a tab and replacing the tab list all go through it.
+  clears `Tab.shells` / `Tab.active_shell`. The shell menu's `D`, the shell
+  view's `C-s D`, closing a tab and replacing the tab list all go through it.
+- `close_other_shells` is its counterpart for "keep exactly one": it closes
+  every other session, detaches if the view pointed at one of them, and reduces
+  `Tab.shells` to `[keep]` with `active_shell = Some(keep)`.
 
 `AppCommand::Shell` and `--working-directory` both call `open_shell`, so the
 `-w` mode becomes "open hire with a mounted shell": the user can still detach
@@ -795,12 +806,17 @@ AppBlock::Shell(_) => {
 
 Left: the program running in the shell (`ShellSession::display_title` — `vim`
 while vim owns the terminal, `bash` at the prompt), start directory, tab
-ordinal (`[2/3]`). Right: the hint `prefix d: detach  n/p: switch  c: new  x:
-kill  prefix x2: literal`; `PREFIX ...` while `shell_prefix_active` is set;
-`Shell #N` while digits are being typed; `Kill shell "vim"? (y/N)` while
-`shell_pending_kill` is set (the same display name); `Kill all N shell(s) of
-this tab? (y/N)` while `shell_pending_kill_all` is set; and an application
-error while `shell_notice` is set.
+ordinal (`[2/3]`). Right: **nothing at all in the idle state** — the hint is
+only rendered once `shell_prefix` has been pressed, so an attached shell looks
+like a plain terminal and the bottom-right corner stays free. The right line is
+`PREFIX d: detach  n/p: switch  c: new  x: kill  D: kill all  o: kill others`
+while `shell_prefix_active` is set; `Shell #N` while digits are being typed;
+`Kill shell "vim"? (y/N)` while `shell_pending_kill` is set (the same display
+name); `Kill all N shell(s) of this tab? (y/N)` while `shell_pending_kill_all`
+is set; `Kill N other shell(s)? (y/N)` while `shell_pending_kill_others` is
+set; and an application error while `shell_notice` is set. `shell_status_lines`
+returns a one-element vector when there is no hint, which `StateLine` renders
+as a left-only line.
 
 `StateLine` (`ui/command_line.rs`) is already public and reusable.
 
@@ -891,7 +907,7 @@ by the tab menu.
 
 - `shell_operation(app)` opens the page with
   `SwitchCaseData::Struct(ShellMenuState)` (`{ deleting: bool, selecting:
-  String }`).
+  String, clear_pending: Option<TabId> }`).
 - Message: one line per shell of the current tab, numbered from **0**:
   `[0] vim  ~/project`; `*` marks the active shell, `!` marks an exited one.
   The name is `ShellSession::display_title` — the program currently running in
@@ -906,9 +922,18 @@ by the tab menu.
     with `quit_command_mode`.
   - `n` — `open_shell` on this tab and attach it.
   - `x` then the number — kill that shell (two-step; no modal confirm needed).
+  - `D` — kill **every** shell mounted on the current tab; the tab itself stays
+    open. The page turns into a y/N confirmation (`Kill all N shell(s) of this
+    tab? (y/N)`); `y` calls `App::close_tab_shells(tab_id)` and any other key
+    cancels. This is the tab-level "clear shells" action; it used to live in the
+    tab menu and was moved here because it is a shell operation, not a tab one.
+    The attached view's `C-s D` performs the same action while a shell owns the
+    input.
   - `Esc` — close (handled by the existing `Esc` path).
 - Rebuilding the page after a kill reuses `generate_msg`; when the tab has no
-  shells left, return `true` to close the menu.
+  shells left, return `true` to close the menu. After clearing the shells the
+  menu is shown again (it reads "No shell is mounted on this tab."), so the tab
+  is visibly still there.
 
 Add the command to `AppCommand` (`ShellMenu`), parse `"shell_menu"` in
 `AppCommand::from_str`, dispatch it in `AppCommand::execute`
@@ -967,22 +992,22 @@ Do not flip the block back just to run a harness.
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions`; the graphics event channel and `drain_graphics` |
 | `src/key_event/shell/input.rs` *(new)* | `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `detach`, `next_shell`, `handle_view_key` (`C-s x`, `C-s D`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
-| `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`), `handle_view_mouse`, `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message; `n`/`x`/digits and `D` (clear every shell of the tab, with a y/N confirmation) |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
 | `src/key_event/tab/types.rs` | `TabId`, `Tab`, `TabList` rewrite (§5) |
-| `src/key_event/tab/utils.rs` | migrate every mutation site; `D` clears the current tab's shells; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts |
+| `src/key_event/tab/utils.rs` | migrate every mutation site; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts. Clearing the shells of a tab without removing it is not a tab action anymore: it lives in the shell menu (`T`, `D`) |
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
-| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
 | `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes` + `handle_shell_graphics`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/app/image_preview.rs` | `protocol_type` / `font_size` accessors (the shell graphics support is derived from the detected protocol and cell size) |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
 | `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
 | `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
 | `src/ui/mod.rs` | shell-view branch; title badge; records `shell_area` |
-| `src/ui/shell_block.rs` *(new)* | screen renderer + status line (prefix/digits/kill prompt/notice) |
+| `src/ui/shell_block.rs` *(new)* | screen renderer + status line (prefix hint only while the prefix is active; digits/kill prompt/notice) |
 | `src/ui/command_line.rs` | `Block::Shell` arm (reuses `StateLine`) |
 | `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding |
 | `README.md`, `docs/ARCHITECTURE.md` | user docs and architecture docs (§16) |
@@ -1025,7 +1050,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Image transmitted while the shell is detached | forwarded anyway (the terminal caches it); attaching repaints the placeholder cells |
 | Terminal query from a background shell | answered on the next main-loop iteration by writing to the child's PTY |
 | `C-s D` while attached | a `Kill all N shell(s) of this tab?` prompt; `y` kills every shell of the tab and returns to the browser, any other key cancels |
-| Clear a tab's shells from the tab menu (`D`) | same confirmation; `y` keeps the tab and empties its shell list, then shows the tab menu again |
+| `C-s o` while attached | a `Kill N other shell(s)?` prompt; `y` kills the tab's other shells, keeps the attached one attached and leaves `Tab.shells == [keep]`; any other key cancels; with a single shell the key does nothing |
+| Clear a tab's shells from the shell menu (`T`, `D`) | the menu asks (`Kill all N shell(s) of this tab? (y/N)`); `y` keeps the tab and empties its shell list, then shows the shell menu again |
+| Idle shell view | the status line's right side is empty; the prefix hint appears only after `shell_prefix` is pressed |
 | Close/delete a tab, close other tabs, restore a stored group | asks first only when the tabs which would lose shells actually have some; `y` performs it, any other key returns to the tab menu |
 | Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; events are re-encoded for the child's mode/encoding |
 | Mouse disabled by the child / detach / quit | outer capture is disabled; a half-tracked drag is reset |
@@ -1038,15 +1065,17 @@ the shell status line). Everything else matches with `if let` or `_`.
 ## 16. Documentation updated with the implementation
 
 - `README.md`: new "Shell Sessions" section (spawn → detach → menu → quota of
-  shells per tab), `shell_prefix`, the prefix table, and the fact that quitting
-  kills the shells.
+  shells per tab), `shell_prefix`, the prefix table (including `C-s o`), the
+  fact that the prefix hint only appears after the prefix is pressed, the shell
+  menu's `D`, and the fact that quitting kills the shells.
 - `docs/ARCHITECTURE.md`:
   - §1 event-loop step: drain shell exits, `clear_screen`, variable poll.
   - §3 module table: the six new `key_event/shell/*` files and
     `ui/shell_block.rs`.
   - §3 `Block` description: add `Shell(ShellId)`.
   - §3 `App` field list: `shell_sessions`, `shell_prefix`, `shell_prefix_active`,
-    `shell_pending_kill`, `shell_digits`, `shell_digit_deadline`,
+    `shell_pending_kill`, `shell_pending_kill_others`,
+    `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`,
     `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`,
     `mouse_buttons`, `shell_area`.
   - §3 `key_event/tab/types.rs`: `Tab` / `TabId`.

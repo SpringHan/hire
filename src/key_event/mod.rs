@@ -66,6 +66,11 @@ pub use shell::{
     fetch_working_directory,
 };
 
+// Only the tests outside `key_event` (the shell status line in `ui`) need the
+// graphics support to mount a session without a terminal.
+#[cfg(test)]
+pub use shell::GraphicsSupport;
+
 // Export for auto config
 pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
