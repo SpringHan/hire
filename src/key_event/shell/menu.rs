@@ -19,6 +19,9 @@ use crate::{
 use super::view::{attach, open_shell};
 use crate::key_event::switch::SwitchStruct;
 
+#[cfg(test)]
+use super::view::detach;
+
 #[derive(Clone, Default)]
 pub struct ShellMenuState {
     /// The next number kills a shell instead of attaching it.
@@ -118,26 +121,41 @@ fn shell_switch(
         },
 
         '0'..='9' => {
-            if let Some(idx) = selected_index(app, &mut state, key) {
+            let entries = if state.deleting {
+                Vec::new()
+            } else {
+                menu_entries(app)
+            };
+
+            let len = if state.deleting {
+                app.tab_list.current_tab().shells.len()
+            } else {
+                entries.len()
+            };
+
+            let Some(idx) = selected_index(&mut state, key, len) else {
+                reopen(app, state);
+                return Ok(false)
+            };
+
+            if state.deleting {
+                // `x` only kills shells of the tab the menu was opened on; the
+                // other tabs are listed for attaching, not for deleting.
                 let id = app.tab_list.current_tab().shells[idx];
+                kill_shell(app, id);
 
-                if state.deleting {
-                    kill_shell(app, id);
-
-                    if app.tab_list.current_tab().shells.is_empty() {
-                        return Ok(true)
-                    }
-
-                    state.deleting = false;
-                    reopen(app, state);
-                } else {
-                    attach(app, id)?;
+                if app.tab_list.current_tab().shells.is_empty() {
+                    return Ok(true)
                 }
 
-                return Ok(false)
+                state.deleting = false;
+                reopen(app, state);
+            } else {
+                // A shell of another tab is borrowed: `attach` switches the
+                // tab internally and `detach` brings the user back here.
+                attach(app, entries[idx])?;
             }
 
-            reopen(app, state);
             return Ok(false)
         },
 
@@ -169,16 +187,29 @@ fn kill_shell(app: &mut App, id: ShellId) {
     }
 }
 
+/// The shells the menu attaches, in display order: the current tab's shells
+/// first (so their numbers do not change), then the shells of the other tabs.
+fn menu_entries(app: &App) -> Vec<ShellId> {
+    let current = app.tab_list.current_tab().id;
+    let mut entries = app.tab_list.current_tab().shells.clone();
+
+    for tab in app.tab_list.tabs() {
+        if tab.id != current {
+            entries.extend(tab.shells.iter().copied());
+        }
+    }
+
+    entries
+}
+
 /// Read one digit of a shell number. Returns the index once the typed number
 /// can no longer grow into a valid one.
 fn selected_index(
-    app: &App,
     state: &mut ShellMenuState,
     key: char,
+    len: usize,
 ) -> Option<usize>
 {
-    let len = app.tab_list.current_tab().shells.len();
-
     if len == 0 {
         return None
     }
@@ -228,16 +259,28 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
             .map(|tab| tab.shells.len())
             .unwrap_or(0);
 
+        // Name the tab: the menu lists the other tabs too, so "this tab" is
+        // not enough to know which shells the confirmation will kill.
+        let tab_number = app
+            .tab_list
+            .tabs()
+            .iter()
+            .position(|tab| tab.id == tab_id)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+
         text.push_line(
             Line::raw(format!(
-                "Kill all {count} shell(s) of this tab? (y/N)"
+                "Kill all {count} shell(s) of tab {tab_number}? (y/N)"
             ))
             .red(),
         );
     }
 
     if state.deleting {
-        text.push_line(Line::raw("Delete mode: type the shell number!").red());
+        text.push_line(
+            Line::raw("Delete mode: type the shell number of this tab!").red(),
+        );
     }
 
     if !state.selecting.is_empty() {
@@ -248,45 +291,70 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
 
     text.push_line("");
 
-    let tab = app.tab_list.current_tab();
+    let current = app.tab_list.current_tab().id;
+    let current_index = app.tab_list.current();
 
-    if tab.shells.is_empty() {
-        text.push_line(Line::raw("No shell is mounted on this tab."));
-        return CmdContent::Text(text)
+    // The current tab's shells come first so their numbers are the ones users
+    // already know; every other tab with a shell follows.
+    let mut sections = vec![(current_index, app.tab_list.current_tab(), true)];
+
+    for (idx, tab) in app.tab_list.tabs().iter().enumerate() {
+        if tab.id != current && !tab.shells.is_empty() {
+            sections.push((idx, tab, false));
+        }
     }
 
-    for (idx, id) in tab.shells.iter().enumerate() {
-        // The foreground program, not the shell: `vim` and `zsh` sessions must
-        // be distinguishable at a glance.
-        let (title, cwd, alive) = match app.shell_sessions.get(*id) {
-            Some(session) => (
-                session.display_title(),
-                session.meta.cwd.to_string_lossy().into_owned(),
-                session.alive,
-            ),
-            None => (String::from("?"), String::new(), false),
-        };
+    let mut number = 0;
 
-        let marker = if tab.active_shell == Some(*id) {
-            "*"
-        } else if !alive {
-            "!"
+    for (tab_idx, tab, is_current) in sections {
+        if is_current {
+            text.push_line(Line::raw(format!("This tab (tab {})", tab_idx + 1)).bold());
         } else {
-            " "
-        };
-
-        let mut line = Line::default();
-        line.push_span(
-            Span::raw(format!("[{}] ", idx))
-                .add_modifier(Modifier::BOLD),
-        );
-        line.push_span(Span::raw(format!("{marker} {title}  {cwd}")));
-
-        if !alive {
-            line.push_span(Span::raw("  (exited)").red());
+            text.push_line(Line::raw(format!("Tab {}", tab_idx + 1)).bold());
         }
 
-        text.push_line(line);
+        if tab.shells.is_empty() {
+            text.push_line(Line::raw("  (no shell)"));
+            text.push_line(Line::default());
+            continue
+        }
+
+        for id in &tab.shells {
+            // The foreground program, not the shell: `vim` and `zsh` sessions
+            // must be distinguishable at a glance.
+            let (title, cwd, alive) = match app.shell_sessions.get(*id) {
+                Some(session) => (
+                    session.display_title(),
+                    session.meta.cwd.to_string_lossy().into_owned(),
+                    session.alive,
+                ),
+                None => (String::from("?"), String::new(), false),
+            };
+
+            let marker = if tab.active_shell == Some(*id) {
+                "*"
+            } else if !alive {
+                "!"
+            } else {
+                " "
+            };
+
+            let mut line = Line::default();
+            line.push_span(
+                Span::raw(format!("  [{}] ", number))
+                    .add_modifier(Modifier::BOLD),
+            );
+            line.push_span(Span::raw(format!("{marker} {title}  {cwd}")));
+
+            if !alive {
+                line.push_span(Span::raw("  (exited)").red());
+            }
+
+            text.push_line(line);
+            number += 1;
+        }
+
+        text.push_line(Line::default());
     }
 
     CmdContent::Text(text)
@@ -348,6 +416,82 @@ mod test {
             .map(|span| span.content.as_ref())
             .collect::<Vec<_>>()
             .join("")
+    }
+
+    /// The menu lists the shells of the other tabs after the current tab's
+    /// ones. Attaching one of them borrows it: the tab is switched internally,
+    /// and `detach` returns to the tab the menu was opened on.
+    #[test]
+    fn test_menu_attaches_a_shell_of_another_tab_and_returns() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first_tab = app.tab_list.current_tab().id;
+        mount_shell(&mut app);
+
+        app.tab_list.push(app.path.clone(), false);
+        let second_index = app.tab_list.len() - 1;
+        app.tab_list.set_current(second_index);
+        let second_shell = mount_shell(&mut app);
+
+        app.tab_list.set_current(0);
+
+        shell_operation(&mut app).unwrap();
+
+        let text = menu_text(&app);
+        assert!(text.contains("This tab (tab 1)"), "{text}");
+        assert!(text.contains("Tab 2"), "{text}");
+        // The current tab's shell is number 0, the other tab's shell 1.
+        assert!(text.contains("[0]"), "{text}");
+        assert!(text.contains("[1]"), "{text}");
+
+        let case = app.switch_case.clone().expect("the shell menu is open");
+        switch_match(&mut app, case, '1').unwrap();
+
+        // The view belongs to the shell's own tab while it is attached.
+        assert_eq!(app.selected_block.shell_id(), Some(second_shell));
+        assert_eq!(app.tab_list.current(), second_index);
+        assert_eq!(app.shell_return_tab, Some(first_tab));
+
+        detach(&mut app);
+
+        // ...and the user is back on the tab the menu was opened on.
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert_eq!(app.tab_list.current(), 0);
+        assert_eq!(app.tab_list.current_tab().id, first_tab);
+        assert!(app.shell_return_tab.is_none());
+    }
+
+    /// `x` keeps working on the current tab only, even though the menu lists
+    /// the shells of the other tabs too.
+    #[test]
+    fn test_delete_mode_only_kills_shells_of_the_current_tab() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first_shell = mount_shell(&mut app);
+
+        app.tab_list.push(app.path.clone(), false);
+        let second_index = app.tab_list.len() - 1;
+        app.tab_list.set_current(second_index);
+        let second_tab = app.tab_list.current_tab().id;
+        let second_shell = mount_shell(&mut app);
+
+        app.tab_list.set_current(0);
+
+        menu(&mut app, &['x', '0']);
+
+        assert!(app.tab_list.current_tab().shells.is_empty());
+        assert!(!app.shell_sessions.is_alive(first_shell));
+        assert!(app.shell_sessions.is_alive(second_shell));
+        assert_eq!(
+            app.tab_list.tab_by_id(second_tab).unwrap().shells,
+            vec![second_shell]
+        );
     }
 
     /// `D` asks before clearing every shell; `y` then kills them all and keeps

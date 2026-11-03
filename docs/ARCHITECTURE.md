@@ -194,6 +194,9 @@ Responsibilities:
   `shell_pending_kill` (one shell),
   `shell_pending_kill_others` (the shell which stays, every other one of its tab
   is killed) and `shell_pending_kill_all` (a tab id; every shell of that tab),
+  `shell_recent` (the most recently attached shells, newest first — `B`'s
+  fallback when the current tab has none) and `shell_return_tab` (the tab to go
+  back to after detaching a borrowed shell),
   `shell_digits` and `shell_digit_deadline` (numbered selection), `clear_screen`
   (full repaint after attaching/detaching) and `shell_notice` (an error shown in
   the shell status line instead of replacing the view).
@@ -358,16 +361,16 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `KeySpec` (key + modifiers parsed from `C-s`/`M-u`/`PageUp`/…), `ShellPrefix` (built on `KeySpec`), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach_active` attaches the tab's remembered shell for `attach_shell`), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s [` scroll mode), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` also re-reads the current directory (`refresh_after_shell`) since the shell may have changed it. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s [` scroll mode), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
 | `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): list, attach, create and kill the shells of the current tab; `D` clears every shell of the tab after a y/N confirmation. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): lists the current tab's shells first and then the shells of the other tabs (`menu_entries`); digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab, `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
 | `key_event/switch/traits.rs` | `SwitchStruct` / `SwitchClone` traits, `Clone` for `SwitchCaseData`. |
 | `key_event/tab/mod.rs` | Tab module wiring and restoring stored tab groups. |
 | `key_event/tab/types.rs` | `TabId`, `Tab` (path, hidden flag, selection, mounted shells) and `TabList`; `TabState` (tab menu state) and `TabAction` (the destructive operation waiting for confirmation). |
-| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; every removal (`c`, `d` + number, `o`, restoring a stored group) asks first when mounted shells would be killed. |
+| `key_event/tab/utils.rs` | Tab operations: open/close/switch/save/restore; every removal (`c`, `d` + number, `o`, restoring a stored group) asks first when mounted shells would be killed. `switch_to_tab` saves the current tab's view state and restores the target's; `next`/`prev`/`switch_tab` and the shell borrow use it. |
 
 **`key_event/mod.rs`** — the input dispatcher.
 
@@ -382,7 +385,8 @@ early-returns an `anyhow`-backed error.
   `shell::open_shell` (a mounted, attachable session); `AppCommand::ShellMenu`
   opens the shell menu; `AppCommand::ShellAttach` calls
   `shell::attach_active`, which attaches the shell remembered by the current
-  tab (`Tab.active_shell`).
+  tab (`Tab.active_shell`) or, when the tab has none, the most recently
+  attached shell of another tab (`App.shell_recent`).
 - Re-exports the public types used by `app`, `ui` and `main`
   (`TabList`, `FileSearcher`, `EditMode`, `SwitchCase`, `ShellCommand`, …).
 
@@ -466,11 +470,17 @@ serves `--working-directory` and the state-line indicator.
 
 *Mounted sessions.* `view.rs`'s `open_shell` spawns `default_shell` into the
 `ShellSessions` registry (`session.rs`), pushes the id onto
-`Tab.shells` and attaches it. `attach`/`detach` only flip `Block::Shell` and
-`Tab.active_shell`; the session keeps running while detached. From the browser,
-`attach_shell` (`B`) calls `attach_active`, which attaches the shell the tab
-used last; it is the quick counterpart of the shell menu and needs no
-numbering. `handle_view_key`
+`Tab.shells` and attaches it. `attach`/`detach` flip `Block::Shell` and
+`Tab.active_shell`; the session keeps running while detached. An attached shell
+always belongs to the current tab: attaching one which belongs to another tab
+(a digit in the shell menu, or `B`'s fallback) switches to that tab through
+`tab::switch_to_tab` and stores the tab the user came from in
+`App.shell_return_tab`; `detach` refreshes the shell's tab and then switches
+back, so borrowing a background shell does not leave the user on a different
+tab. From the browser, `attach_shell` (`B`) calls `attach_active`, which
+attaches the shell the tab used last (or the most recent shell of another tab
+when this tab has none); it is the quick counterpart of the shell menu and
+needs no numbering. `handle_view_key`
 implements the attached-view state machine: the prefix chord (`C-s`, from
 `shell_prefix`), detach/switch/create/kill, and the numbered selection
 (0-based; with more than ten shells the digits are accumulated and committed on
@@ -709,7 +719,8 @@ spawn_shell (`S`) / --working-directory
        └─ attach → Block::Shell(id), clear_screen
             └─ main loop: 16 ms poll, handle_view_key forwards keys
                  ├─ `C-s d` → detach: Block::Browser + refresh the current
-                 │    directory, session still mounted
+                 │    directory (and, for a borrowed shell, go back to the
+                 │    tab the shell was borrowed from), session still mounted
                  ├─ `C-s n/p`, `C-s <number>` → attach another shell
                  ├─ `C-s c` → open another shell on the same tab
                  ├─ `C-s x` → prompt; `y` kills it and attaches the next
@@ -734,17 +745,24 @@ spawn_shell (`S`) / --working-directory
                  └─ shell exits → handle_shell_events reaps it, removes the id
                       from the tab and attaches the next live shell; when there
                       is none it detaches, which also refreshes the browser
+                      (and returns to the tab a borrowed shell came from)
 
 shell_menu (`T`)
-  ├─ list the tab's shells (0-based); digits attach, `n` new, `x` + digits kill
-  └─ `D` → prompt; `y` kills every shell of the tab and keeps the tab open
-       (App::close_tab_shells); the menu is shown again
+  ├─ list the current tab's shells first (0-based), then the other tabs'
+  │    shells under `Tab N`; digits attach either kind, `n` new, `x` + digits
+  │    kill (current tab only)
+  ├─ attaching a shell of another tab → attach switches that tab, stores
+  │    `shell_return_tab`; `C-s d` refreshes that tab and switches back
+  └─ `D` → prompt; `y` kills every shell of the current tab and keeps the tab
+       open (App::close_tab_shells); the menu is shown again
 
 attach_shell (`B`)
-  └─ shell::attach_active → attach(Tab.active_shell)
-       ├─ the shell the tab attached last, however it was chosen
-       │    (`S`, the menu, `C-s n/p`, `C-s <number>`)
-       └─ no shell on the tab → an error in the command line, no view change
+  └─ shell::attach_active
+       ├─ attach(Tab.active_shell) — the shell this tab attached last,
+       │    however it was chosen (`S`, the menu, `C-s n/p`, `C-s <number>`)
+       └─ no shell on this tab → attach the most recently attached shell of
+            another tab (`App.shell_recent`), with the same borrow-and-return
+            behaviour; an error only when no tab has a shell
 ```
 
 `ui/shell_block.rs` renders the attached screen into the middle band, and
@@ -859,12 +877,14 @@ binary) and return early when `/bin/sh` does not exist; they need no network and
 no installed binary. They are
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
-kill-all, `C-s o` kill-others, detach refresh), `key_event::shell::scroll::test::*`
+kill-all, `C-s o` kill-others, detach refresh, `attach_active` and its
+cross-tab fallback), `key_event::shell::scroll::test::*`
 (scrolling, paging, top/bottom, wheel, leaving at the bottom),
 `key_event::shell::input::test::*` (`KeySpec` parsing/labels, `shell_prefix`),
 `config::keymap::test::*` (the default scroll bindings and the `keymap.toml`
 sections), `key_event::shell::menu::test::*` (the shell menu's `D`
-confirmation), `ui::shell_block::test::*` (the idle status line and the prefix
+confirmation, the cross-tab list/borrow and the `x` scope),
+`ui::shell_block::test::*` (the idle status line and the prefix
 hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or

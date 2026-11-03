@@ -20,7 +20,7 @@ use vt100::MouseProtocolMode;
 use crate::{
     app::App,
     error::{AppResult, ErrorType, NotFoundType},
-    key_event::TabId,
+    key_event::{tab::switch_to_tab, TabId},
     rt_error,
     utils::{Block, ShellId},
 };
@@ -60,16 +60,48 @@ pub fn open_shell(app: &mut App) -> AppResult<()> {
 /// `Tab::active_shell` follows every attach (`C-s <number>`, `C-s n/p`, the
 /// shell menu and the exit cleanup), so going back to the shell which was in
 /// front is a single key instead of opening the shell menu.
+///
+/// When the tab has no shell at all, the shell attached most recently on
+/// another tab is borrowed instead, so `B` still reaches the background
+/// shells a tab may not own. The tab is switched internally for the view and
+/// `detach` returns to this one (see `attach`).
 pub fn attach_active(app: &mut App) -> AppResult<()> {
-    let active = app.tab_list.current_tab().active_shell;
+    let (tab_id, active, has_shells) = {
+        let tab = app.tab_list.current_tab();
+        (tab.id, tab.active_shell, !tab.shells.is_empty())
+    };
 
-    let Some(id) = active else {
-        rt_error!("No shell is active on the current tab")
+    if has_shells {
+        let Some(id) = active else {
+            rt_error!("No shell is active on the current tab")
+        };
+
+        return attach(app, id)
+    }
+
+    let Some(id) = recent_shell(app, tab_id) else {
+        rt_error!("No shell is mounted on this tab or another tab")
     };
 
     attach(app, id)
 }
 
+/// The most recently attached shell which belongs to another tab.
+fn recent_shell(app: &App, current_tab: TabId) -> Option<ShellId> {
+    app.shell_recent.iter().copied().find(|id| {
+        app.shell_sessions.get(*id).is_some_and(|session| {
+            session.alive && session.tab != current_tab
+        })
+    })
+}
+
+/// Attach `id` and make it the view's shell.
+///
+/// An attached shell must belong to the current tab: the status line, the
+/// prefix commands (`C-s c`, `C-s n/p`, `C-s D`, …), the exit cleanup and the
+/// mouse/key forwarding all work on `current_tab()`. Attaching a shell of
+/// another tab therefore switches that tab for the duration of the view;
+/// `shell_return_tab` remembers where the user was so `detach` can go back.
 pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     let (tab_id, alive) = match app.shell_sessions.get(id) {
         Some(session) => (session.tab, session.alive),
@@ -78,6 +110,13 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
 
     if !alive {
         rt_error!("This shell has already exited")
+    }
+
+    let current_tab = app.tab_list.current_tab().id;
+
+    if current_tab != tab_id {
+        switch_to_tab(app, tab_id)?;
+        app.shell_return_tab.get_or_insert(current_tab);
     }
 
     if let Some(tab) = app.tab_list.tab_by_id_mut(tab_id) {
@@ -105,6 +144,8 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
         session.parser().screen_mut().set_scrollback(0);
     }
 
+    app.note_attached_shell(id);
+
     Ok(())
 }
 
@@ -125,6 +166,20 @@ pub fn detach(app: &mut App) {
     // The shell may have created, renamed or deleted files while it was in
     // front, so the browser's lists are stale.
     refresh_after_shell(app);
+
+    // A borrowed shell returns the user to the tab they came from. The shell's
+    // tab was just refreshed and `switch_to_tab` saves that state, so the next
+    // visit shows the files the shell changed.
+    if let Some(origin) = app.shell_return_tab.take()
+        && origin != app.tab_list.current_tab().id
+    {
+        match switch_to_tab(app, origin) {
+            // `selected_block` was built from the shell's tab; the browser
+            // flag follows the tab which is current now.
+            Ok(()) => app.selected_block = Block::Browser(app.root()),
+            Err(err) => app.app_error.append_errors(err.iter()),
+        }
+    }
 }
 
 /// Re-read the current directory after leaving the shell view.
@@ -453,6 +508,16 @@ pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
 }
 
 impl App<'_> {
+    /// Remember `id` as the most recently attached shell.
+    ///
+    /// The list is capped: it only serves `attach_active`'s fallback, which
+    /// picks the newest entry whose session is still alive.
+    fn note_attached_shell(&mut self, id: ShellId) {
+        self.shell_recent.retain(|shell| *shell != id);
+        self.shell_recent.insert(0, id);
+        self.shell_recent.truncate(64);
+    }
+
     /// Reap exited sessions and repair the tab/view state.
     pub fn handle_shell_events(&mut self) {
         let exited = self.shell_sessions.drain_exits();
@@ -982,6 +1047,95 @@ mod test {
         assert_eq!(app.tab_list.current_tab().active_shell, Some(first));
         // The other shells of the tab are untouched.
         assert_eq!(app.tab_list.current_tab().shells.len(), 3);
+        // A shell of the current tab does not borrow a tab.
+        assert!(app.shell_return_tab.is_none());
+    }
+
+    /// `B` on a tab without any shell borrows the shell of another tab which
+    /// was attached last; `detach` returns to the tab the user was on.
+    #[test]
+    fn test_attach_active_borrows_the_last_shell_of_another_tab() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first_tab = app.tab_list.current_tab().id;
+        let id = open_test_shell(&mut app);
+
+        // Attach it once so it becomes the most recently used shell.
+        attach(&mut app, id).unwrap();
+        detach(&mut app);
+
+        // Move to a tab without any shell.
+        app.tab_list.push(app.path.clone(), false);
+        let empty_index = app.tab_list.len() - 1;
+        app.tab_list.set_current(empty_index);
+        let empty_tab = app.tab_list.current_tab().id;
+
+        attach_active(&mut app).unwrap();
+
+        assert_eq!(app.selected_block.shell_id(), Some(id));
+        // The view is rendered as part of the shell's own tab.
+        assert_eq!(app.tab_list.current(), 0);
+        assert_eq!(app.tab_list.current_tab().id, first_tab);
+        assert_eq!(app.shell_return_tab, Some(empty_tab));
+
+        detach(&mut app);
+
+        assert_eq!(app.tab_list.current(), empty_index);
+        assert_eq!(app.tab_list.current_tab().id, empty_tab);
+        assert!(app.shell_return_tab.is_none());
+    }
+
+    /// Detaching a borrowed shell refreshes the shell's own tab before
+    /// returning, so the tab's remembered selection still points at the same
+    /// file when the user visits it later.
+    #[test]
+    fn test_detach_refreshes_the_borrowed_shell_tab() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let dir = temp_dir("borrowed-refresh");
+        fs::write(dir.join("b.txt"), "").unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        app.file_search_sync(String::from("b.txt"), true).unwrap();
+
+        // The tab only stores its directory when it is left, so save it here:
+        // the test never switches tabs through the normal path.
+        crate::key_event::tab::update_current_tab(&mut app);
+
+        let shell_tab = app.tab_list.current_tab().id;
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+        detach(&mut app);
+        assert!(app.shell_return_tab.is_none());
+
+        // A second tab which borrows the shell.
+        app.tab_list.push(app.path.clone(), false);
+        let other_index = app.tab_list.len() - 1;
+        app.tab_list.set_current(other_index);
+        let other_tab = app.tab_list.current_tab().id;
+
+        attach(&mut app, id).unwrap();
+        assert_eq!(app.shell_return_tab, Some(other_tab));
+
+        // The shell writes a file which sorts before the selected one.
+        fs::write(dir.join("a.txt"), "").unwrap();
+
+        detach(&mut app);
+        assert_eq!(app.tab_list.current(), other_index);
+
+        // The refresh ran while the shell's tab was still current, so the saved
+        // selection is right even though the directory changed meanwhile.
+        switch_to_tab(&mut app, shell_tab).unwrap();
+        assert_eq!(
+            app.get_file_saver().map(|file| file.name.as_str()),
+            Some("b.txt"),
+        );
     }
 
     /// A tab without a shell (or whose shells are all gone) has nothing to

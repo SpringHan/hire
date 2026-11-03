@@ -119,6 +119,20 @@ pub struct App<'a> {
     /// in the meantime.
     pub shell_pending_kill_all: Option<TabId>,
 
+    /// The shells attached most recently, newest first.
+    ///
+    /// `attach_active` (`B`) uses it to borrow the last used shell of another
+    /// tab when the current tab has none.
+    pub shell_recent: Vec<ShellId>,
+
+    /// The tab to go back to after detaching a shell borrowed from another tab.
+    ///
+    /// Attaching a shell of another tab switches the current tab for the
+    /// duration of the view (the shell always belongs to the tab it is
+    /// rendered in); this remembers the tab the user was in so `detach` can
+    /// return there.
+    pub shell_return_tab: Option<TabId>,
+
     /// Digits typed after the prefix, used to select a shell by number.
     pub shell_digits: String,
 
@@ -210,6 +224,8 @@ impl<'a> Default for App<'a> {
             shell_pending_kill: None,
             shell_pending_kill_others: None,
             shell_pending_kill_all: None,
+            shell_recent: Vec::new(),
+            shell_return_tab: None,
             shell_digits: String::new(),
             shell_digit_deadline: None,
             clear_screen: false,

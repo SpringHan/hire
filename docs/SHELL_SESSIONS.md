@@ -599,22 +599,33 @@ impl App<'_> {
   `current_tab().active_shell` without opening the shell menu. The tab's
   remembered shell follows every `attach` (numbers, `C-s n`/`C-s p`, the menu,
   the exit cleanup), so it is "the shell I was in last", not "the shell opened
-  last". A tab without a shell reports an error instead of changing the view;
-  `attach` still rejects a session which has already exited.
-- `attach`: fail if the session is missing or dead; clear `switch_case`, command
+  last". When the current tab has no shell at all it borrows the shell of
+  another tab which was attached most recently (`App.shell_recent`, newest
+  first, alive sessions only), with the same borrow-and-return behaviour as the
+  menu; an error is reported only when no tab has a shell. `attach` still
+  rejects a session which has already exited.
+- `attach`: fail if the session is missing or dead. If the shell belongs to
+  another tab, switch to that tab first (`tab::switch_to_tab`: save the current
+  tab's view state, restore the target's) and remember the tab the user came
+  from in `App.shell_return_tab`. This keeps the invariant that an attached
+  shell belongs to the current tab, so the status line, `C-s c`, `C-s n/p`,
+  `C-s D`, `C-s o` and the exit cleanup keep working without knowing about
+  borrowing. Then clear `switch_case`, command
   line/expand/completion state, `shell_prefix_active`, `shell_scroll_mode`,
   `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`;
   reset the shell's scrollback offset to the live screen; set
   `selected_block = Block::Shell(id)`; set `active_shell`; set
-  `app.clear_screen = true`.
+  `app.clear_screen = true`; record the shell in `App.shell_recent`.
 - `detach`: clear the prefix/pending state, set
   `selected_block = Block::Browser(app.root())`, set `clear_screen`, then
   `refresh_after_shell`: re-read the current directory (the shell may have
   created, renamed or deleted files) and select the previously selected file
-  again when it still exists. Errors are reported through the error banner —
-  note that a removed current directory is handled by `init_parent_files`,
-  which moves the browser to an existing sibling. The session is **not**
-  touched — it keeps running and keeps parsing output.
+  again when it still exists. If the shell was borrowed from another tab,
+  `App.shell_return_tab` makes `detach` switch back to it after the refresh (the
+  shell's tab state is saved by that switch). Errors are reported through the
+  error banner — note that a removed current directory is handled by
+  `init_parent_files`, which moves the browser to an existing sibling. The
+  session is **not** touched — it keeps running and keeps parsing output.
 - `next_shell`: cycle `current_tab().shells` among alive sessions; no-op when
   there is only one.
 - `x` (inside the prefix) requests a kill confirmation through
@@ -970,39 +981,54 @@ by the tab menu.
 - `shell_operation(app)` opens the page with
   `SwitchCaseData::Struct(ShellMenuState)` (`{ deleting: bool, selecting:
   String, clear_pending: Option<TabId> }`).
-- Message: one line per shell of the current tab, numbered from **0**:
-  `[0] vim  ~/project`; `*` marks the active shell, `!` marks an exited one.
-  The name is `ShellSession::display_title` — the program currently running in
-  that shell, not the shell program it was started with. Without it every
-  shell started from the same `default_shell` would read `zsh` even when one of
-  them is running vim. A shell at its prompt shows the shell's own name.
+- Message: the shells which can be attached, numbered from **0**. The current
+  tab's shells come first (their numbers are the ones users already know), then
+  the shells of every other tab, grouped under `Tab N` (1-based, like the title
+  badge and `switch_tab`). A line reads `  [0] * vim  ~/project`; `*` marks the
+  shell's own tab's active shell, `!` marks an exited one. The name is
+  `ShellSession::display_title` — the program currently running in that shell,
+  not the shell program it was started with. Without it every shell started
+  from the same `default_shell` would read `zsh` even when one of them is
+  running vim. A shell at its prompt shows the shell's own name.
 - Keys:
-  - `0..9` — attach that shell. A number is accumulated exactly like the
-    prefix's digits (0-based, width of the largest index); the page is
-    re-rendered while the number is incomplete. Attaching clears the switch
-    case and returns `false`, so `switch_match` does not overwrite the block
-    with `quit_command_mode`.
+  - `0..9` — attach that shell. The menu builds one flat list (`menu_entries`:
+    current tab first, then the other tabs in tab order). A shell of another
+    tab is **borrowed**: `attach` switches that tab internally (the view must
+    belong to the shell's tab, see §9), stores `shell_return_tab`, and `detach`
+    refreshes the shell's tab and returns to the tab the menu was opened on.
+    A number is accumulated exactly like the prefix's digits (0-based, width of
+    the largest index); the page is re-rendered while the number is incomplete.
+    Attaching clears the switch case and returns `false`, so `switch_match`
+    does not overwrite the block with `quit_command_mode`.
   - `n` — `open_shell` on this tab and attach it.
-  - `x` then the number — kill that shell (two-step; no modal confirm needed).
+  - `x` then the number — kill that shell. The scope is the **current tab**,
+    even though the other tabs' shells are listed: `selected_index` is fed
+    `current_tab().shells.len()`, so a number of another tab is out of range
+    and does nothing. Two-step, no modal confirm needed.
   - `D` — kill **every** shell mounted on the current tab; the tab itself stays
-    open. The page turns into a y/N confirmation (`Kill all N shell(s) of this
-    tab? (y/N)`); `y` calls `App::close_tab_shells(tab_id)` and any other key
-    cancels. This is the tab-level "clear shells" action; it used to live in the
-    tab menu and was moved here because it is a shell operation, not a tab one.
-    The attached view's `C-s D` performs the same action while a shell owns the
-    input.
+    open. The page turns into a y/N confirmation (`Kill all N shell(s) of tab
+    X? (y/N)`; the tab number keeps the prompt unambiguous now that the other
+    tabs are visible); `y` calls `App::close_tab_shells(tab_id)` and any other
+    key cancels. This is the tab-level "clear shells" action; it used to live in
+    the tab menu and was moved here because it is a shell operation, not a tab
+    one. The attached view's `C-s D` performs the same action while a shell owns
+    the input.
   - `Esc` — close (handled by the existing `Esc` path).
 - Rebuilding the page after a kill reuses `generate_msg`; when the tab has no
   shells left, return `true` to close the menu. After clearing the shells the
-  menu is shown again (it reads "No shell is mounted on this tab."), so the tab
+  menu is shown again (the current tab section reads `(no shell)`), so the tab
   is visibly still there.
+- `menu_entries` and `generate_msg` must walk the tabs in the same order
+  (current first, then `TabList::tabs()` order) so the displayed numbers and the
+  attached shells agree. Other tabs are only listed when they have at least one
+  shell; the current tab is always shown (reading `(no shell)` when empty).
 
 Add the command to `AppCommand` (`ShellMenu`), parse `"shell_menu"` in
 `AppCommand::from_str`, dispatch it in `AppCommand::execute`
 (`shell::menu::shell_operation(app)?`), and bind it in both shipped keymaps:
 
 ```toml
-{ key = "T", run = "shell_menu" },   # List / attach / kill shells of this tab
+{ key = "T", run = "shell_menu" },   # List / attach / kill shells of any tab
 ```
 
 `T` is free in `default.toml` and `colemak.toml`. `spawn_shell` (`S`) keeps its
@@ -1011,9 +1037,11 @@ current key and now creates + attaches a new session.
 The menu's job for the *common* case — "go back to the shell I was in" — does
 not need a list: the tab already stores `active_shell`. `AppCommand::ShellAttach`
 (parsed from `"attach_shell"`, bound to `B` in both shipped keymaps) calls
-`shell::attach_active`, which attaches `current_tab().active_shell` and reports
-an error when the tab has no shell. The remembered value is updated by every
-attach, so it is the last shell used, not the last one opened.
+`shell::attach_active`, which attaches `current_tab().active_shell`; when the
+tab has no shell it borrows the most recently attached shell of another tab
+(`App.shell_recent`, newest first, alive sessions only), with the same
+borrow-and-return behaviour as the menu. The remembered value is updated by
+every attach, so it is the last shell used, not the last one opened.
 
 ```toml
 { key = "B", run = "attach_shell" },   # Attach the shell this tab used last
@@ -1095,16 +1123,16 @@ Do not flip the block back just to run a harness.
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions`; the graphics event channel and `drain_graphics` |
 | `src/key_event/shell/input.rs` *(new)* | `KeySpec` (key + modifiers, parsed from `M-u`/`C-b`/`PageUp`/…), `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `attach_active` (the `attach_shell` command), `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`, `C-s [`, the `shell_scroll` keys), `handle_view_mouse` (wheel forwarded by default, `Shift`+wheel and the scroll mode scroll the history; `outer_mouse_mode` capture policy), `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach` (switches to the shell's tab and records `shell_return_tab` when it is borrowed), `attach_active` (the `attach_shell` command, with the most-recent-other-tab fallback), `detach` (refreshes the browser, then returns to `shell_return_tab`), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`, `C-s [`, the `shell_scroll` keys), `handle_view_mouse` (wheel forwarded by default, `Shift`+wheel and the scroll mode scroll the history; `outer_mouse_mode` capture policy), `handle_view_paste`; the `App` methods `note_attached_shell`, `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
 | `src/key_event/shell/scroll.rs` *(new)* | `ScrollCommand`, `enter`, `leave`, `apply`, `handle_wheel`: moves `vt100`'s scrollback offset and derives `shell_scroll_mode` from it |
-| `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message; `n`/`x`/digits and `D` (clear every shell of the tab, with a y/N confirmation) |
+| `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message; `menu_entries` (current tab first, then the other tabs) and the grouped message; digits attach any tab's shell (a foreign one is borrowed), `n`/`x`/`D` stay on the current tab; `D` (clear every shell of the tab, with a y/N confirmation naming the tab) |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
 | `src/key_event/shell/utils.rs` | keep `shell_process`; factor shell-program resolution into a helper |
 | `src/key_event/tab/types.rs` | `TabId`, `Tab`, `TabList` rewrite (§5) |
-| `src/key_event/tab/utils.rs` | migrate every mutation site; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts. Clearing the shells of a tab without removing it is not a tab action anymore: it lives in the shell menu (`T`, `D`) |
+| `src/key_event/tab/utils.rs` | migrate every mutation site; every tab removal (`c`, `d` + number, `o`, stored-group restore) asks first when mounted shells would be killed (`TabAction` + confirmation page); show shell counts. `switch_to_tab`/`switch_to` save the current tab's view state and restore the target's; they are used by `next`/`prev`/`switch_tab` and by the shell borrow. Clearing the shells of a tab without removing it is not a tab action anymore: it lives in the shell menu (`T`, `D`) |
 | `src/key_event/tab/mod.rs` | export `TabId`, `Tab` |
 | `src/key_event/sudo_session.rs` | adapt to `tabs()` / `set_tabs`; shells are never transferred |
-| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_scroll_mode`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
+| `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_scroll_mode`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_recent`, `shell_return_tab`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
 | `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes` + `handle_shell_graphics`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/app/image_preview.rs` | `protocol_type` / `font_size` accessors (the shell graphics support is derived from the detected protocol and cell size) |
 | `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; `ShellAttach` → `attach_active`; exports |
@@ -1129,9 +1157,12 @@ the shell status line). Everything else matches with `if let` or `_`.
 
 | Situation | Behaviour |
 | --- | --- |
-| Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser and refresh the current directory; tab list updated |
-| Detach (`C-s d`) | return to the browser and re-read the current directory, keeping the selected file selected |
-| Shell killed (`C-s x`, no shell left) | same as detaching: back to the browser, refreshed |
+| Shell exits while attached | reap it, attach the tab's next live shell, else return to the browser and refresh the current directory (and, if the shell was borrowed, return to the tab it was borrowed from); tab list updated |
+| Detach (`C-s d`) | return to the browser and re-read the current directory, keeping the selected file selected; a borrowed shell's tab is refreshed first and `detach` then switches back to the tab the user came from |
+| Shell killed (`C-s x`, no shell left) | same as detaching: back to the browser, refreshed (and back to the original tab when the shell was borrowed) |
+| Attach a shell of another tab (menu digit, or `B` when the current tab has none) | `attach` switches that tab internally (`switch_to_tab`) and stores `App.shell_return_tab`; while attached the title bar shows the shell's tab. `detach` refreshes that tab and switches back to the original one |
+| `B` on a tab without any shell | borrow the most recently attached shell of another tab (`App.shell_recent`, alive only); the same borrow-and-return applies. An error is shown only when no tab has an attachable shell |
+| The borrowed shell's tab is removed while it is attached | impossible through the UI (no tab command is reachable while a shell owns the input); if `shell_return_tab` no longer exists, `detach` reports the tab-switch error and stays in the shell's tab |
 | Shell exits while detached | remove it from `shells`; clear `active_shell` if it pointed at the shell; no view change |
 | Close a tab with shells | the tab menu asks first; `y` closes the tab and kills every shell of it (`close_tab_shells`) |
 | `delete_other_tabs` | asks first when a removed tab has shells; `close_tab_shells` on every removed tab |
@@ -1156,7 +1187,7 @@ the shell status line). Everything else matches with `if let` or `_`.
 | Terminal query from a background shell | answered on the next main-loop iteration by writing to the child's PTY |
 | `C-s D` while attached | a `Kill all N shell(s) of this tab?` prompt; `y` kills every shell of the tab and returns to the browser, any other key cancels |
 | `C-s o` while attached | a `Kill N other shell(s)?` prompt; `y` kills the tab's other shells, keeps the attached one attached and leaves `Tab.shells == [keep]`; any other key cancels; with a single shell the key does nothing |
-| Clear a tab's shells from the shell menu (`T`, `D`) | the menu asks (`Kill all N shell(s) of this tab? (y/N)`); `y` keeps the tab and empties its shell list, then shows the shell menu again |
+| Clear a tab's shells from the shell menu (`T`, `D`) | the menu asks (`Kill all N shell(s) of tab X? (y/N)`); `y` keeps the tab and empties its shell list, then shows the shell menu again. `D` (and `x`) only ever touch the tab the menu was opened on, even though other tabs' shells are listed |
 | Idle shell view | the status line's right side is empty; the prefix hint appears only after `shell_prefix` is pressed |
 | Close/delete a tab, close other tabs, restore a stored group | asks first only when the tabs which would lose shells actually have some; `y` performs it, any other key returns to the tab menu |
 | Mouse enabled by the child | outer mouse capture is enabled in the matching tracking mode + SGR; wheel, clicks and drags are re-encoded for the child's mode/encoding (its own wheel scrolling keeps working) |
@@ -1181,7 +1212,9 @@ the shell status line). Everything else matches with `if let` or `_`.
 - `README.md`: new "Shell Sessions" section (spawn → detach → menu → quota of
   shells per tab), `shell_prefix`, the prefix table (including `C-s o`), the
   fact that the prefix hint only appears after the prefix is pressed, the shell
-  menu's `D`, and the fact that quitting kills the shells.
+  menu's `D`, the fact that quitting kills the shells, the cross-tab shell
+  list / borrow-and-return of `T`, and `B`'s fallback to the most recently
+  attached shell of another tab.
 - `docs/ARCHITECTURE.md`:
   - §1 event-loop step: drain shell exits, `clear_screen`, variable poll.
   - §3 module table: the six new `key_event/shell/*` files and
@@ -1189,12 +1222,16 @@ the shell status line). Everything else matches with `if let` or `_`.
   - §3 `Block` description: add `Shell(ShellId)`.
   - §3 `App` field list: `shell_sessions`, `shell_prefix`, `shell_prefix_active`,
     `shell_pending_kill`, `shell_pending_kill_others`,
-    `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`,
+    `shell_pending_kill_all`, `shell_recent`, `shell_return_tab`,
+    `shell_digits`, `shell_digit_deadline`,
     `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`,
     `mouse_buttons`, `shell_area`.
+  - §3 module table: `menu_entries` / the grouped menu, `attach`'s tab borrow,
+    `detach`'s return, and `tab::switch_to_tab`.
   - §3 `key_event/tab/types.rs`: `Tab` / `TabId`.
   - §4: a "Shell session" flow (spawn → attach → detach → menu → exit/close)
-    and an "Images inside a shell" flow.
+    and an "Images inside a shell" flow; the menu block includes the other
+    tabs, and the borrow path shows `shell_return_tab` and the return.
   - §5: this document.
   - §6 test notes: the in-memory graphics filter tests.
 - `keymap_config/{default,colemak}.toml`: `shell_menu` and `attach_shell`
@@ -1219,11 +1256,12 @@ the shell status line). Everything else matches with `if let` or `_`.
 | 2c | Images painted by a TUI inside a shell: kitty query answers, placeholder image passthrough, pixel size in the PTY | done (kitty terminals only) |
 | 2d | Scrollback: `vt100` 0.16, `C-s [` scroll mode with configurable keys, `M-u`/`M-e`, wheel, status hint | done |
 | 2e | Quick attach: `attach_shell` (`B`) attaches the tab's `active_shell` without the menu | done |
+| 2f | Cross-tab shells: the menu lists every tab's shells, a foreign shell is borrowed (`shell_return_tab`), `B` falls back to the most recently attached shell, `detach` refreshes and returns | done |
 | 3 | Rename, activity notification, optional split panes | not implemented |
 
 Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the
 background, `C-s n/p` cycles the tab's shells, `S` from the browser opens
-another one. Phases 0–2d are implemented; phase 3 is not.
+another one. Phases 0–2f are implemented; phase 3 is not.
 
 ---
 
@@ -1242,3 +1280,10 @@ another one. Phases 0–2d are implemented; phase 3 is not.
 3. **`tui-term` for rendering.** `tui-term 0.2` is pinned to ratatui 0.29 +
    vt100 0.15; the renderer above is ~100 lines and keeps us on current vt100
    without another dependency (and it also gives the scrollback for free).
+4. **Borrowed view without switching tabs.** Attaching a shell of another tab
+   while keeping `current_tab()` on the origin would avoid the internal switch,
+   but the status line (`[pos/total]`), `C-s c`, `C-s n/p`, `C-s D`/`C-s o` and
+   the exit cleanup all read `current_tab()`. They would each need the shell's
+   owner tab instead, and `C-s c` would become ambiguous (create on the shell's
+   tab or on the one being browsed?). Switching the tab for the duration of the
+   view and returning on `detach` keeps one invariant and is much smaller.

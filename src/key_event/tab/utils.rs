@@ -16,7 +16,7 @@ use crate::{
     rt_error,
 };
 
-use super::types::{Tab, TabAction, TabState};
+use super::types::{Tab, TabAction, TabId, TabState};
 
 pub fn quick_switch(app: &mut App, key: char) -> AppResult<()> {
     let mut state = TabState::default();
@@ -301,11 +301,8 @@ pub fn next(app: &mut App) -> AppResult<bool> {
         return Ok(true)
     }
 
-    update_current_tab(app);
-
-    let tab = &mut app.tab_list;
-    tab.current += 1;
-    select_new(app)?;
+    let idx = app.tab_list.current() + 1;
+    switch_to(app, idx)?;
 
     Ok(true)
 }
@@ -315,10 +312,8 @@ pub fn prev(app: &mut App) -> AppResult<bool> {
         return Ok(true)
     }
 
-    update_current_tab(app);
-    let tab = &mut app.tab_list;
-    tab.current -= 1;
-    select_new(app)?;
+    let idx = app.tab_list.current() - 1;
+    switch_to(app, idx)?;
 
     Ok(true)
 }
@@ -440,18 +435,7 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
     }
 
-    let target = idx - 1;
-
-    if let Some(tab) = app.tab_list.tabs().get(target).cloned() {
-        app.tab_list.set_current(target);
-        app.goto_dir(tab.path, Some(tab.hide_files))?;
-
-        if let Some(selected) = tab.selected {
-            if selected != 0 {
-                move_cursor(app, Goto::Index(selected), app.root())?;
-            }
-        }
-    }
+    switch_to(app, idx - 1)?;
 
     Ok(true)
 }
@@ -601,6 +585,47 @@ fn select_new(app: &mut App) -> AppResult<()> {
         if selected != 0 {
             move_cursor(app, Goto::Index(selected), app.root())?;
         }
+    }
+
+    Ok(())
+}
+
+/// Switch the current tab to the one identified by `id`.
+///
+/// The view state of the tab being left (path, hidden-file flag, selection) is
+/// saved and the target tab's is restored, exactly like `[`/`]` and
+/// `switch_tab`. Used by `shell::attach` to display a shell of another tab
+/// without leaving the tab list inconsistent.
+pub fn switch_to_tab(app: &mut App, id: TabId) -> AppResult<()> {
+    let Some(idx) = app
+        .tab_list
+        .tabs()
+        .iter()
+        .position(|tab| tab.id == id)
+    else {
+        return Err(ErrorType::NotFound(NotFoundType::None).pack())
+    };
+
+    switch_to(app, idx)
+}
+
+/// Switch to the tab at `idx`, keeping the tab list and the browser state in
+/// sync.
+fn switch_to(app: &mut App, idx: usize) -> AppResult<()> {
+    if idx == app.tab_list.current() {
+        return Ok(())
+    }
+
+    let previous = app.tab_list.current();
+    update_current_tab(app);
+    app.tab_list.set_current(idx);
+
+    if let Err(err) = select_new(app) {
+        // Best effort rollback: never leave the tab list pointing at a tab
+        // whose browser state could not be restored.
+        app.tab_list.set_current(previous);
+        let _ = select_new(app);
+        return Err(err)
     }
 
     Ok(())
