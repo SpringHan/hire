@@ -572,6 +572,7 @@ New file `src/key_event/shell/view.rs`.
 ```rust
 pub fn open_shell(app: &mut App) -> AppResult<()>;
 pub fn attach(app: &mut App, id: ShellId) -> AppResult<()>;
+pub fn attach_active(app: &mut App) -> AppResult<()>;
 pub fn detach(app: &mut App);
 pub fn next_shell(app: &mut App, forward: bool) -> AppResult<()>;
 pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()>;
@@ -594,6 +595,12 @@ impl App<'_> {
 - `open_shell`: resolve `default_shell` (or `$SHELL`), `shell_sessions.open(...)`,
   push the new id onto `current_tab().shells`, set `active_shell`, then
   `attach`.
+- `attach_active` (the `attach_shell` command, default key `B`): attach
+  `current_tab().active_shell` without opening the shell menu. The tab's
+  remembered shell follows every `attach` (numbers, `C-s n`/`C-s p`, the menu,
+  the exit cleanup), so it is "the shell I was in last", not "the shell opened
+  last". A tab without a shell reports an error instead of changing the view;
+  `attach` still rejects a session which has already exited.
 - `attach`: fail if the session is missing or dead; clear `switch_case`, command
   line/expand/completion state, `shell_prefix_active`, `shell_scroll_mode`,
   `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`;
@@ -1001,6 +1008,17 @@ Add the command to `AppCommand` (`ShellMenu`), parse `"shell_menu"` in
 `T` is free in `default.toml` and `colemak.toml`. `spawn_shell` (`S`) keeps its
 current key and now creates + attaches a new session.
 
+The menu's job for the *common* case — "go back to the shell I was in" — does
+not need a list: the tab already stores `active_shell`. `AppCommand::ShellAttach`
+(parsed from `"attach_shell"`, bound to `B` in both shipped keymaps) calls
+`shell::attach_active`, which attaches `current_tab().active_shell` and reports
+an error when the tab has no shell. The remembered value is updated by every
+attach, so it is the last shell used, not the last one opened.
+
+```toml
+{ key = "B", run = "attach_shell" },   # Attach the shell this tab used last
+```
+
 ---
 
 ## 13. Configuration
@@ -1077,7 +1095,7 @@ Do not flip the block back just to run a harness.
 | `src/key_event/shell/session.rs` *(new)* | `ShellMeta`, `ShellSession`, `ShellSessions`; the graphics event channel and `drain_graphics` |
 | `src/key_event/shell/input.rs` *(new)* | `KeySpec` (key + modifiers, parsed from `M-u`/`C-b`/`PageUp`/…), `ShellPrefix`, `encode_key`, `encode_paste` |
 | `src/key_event/shell/mouse.rs` *(new)* | `encode_mouse`, `button_bit`, `inside` |
-| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach` (resets the scrollback), `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`, `C-s [`, the `shell_scroll` keys), `handle_view_mouse` (wheel forwarded by default, `Shift`+wheel and the scroll mode scroll the history; `outer_mouse_mode` capture policy), `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
+| `src/key_event/shell/view.rs` *(new)* | `open_shell` (with `graphics_support`), `attach`, `attach_active` (the `attach_shell` command), `detach` (refreshes the browser), `next_shell`, `handle_view_key` (`C-s x`, `C-s D`, `C-s o`, `C-s [`, the `shell_scroll` keys), `handle_view_mouse` (wheel forwarded by default, `Shift`+wheel and the scroll mode scroll the history; `outer_mouse_mode` capture policy), `handle_view_paste`; the `App` methods `handle_shell_events`, `handle_shell_graphics`, `tick_shell_digits`, `commit_shell_digits`, `clear_shell_digits`, `remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`, `sync_terminal_modes`, `disable_terminal_modes` |
 | `src/key_event/shell/scroll.rs` *(new)* | `ScrollCommand`, `enter`, `leave`, `apply`, `handle_wheel`: moves `vt100`'s scrollback offset and derives `shell_scroll_mode` from it |
 | `src/key_event/shell/menu.rs` *(new)* | `shell_operation` + `SwitchCase` state/message; `n`/`x`/digits and `D` (clear every shell of the tab, with a y/N confirmation) |
 | `src/key_event/shell/mod.rs` | declare the new modules, re-export the public API |
@@ -1089,14 +1107,14 @@ Do not flip the block back just to run a harness.
 | `src/app/mod.rs` | `shell_sessions`, `shell_prefix`, `shell_prefix_active`, `shell_scroll_mode`, `shell_pending_kill`, `shell_pending_kill_others`, `shell_pending_kill_all`, `shell_digits`, `shell_digit_deadline`, `clear_screen`, `shell_notice`, `outer_mouse_mode`, `outer_bracketed_paste`, `mouse_buttons`, `shell_area` |
 | `src/main.rs` | drain exits + `tick_shell_digits` + `sync_terminal_modes` + `handle_shell_graphics`, `clear_screen`, poll timeout, key/mouse/paste event drain, `q` guard, quit warning, `-w` mode, `disable_terminal_modes` before restore |
 | `src/app/image_preview.rs` | `protocol_type` / `font_size` accessors (the shell graphics support is derived from the detected protocol and cell size) |
-| `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; exports |
-| `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"` parsing |
+| `src/key_event/mod.rs` | early `Block::Shell` dispatch; `AppCommand::Shell` → `open_shell`; `ShellMenu`; `ShellAttach` → `attach_active`; exports |
+| `src/command/types.rs` | `AppCommand::ShellMenu` + `"shell_menu"`; `AppCommand::ShellAttach` + `"attach_shell"` |
 | `src/config/types.rs`, `src/config/mod.rs` | `shell_prefix` option |
 | `src/config/keymap.rs` | the `shell_scroll` / `shell_scroll_mode` arrays, their defaults, `ScrollCommand` parsing and `shell_scroll_label` |
 | `src/ui/mod.rs` | shell-view branch; title badge; records `shell_area` |
 | `src/ui/shell_block.rs` *(new)* | screen renderer (scrollback-aware, cursor only on the live screen) + status line (prefix hint only while the prefix is active; scroll-mode hint built from the configured keys; digits/kill prompt/notice) |
 | `src/ui/command_line.rs` | `Block::Shell` arm (reuses `StateLine`) |
-| `keymap_config/default.toml`, `colemak.toml` | `shell_menu` binding; `shell_scroll` and `shell_scroll_mode` sections |
+| `keymap_config/default.toml`, `colemak.toml` | `shell_menu` / `attach_shell` bindings; `shell_scroll` and `shell_scroll_mode` sections |
 | `README.md`, `docs/ARCHITECTURE.md` | user docs and architecture docs (§16) |
 
 Exhaustive `match` sites the compiler will point at when `Block::Shell` is
@@ -1179,10 +1197,11 @@ the shell status line). Everything else matches with `if let` or `_`.
     and an "Images inside a shell" flow.
   - §5: this document.
   - §6 test notes: the in-memory graphics filter tests.
-- `keymap_config/{default,colemak}.toml`: `shell_menu` line, and the
-  `shell_scroll` / `shell_scroll_mode` arrays with comments.
+- `keymap_config/{default,colemak}.toml`: `shell_menu` and `attach_shell`
+  lines, and the `shell_scroll` / `shell_scroll_mode` arrays with comments.
 - `README.md`: the scrollback keys, the `shell_scroll`/`shell_scroll_mode`
-  sections of `keymap.toml`, and the mouse-capture/`Shift` note.
+  sections of `keymap.toml`, the mouse-capture/`Shift` note, and the `B`
+  ("back to the shell this tab used last") shortcut.
 - `Cargo.toml` dependency list in §1 of `ARCHITECTURE.md` (`portable-pty`,
   `vt100` 0.16, `ratatui` 0.30, `ratatui-image` 10, `ansi-to-tui` 8) and the
   reason for the ratatui upgrade (`unicode-width`).
@@ -1199,6 +1218,7 @@ the shell status line). Everything else matches with `if let` or `_`.
 | 2b | Mouse forwarding (4 tracking modes × 3 encodings) and bracketed paste; outer mode sync | done |
 | 2c | Images painted by a TUI inside a shell: kitty query answers, placeholder image passthrough, pixel size in the PTY | done (kitty terminals only) |
 | 2d | Scrollback: `vt100` 0.16, `C-s [` scroll mode with configurable keys, `M-u`/`M-e`, wheel, status hint | done |
+| 2e | Quick attach: `attach_shell` (`B`) attaches the tab's `active_shell` without the menu | done |
 | 3 | Rename, activity notification, optional split panes | not implemented |
 
 Phase 1 is the usable MVP: `S` opens a shell, `C-s d` mounts it in the

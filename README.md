@@ -189,6 +189,7 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 
 - `S` — create a new shell on the current tab and attach it.
 - `T` (`shell_menu`) — list the shells mounted on the current tab; digits attach one, `n` creates a new one, `x` followed by a number kills one, and `D` kills every shell of the tab (the tab stays open; press `y` to confirm). Shells are numbered from `0`.
+- `B` (`attach_shell`) — go straight back to the shell this tab used last, without opening the shell menu. The tab remembers the shell which was attached last (`Tab::active_shell`), however it was chosen (`S`, the menu, `C-s n`/`C-s p` or `C-s <number>`), so it follows you across detach/attach. On a tab without a shell the browser shows an error instead of switching.
 - The shell menu and the attached shell's status line name the program **currently running** in the shell (`vim`, `htop`, `nvim`, …), not just the shell program it was started with. A shell sitting at its prompt shows its own name (`bash`, `zsh`), so several shells started with the same `default_shell` can be told apart at a glance.
 - While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command. The status line only lists the prefix commands after `C-s` has been pressed, so the bottom of the screen stays clean while the shell is used normally:
 

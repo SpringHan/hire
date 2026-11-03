@@ -501,6 +501,7 @@ impl AppCommand {
             AppCommand::VimDiff         => vim_diff(app, terminal)?,
             AppCommand::CmdShell        => shell::cmdline_shell(app)?,
             AppCommand::ShellMenu       => shell::shell_operation(app)?,
+            AppCommand::ShellAttach     => shell::attach_active(app)?,
             AppCommand::PathHistory     => path_history_operation(app),
             AppCommand::MacroPage       => macro_page::macro_operation(app)?,
             AppCommand::PrintFullPath   => simple_operations::print_full_path(app),

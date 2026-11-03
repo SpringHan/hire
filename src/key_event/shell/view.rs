@@ -55,6 +55,21 @@ pub fn open_shell(app: &mut App) -> AppResult<()> {
     attach(app, id)
 }
 
+/// Attach the shell which the current tab used last.
+///
+/// `Tab::active_shell` follows every attach (`C-s <number>`, `C-s n/p`, the
+/// shell menu and the exit cleanup), so going back to the shell which was in
+/// front is a single key instead of opening the shell menu.
+pub fn attach_active(app: &mut App) -> AppResult<()> {
+    let active = app.tab_list.current_tab().active_shell;
+
+    let Some(id) = active else {
+        rt_error!("No shell is active on the current tab")
+    };
+
+    attach(app, id)
+}
+
 pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     let (tab_id, alive) = match app.shell_sessions.get(id) {
         Some(session) => (session.tab, session.alive),
@@ -941,6 +956,42 @@ mod test {
         tab.active_shell = Some(id);
 
         id
+    }
+
+    /// `attach_active` goes back to the shell the tab used last, not to the
+    /// one which was opened last.
+    #[test]
+    fn test_attach_active_returns_to_the_last_used_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        open_test_shell(&mut app);
+        open_test_shell(&mut app);
+
+        // The last opened shell is the active one until another one is
+        // attached.
+        attach(&mut app, first).unwrap();
+        detach(&mut app);
+
+        attach_active(&mut app).unwrap();
+
+        assert_eq!(app.selected_block.shell_id(), Some(first));
+        assert_eq!(app.tab_list.current_tab().active_shell, Some(first));
+        // The other shells of the tab are untouched.
+        assert_eq!(app.tab_list.current_tab().shells.len(), 3);
+    }
+
+    /// A tab without a shell (or whose shells are all gone) has nothing to
+    /// attach, so the command reports it instead of leaving the browser.
+    #[test]
+    fn test_attach_active_without_a_shell_reports_an_error() {
+        let mut app = App::default();
+
+        assert!(attach_active(&mut app).is_err());
+        assert!(matches!(app.selected_block, Block::Browser(_)));
     }
 
     /// `C-s D` asks before killing every shell of the tab; `y` then kills them

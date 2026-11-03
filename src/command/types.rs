@@ -20,6 +20,10 @@ pub enum AppCommand {
     GotoFile,
     CmdShell,
     ShellMenu,
+
+    /// Attach the shell the current tab used last (`Tab::active_shell`).
+    ShellAttach,
+
     RgSearch,
     EditMode,
     PrevPath,
@@ -116,6 +120,7 @@ impl AppCommand {
             "prev_tab"          => Self::PrevTab,
             "cmdline_shell"     => Self::CmdShell,
             "shell_menu"        => Self::ShellMenu,
+            "attach_shell"      => Self::ShellAttach,
             "goto_file"         => Self::GotoFile,
             "prev_path"         => Self::PrevPath,
             "edit_mode"         => Self::EditMode,
@@ -211,5 +216,20 @@ impl AppCommand {
         };
 
         Ok(command)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// The shipped keymaps bind `B` to this command, so the string has to stay
+    /// parseable.
+    #[test]
+    fn test_attach_shell_command() {
+        assert!(matches!(
+            AppCommand::from_str("attach_shell").unwrap(),
+            AppCommand::ShellAttach
+        ));
     }
 }

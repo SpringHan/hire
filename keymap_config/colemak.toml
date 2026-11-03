@@ -47,6 +47,7 @@ keymap = [
     # Shell
     { key = "T", run = "shell_menu"                 },  # List / attach / kill shells of current tab
     { key = "S", run = "spawn_shell"                },  # Spawn shell in current directory
+    { key = "B", run = "attach_shell"               },  # Attach the shell this tab used last
     { key = "Z", run = "sudo_session"               },  # Open a root hire with the same tabs
     { key = "!", run = "cmdline_shell"              },  # Open shell command prompt in command line
     { key = "l", run = "shell_command true lazygit" },  # Run lazygit (with refresh)
