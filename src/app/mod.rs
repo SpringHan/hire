@@ -979,23 +979,3 @@ fn get_host_info() -> (String, String) {
 
     (host_name, user_name)
 }
-
-#[cfg(test)]
-mod test {
-    use ratatui::style::{Color, Modifier, Style};
-
-    use super::*;
-
-    #[test]
-    fn test_color_init() {
-        let app = App::default();
-        assert_eq!(
-            app.term_colors.dir_style,
-            Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD)
-        );
-        assert_eq!(
-            app.term_colors.symlink_style,
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        );
-    }
-}

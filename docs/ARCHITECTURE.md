@@ -174,7 +174,7 @@ Responsibilities:
 | --- | --- |
 | `app/mod.rs` | Defines the central `App<'a>` struct and its core implementation. Re-exports `Macro`/`MacroStatus`/`MacroTarget`, `TermColors`, `FileSaver`, `sort`. |
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
-| `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles. |
+| `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles; `from_ls_colors` falls back to `app/default_ls_colors.txt` when the variable is missing or blank. |
 | `app/image_preview.rs` | `ImagePreview`: terminal image support detection, decode/resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
 
@@ -226,7 +226,11 @@ Responsibilities:
 
 **`app/color.rs`** — parses the `LS_COLORS` environment variable into
 `dir_style`, `file_style`, `marked_style`, `orphan_style`, `symlink_style` and
-`executable_style`.
+`executable_style`. `TermColors::init` is infallible: when `LS_COLORS` is
+missing (CI, a bare `sh`, a minimal container) or blank, `from_ls_colors` uses
+the palette bundled in `src/app/default_ls_colors.txt` (the author's interactive
+zsh `LS_COLORS`, a standard `dircolors` value). An empty value is treated like
+an unset one, so the styles are still readable instead of all-default.
 
 **`app/image_preview.rs`** — wraps `ratatui-image`'s `Picker` and
 `ThreadProtocol`; spawns a decode thread and a resize/encode thread and returns
@@ -877,7 +881,10 @@ never execute the user configuration: the only config-related test
 (`goto_test::test_read_config`) builds its TOML document in memory. The tests
 which spawn processes run `/bin/sh` in a private PTY (no config file, no hire
 binary) and return early when `/bin/sh` does not exist; they need no network and
-no installed binary. They are
+no installed binary. The suite is also independent of `LS_COLORS`:
+`TermColors::init` falls back to the bundled palette when the variable is unset
+or blank, and `app::color::test::*` covers the fallback and the parsing of an
+explicit value, so `cargo test` works in a bare CI shell. They are
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
 kill-all, `C-s o` kill-others, detach refresh, `attach_active` and its

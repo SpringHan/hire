@@ -5,6 +5,13 @@ use std::collections::HashMap;
 
 use ratatui::style::{Color, Style, Modifier};
 
+/// The palette used when `LS_COLORS` is not set (or is empty).
+///
+/// It is the value of `$LS_COLORS` from the author's interactive zsh (a
+/// standard `dircolors` palette), so tests and fresh environments get the same
+/// colours as the development machine instead of a panic or uncoloured output.
+const DEFAULT_LS_COLORS: &str = include_str!("default_ls_colors.txt");
+
 pub struct TermColors {
     pub dir_style: Style,
     pub file_style: Style,
@@ -29,6 +36,18 @@ macro_rules! hashmap {
 
 impl TermColors {
     pub fn init() -> TermColors {
+        let configured = var("LS_COLORS").ok();
+
+        Self::from_ls_colors(configured.as_deref())
+    }
+
+    /// Build the styles from an `LS_COLORS` value.
+    ///
+    /// `None` and a blank value mean the variable is not usable, so the
+    /// bundled palette is used. This keeps `TermColors::init` infallible: a
+    /// terminal without `LS_COLORS` (CI, a bare shell, a minimal container)
+    /// still gets readable colours.
+    fn from_ls_colors(configured: Option<&str>) -> TermColors {
         let color_map = hashmap!(
             ("0", Style::new().fg(Color::White)),
             ("01", Style::new().add_modifier(Modifier::BOLD)),
@@ -65,7 +84,10 @@ impl TermColors {
             ("106", Style::new().bg(Color::Rgb(64, 224, 208)))
         );
 
-        let colors = var("LS_COLORS").expect("Unable to get colors");
+        let colors = configured
+            .filter(|colors| !colors.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_LS_COLORS.trim());
+
         let colors: Vec<&str> = colors.split(":").collect();
         let dir_style = fetch_style(&colors, &color_map, "di");
         let file_style = fetch_style(&colors, &color_map, "rs");
@@ -85,7 +107,7 @@ impl TermColors {
     }
 }
 
-fn fetch_style(from: &Vec<&str>,
+fn fetch_style(from: &[&str],
                map: &HashMap<&str, Style>,
                target: &str
 ) -> Style
@@ -112,10 +134,83 @@ fn fetch_style(from: &Vec<&str>,
             }
         }
 
-        if final_style.is_some() {
-            return final_style.unwrap()
+        if let Some(style) = final_style {
+            return style
         }
     }
 
     Style::default()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_missing_ls_colors_uses_the_bundled_palette() {
+        let colors = TermColors::from_ls_colors(None);
+
+        assert_eq!(
+            colors.dir_style,
+            Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(colors.file_style, Style::new().fg(Color::White));
+        assert_eq!(
+            colors.marked_style,
+            Style::new().bg(Color::Black).fg(Color::LightYellow)
+        );
+        assert_eq!(
+            colors.orphan_style,
+            Style::new()
+                .fg(Color::Rgb(255, 121, 198))
+                .add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            colors.symlink_style,
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            colors.executable_style,
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn test_blank_ls_colors_uses_the_bundled_palette() {
+        let bundled = TermColors::from_ls_colors(None);
+
+        for value in ["", " ", "\t\n"] {
+            let colors = TermColors::from_ls_colors(Some(value));
+
+            assert_eq!(colors.dir_style, bundled.dir_style);
+            assert_eq!(colors.file_style, bundled.file_style);
+            assert_eq!(colors.marked_style, bundled.marked_style);
+            assert_eq!(colors.orphan_style, bundled.orphan_style);
+            assert_eq!(colors.symlink_style, bundled.symlink_style);
+            assert_eq!(colors.executable_style, bundled.executable_style);
+        }
+    }
+
+    #[test]
+    fn test_present_ls_colors_is_parsed() {
+        let colors = TermColors::from_ls_colors(Some(
+            "di=31:rs=32:ln=33:pi=40;35:do=01;36:ex=37"
+        ));
+
+        assert_eq!(colors.dir_style, Style::new().fg(Color::Red));
+        assert_eq!(colors.file_style, Style::new().fg(Color::Green));
+        assert_eq!(
+            colors.symlink_style,
+            Style::new().fg(Color::LightYellow)
+        );
+        assert_eq!(
+            colors.marked_style,
+            Style::new().bg(Color::Black).fg(Color::Rgb(255, 121, 198))
+        );
+        assert_eq!(
+            colors.orphan_style,
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(colors.executable_style, Style::new().fg(Color::Gray));
+    }
 }

@@ -33,6 +33,13 @@ production names above. See `docs/ARCHITECTURE.md` §6 for details.
 
 Notice: The `auto_config.toml` is generated & edited by app.
 
+### Colors
+
+File colors come from the `LS_COLORS` environment variable, like `ls --color`.
+When it is not set (or is empty), hire uses a built-in `dircolors` palette
+shipped in `src/app/default_ls_colors.txt`, so colours stay readable in CI, a
+bare shell or a minimal container.
+
 ### user_config.toml
 
 This file contains user-specific configuration options. Here are the available settings:
