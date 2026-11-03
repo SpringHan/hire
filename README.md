@@ -1,5 +1,7 @@
 # Hire - ligHtweight fIle bRowsEr
 
+[![CI](https://github.com/SpringHan/hire/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/SpringHan/hire/actions/workflows/ci.yml)
+
 This is a repository which contains a terminal file browser written in Rust.
 
 I made the project with the aim for practicing Rust and this tool was almost created accroding to my own situations and demands.

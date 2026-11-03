@@ -1,0 +1,15 @@
+version: 2
+
+updates:
+  # Rust dependencies (Cargo.lock is committed, so these PRs keep it fresh).
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Keep the actions used by the workflows current.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

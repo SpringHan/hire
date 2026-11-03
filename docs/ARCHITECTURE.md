@@ -864,6 +864,9 @@ when files are marked, execution is repeated for every marked target.
 | `README.md` | User documentation (configuration, features, keybindings). |
 | `docs/ARCHITECTURE.md` | This document. |
 | `docs/SHELL_SESSIONS.md` | Design record for the implemented mountable (tmux-like) shell sessions: PTY/session model, key handling, numbered selection and edge cases. |
+| `rust-toolchain.toml` | Pins the stable channel and the `rustfmt`/`clippy` components for local development and CI. |
+| `.github/workflows/ci.yml` | CI: build and test on `ubuntu-latest` with `--locked`. |
+| `.github/dependabot.yml` | Weekly Cargo and GitHub Actions update PRs. |
 
 ---
 
@@ -912,6 +915,16 @@ rm -rf "$tmp"
 With the isolated config, `Enter` in the browser writes the path into the output
 file (`--output-file`, or `/tmp/hire.tmp` when it isn't given) instead of
 starting a GUI program, so an e2e harness can check the result safely.
+
+**CI.** `.github/workflows/ci.yml` runs on `ubuntu-latest` with the stable
+toolchain pinned by `rust-toolchain.toml`: `cargo build --locked --all-targets`
+and `cargo test --locked`. The suite is Linux-oriented (a real PTY and
+`/bin/sh`; the foreground-process tests read `/proc`), so there is no Windows
+job, and a macOS job would need those tests gated first. `clippy` and `rustfmt`
+are installed for the future lint jobs but are not enforced yet: the repository
+still has pre-existing lint/format debt, and those checks are enabled after
+their cleanup PR. Dependabot keeps `Cargo.lock` and the workflow actions
+current.
 
 ### Dev config filenames
 
