@@ -18,6 +18,8 @@
 
 use std::collections::HashSet;
 
+use super::emulation::Hvp;
+
 /// The kitty graphics delete command which frees an image id and its
 /// placements. Used to translate the child's "delete everything" without
 /// touching the images of hire's own preview.
@@ -67,6 +69,48 @@ pub enum GraphicsEvent {
     Forward(Vec<u8>),
 }
 
+/// The child's text screen, as much of it as the filter needs.
+///
+/// Some queries are answered from the terminal state rather than from the
+/// query alone: `CSI 6 n` reports the cursor position, so the filter has to
+/// parse the bytes up to the query before it can answer.
+pub trait TextScreen {
+    /// Feed one run of ordinary terminal output to the screen model.
+    fn process(&mut self, bytes: &[u8]);
+
+    /// The 0-based `(row, column)` a `CSI 6 n` reports right now.
+    fn cursor_position(&self) -> (u16, u16);
+}
+
+impl TextScreen for vt100::Parser {
+    fn process(&mut self, bytes: &[u8]) {
+        vt100::Parser::process(self, bytes);
+    }
+
+    fn cursor_position(&self) -> (u16, u16) {
+        self.screen().cursor_position()
+    }
+}
+
+/// A terminal query the filter answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Query {
+    /// `CSI 6 n`: report the cursor position.
+    Cursor,
+
+    /// `CSI 16 t`: report the cell size in pixels.
+    CellSize,
+
+    /// `CSI 14 t`: report the text area size in pixels.
+    TextArea,
+
+    /// `CSI c`: report the primary device attributes.
+    PrimaryDa,
+
+    /// `CSI 5 n`: report that the terminal is ready.
+    Status,
+}
+
 /// A kitty image transmission which is being collected chunk by chunk.
 struct Forwarding {
     id: Option<u32>,
@@ -86,6 +130,8 @@ pub struct GraphicsFilter {
     forward: Option<Forwarding>,
     /// Image ids whose data was forwarded to the real terminal.
     forwarded: HashSet<u32>,
+    /// The emulation fixes applied before the parser sees the text.
+    hvp: Hvp,
 }
 
 impl GraphicsFilter {
@@ -96,6 +142,7 @@ impl GraphicsFilter {
             tail: Vec::new(),
             forward: None,
             forwarded: HashSet::new(),
+            hvp: Hvp::default(),
         }
     }
 
@@ -107,7 +154,7 @@ impl GraphicsFilter {
         bytes: &[u8],
         rows: u16,
         cols: u16,
-        text: &mut dyn FnMut(&[u8]),
+        screen: &mut dyn TextScreen,
         emit: &mut dyn FnMut(GraphicsEvent),
     ) {
         self.pending.extend_from_slice(bytes);
@@ -122,7 +169,7 @@ impl GraphicsFilter {
                 self.pending.drain(..split);
 
                 if !chunk.is_empty() {
-                    self.text(&chunk, rows, cols, text, emit);
+                    self.text(&chunk, rows, cols, screen, emit);
                 }
 
                 break
@@ -132,7 +179,7 @@ impl GraphicsFilter {
             self.pending.drain(..pos);
 
             if !chunk.is_empty() {
-                self.text(&chunk, rows, cols, text, emit);
+                self.text(&chunk, rows, cols, screen, emit);
             }
 
             // The APC body ends at `ESC \`; wait for the rest of it. vt100
@@ -148,75 +195,134 @@ impl GraphicsFilter {
     }
 
     /// Feed one text run to the parser and answer the queries inside it.
+    ///
+    /// The run is parsed piece by piece, each piece ending just after a query:
+    /// an answer may depend on the screen state at the query (the cursor
+    /// position), so the bytes which follow it must not be parsed yet.
     fn text(
         &mut self,
         chunk: &[u8],
         rows: u16,
         cols: u16,
-        text: &mut dyn FnMut(&[u8]),
+        screen: &mut dyn TextScreen,
         emit: &mut dyn FnMut(GraphicsEvent),
     ) {
-        text(chunk);
-
-        if !self.support.enabled() {
-            self.tail.clear();
-            return
-        }
-
         let overlap = self.tail.len();
         let mut scan = std::mem::take(&mut self.tail);
         scan.extend_from_slice(chunk);
 
+        // How much of `chunk` the screen has already seen.
+        let mut parsed = 0;
         let mut idx = 0;
+
         while idx < scan.len() {
-            let Some((len, reply)) = self.query(&scan[idx..], rows, cols) else {
+            // Every query starts with `ESC`; skip the rest a byte at a time.
+            if scan[idx] != 0x1b {
+                idx += 1;
+                continue
+            }
+
+            let Some((len, query)) = self.query(&scan[idx..]) else {
                 idx += 1;
                 continue
             };
 
+            let end = idx + len;
+            idx = end;
+
             // A match which already ended inside the previous tail was seen
             // last time; reporting it again would answer the query twice.
-            if idx + len > overlap {
-                emit(GraphicsEvent::Reply(reply));
+            if end <= overlap {
+                continue
             }
 
-            idx += len;
+            let end = end - overlap;
+            self.translate(&chunk[parsed..end], screen);
+            parsed = end;
+
+            if let Some(reply) = self.reply(query, rows, cols, screen.cursor_position()) {
+                emit(GraphicsEvent::Reply(reply));
+            }
         }
+
+        self.translate(&chunk[parsed..], screen);
 
         let keep = scan.len().min(QUERY_TAIL);
         self.tail = scan[scan.len() - keep..].to_vec();
     }
 
-    /// Match one terminal query and build its answer.
-    fn query(&self, buf: &[u8], rows: u16, cols: u16) -> Option<(usize, Vec<u8>)> {
-        let (pattern, reply) = if buf.starts_with(b"\x1b[16t") {
-            // Cell size in pixels: `CSI 6 ; height ; width t`.
-            (
-                5,
-                format!("\x1b[6;{};{}t", self.support.cell.1, self.support.cell.0),
-            )
+    /// Feed one piece of the child's text to its screen.
+    ///
+    /// The emulation fixes live here, in front of the parser, because they work
+    /// on the bytes vt100 would otherwise misread; the translation keeps the
+    /// byte count, so the filter's offsets are unaffected.
+    fn translate(&mut self, bytes: &[u8], screen: &mut dyn TextScreen) {
+        self.hvp
+            .translate(bytes, &mut |translated| screen.process(translated));
+    }
+
+    /// Match one terminal query.
+    fn query(&self, buf: &[u8]) -> Option<(usize, Query)> {
+        if buf.starts_with(b"\x1b[6n") {
+            // Cursor position report. Programs which cannot ask the terminal
+            // for its size any other way move the cursor to the bottom right,
+            // ask where it is, and restore it; `gh`'s prompts do exactly this.
+            // Without an answer they block on the report and swallow whatever
+            // the user types next while looking for it.
+            Some((4, Query::Cursor))
+        } else if buf.starts_with(b"\x1b[16t") {
+            Some((5, Query::CellSize))
         } else if buf.starts_with(b"\x1b[14t") {
-            // Text area size in pixels.
-            (
-                5,
-                format!(
-                    "\x1b[4;{};{}t",
-                    rows.saturating_mul(self.support.cell.1),
-                    cols.saturating_mul(self.support.cell.0)
-                ),
-            )
-        } else if buf.starts_with(b"\x1b[0c") || buf.starts_with(b"\x1b[c") {
-            // Primary device attributes. No sixel, so the child picks kitty.
-            let len = if buf.starts_with(b"\x1b[0c") { 4 } else { 3 };
-            (len, String::from("\x1b[?62;22c"))
+            Some((5, Query::TextArea))
+        } else if buf.starts_with(b"\x1b[0c") {
+            Some((4, Query::PrimaryDa))
+        } else if buf.starts_with(b"\x1b[c") {
+            Some((3, Query::PrimaryDa))
         } else if buf.starts_with(b"\x1b[5n") {
-            // Device status report: "terminal ready".
-            (4, String::from("\x1b[0n"))
+            Some((4, Query::Status))
         } else {
-            return None
+            None
+        }
+    }
+
+    /// Build the answer to a query.
+    ///
+    /// `cursor` is the position after the bytes up to and including the query
+    /// were parsed. Only the cursor report is answered without kitty graphics:
+    /// it is plain terminal behaviour, and a program which asked for it would
+    /// wait forever otherwise. The other answers describe hire's image support,
+    /// so a terminal without kitty must not give them.
+    fn reply(
+        &self,
+        query: Query,
+        rows: u16,
+        cols: u16,
+        cursor: (u16, u16),
+    ) -> Option<Vec<u8>> {
+        let reply = match query {
+            Query::Cursor => format!(
+                "\x1b[{};{}R",
+                cursor.0.saturating_add(1),
+                cursor.1.saturating_add(1)
+            ),
+            _ if !self.support.enabled() => return None,
+            // Cell size in pixels: `CSI 6 ; height ; width t`.
+            Query::CellSize => {
+                format!("\x1b[6;{};{}t", self.support.cell.1, self.support.cell.0)
+            },
+            // Text area size in pixels.
+            Query::TextArea => format!(
+                "\x1b[4;{};{}t",
+                rows.saturating_mul(self.support.cell.1),
+                cols.saturating_mul(self.support.cell.0)
+            ),
+            // Primary device attributes. No sixel, so the child picks kitty.
+            Query::PrimaryDa => String::from("\x1b[?62;22c"),
+            // Device status report: "terminal ready".
+            Query::Status => String::from("\x1b[0n"),
         };
 
-        Some((pattern, reply.into_bytes()))
+        Some(reply.into_bytes())
     }
 
     /// Handle one APC sequence (the bytes between `ESC _` and `ESC \`).
@@ -454,25 +560,56 @@ mod test {
         GraphicsSupport::kitty((10, 20))
     }
 
-    /// Feed `bytes` and return `(text, events)`.
+    /// A real `vt100` screen which records the text the filter fed to it.
+    struct Recorder {
+        parser: vt100::Parser,
+        text: Vec<u8>,
+    }
+
+    impl Recorder {
+        fn new(rows: u16, cols: u16) -> Self {
+            Self {
+                parser: vt100::Parser::new(rows, cols, 0),
+                text: Vec::new(),
+            }
+        }
+    }
+
+    impl TextScreen for Recorder {
+        fn process(&mut self, bytes: &[u8]) {
+            self.text.extend_from_slice(bytes);
+            self.parser.process(bytes);
+        }
+
+        fn cursor_position(&self) -> (u16, u16) {
+            self.parser.screen().cursor_position()
+        }
+    }
+
+    /// Feed `bytes` into a fresh screen and return `(text, events)`.
     fn feed(
         filter: &mut GraphicsFilter,
         bytes: &[u8],
         rows: u16,
         cols: u16,
     ) -> (Vec<u8>, Vec<GraphicsEvent>) {
-        let mut text = Vec::new();
+        let mut screen = Recorder::new(rows, cols);
+        feed_to(filter, &mut screen, bytes)
+    }
+
+    /// Feed `bytes` into an existing screen and return `(text, events)`.
+    fn feed_to(
+        filter: &mut GraphicsFilter,
+        screen: &mut Recorder,
+        bytes: &[u8],
+    ) -> (Vec<u8>, Vec<GraphicsEvent>) {
+        let start = screen.text.len();
+        let (rows, cols) = screen.parser.screen().size();
         let mut events = Vec::new();
 
-        filter.feed(
-            bytes,
-            rows,
-            cols,
-            &mut |chunk| text.extend_from_slice(chunk),
-            &mut |event| events.push(event),
-        );
+        filter.feed(bytes, rows, cols, screen, &mut |event| events.push(event));
 
-        (text, events)
+        (screen.text[start..].to_vec(), events)
     }
 
     fn forwarded(events: &[GraphicsEvent]) -> Vec<u8> {
@@ -575,6 +712,76 @@ mod test {
         assert!(replies.contains("\x1b[?62;22c"));
         assert!(replies.contains("\x1b[6;20;10t"));
         assert!(replies.contains("\x1b[4;480;800t"));
+    }
+
+    /// A program which cannot read the terminal size otherwise saves the
+    /// cursor, moves it to the bottom right and asks where it is. The answer is
+    /// the child screen's cursor, one-based like every terminal reports it.
+    #[test]
+    fn test_cursor_position_report() {
+        // No kitty support: the cursor report is plain terminal behaviour and
+        // must be answered by every terminal.
+        let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
+        let mut screen = Recorder::new(24, 80);
+
+        let (_, events) = feed_to(
+            &mut filter,
+            &mut screen,
+            b"\x1b7\x1b[999;999f\x1b[6n",
+        );
+
+        assert_eq!(replies(&events), b"\x1b[24;80R");
+    }
+
+    /// The bytes after the query must not be parsed before it is answered.
+    #[test]
+    fn test_cursor_report_uses_the_position_at_the_query() {
+        let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
+        let mut screen = Recorder::new(24, 80);
+
+        let (_, events) = feed_to(
+            &mut filter,
+            &mut screen,
+            b"\x1b[3;5H\x1b[6n\x1b[10;20H",
+        );
+
+        assert_eq!(replies(&events), b"\x1b[3;5R");
+        // The following CUP is still parsed.
+        assert_eq!(screen.cursor_position(), (9, 19));
+    }
+
+    /// A cursor query split between two reads is answered exactly once.
+    #[test]
+    fn test_split_cursor_query_is_answered_once() {
+        let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
+        let mut screen = Recorder::new(24, 80);
+
+        let (_, events) = feed_to(&mut filter, &mut screen, b"\x1b[2;4H\x1b[6");
+        assert_eq!(replies(&events), b"");
+
+        let (_, events) = feed_to(&mut filter, &mut screen, b"n");
+        assert_eq!(replies(&events), b"\x1b[2;4R");
+
+        // The answered query is not reported again by the next read.
+        let (text, events) = feed_to(&mut filter, &mut screen, b"x");
+        assert_eq!(replies(&events), b"");
+        assert_eq!(text, b"x");
+    }
+
+    /// The answer for a disabled kitty terminal is still the terminal's own
+    /// reply; only the image capability answers are suppressed.
+    #[test]
+    fn test_cursor_report_does_not_advertise_graphics() {
+        let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
+        let mut screen = Recorder::new(10, 40);
+
+        let (_, events) = feed_to(
+            &mut filter,
+            &mut screen,
+            b"\x1b[1;1H\x1b[6n\x1b[c\x1b[16t",
+        );
+
+        assert_eq!(replies(&events), b"\x1b[1;1R");
     }
 
     /// Only direct transmission is accepted, so the child sends the data

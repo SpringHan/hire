@@ -104,7 +104,6 @@ impl PtyProcess {
                                 .unwrap_or_else(|err| err.into_inner());
                             let (rows, cols) = parser.screen().size();
 
-                            let mut text = |chunk: &[u8]| parser.process(chunk);
                             let mut emit = |event: GraphicsEvent| {
                                 let _ = events.try_send((id, event));
                             };
@@ -113,7 +112,7 @@ impl PtyProcess {
                                 &buf[..n],
                                 rows,
                                 cols,
-                                &mut text,
+                                &mut *parser,
                                 &mut emit,
                             );
                         },

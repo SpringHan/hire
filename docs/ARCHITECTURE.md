@@ -360,8 +360,9 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
-| `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries and forwards placeholder image transmissions to the real terminal. |
-| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter, write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
+| `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries (device attributes, cell/text-area size, status, and always the `CSI 6n` cursor report) and forwards placeholder image transmissions to the real terminal. `TextScreen` is the contract with the parser; the text is fed query by query so a report reflects the cursor position at the query. |
+| `key_event/shell/emulation.rs` | `Hvp`: the escape sequences `vt100` does not implement, translated before they reach the parser. Today `CSI f` (HVP) becomes `CSI H` (CUP); programs which cannot read the terminal size otherwise move the cursor to the bottom right with HVP and ask for its position (`gh`'s prompts do). The state survives across reads, so a sequence split between two reads is still translated. |
+| `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter (which also applies the emulation fixes), write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `KeySpec` (key + modifiers parsed from `C-s`/`M-u`/`PageUp`/…), `ShellPrefix` (built on `KeySpec`), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
@@ -785,7 +786,9 @@ child writes to its PTY → GraphicsFilter (reader thread)
   ├─ terminal queries            → GraphicsEvent::Reply → the child's PTY
   │    ├─ kitty `a=q`            → `OK` (direct) / `ENOTSUP` (shared memory, files)
   │    ├─ `CSI c` (DA1)          → `?62;22c` (no sixel, so the child picks kitty)
-  │    └─ `CSI 14t` / `CSI 16t`  → text area / cell size in pixels
+  │    ├─ `CSI 14t` / `CSI 16t`  → text area / cell size in pixels
+  │    └─ `CSI 6n`               → `CSI <row>;<col>R`, from the child's screen
+  │                                 (answered even without kitty support)
   └─ kitty image data            → GraphicsEvent::Forward → the real terminal
        (`a=T`, `U=1`, chunked)      (one buffered sequence per image, `q=2`)
                                       ↓
@@ -799,6 +802,21 @@ and behaves exactly as before. Inside tmux the support is off as well, because
 the sequences would need tmux passthrough wrapping. `a=d` deletes are translated
 to deletes of the image ids this shell forwarded, so a TUI inside a shell can
 never remove hire's own preview image.
+
+The cursor report is not a graphics answer: a real terminal always sends it, and
+a program which asked for it waits for the report before it reads anything else
+(`gh`'s text prompts block exactly there, and swallow the typed keys while they
+look for the `R`). It is therefore answered with `GraphicsSupport::disabled()`
+too, with the position of the child's own `vt100` screen and one-based like
+every terminal reports it. The bytes are parsed up to the query before the
+answer is computed, so a `CSI 6n` followed by more cursor movement still reports
+the position at the query.
+
+Because `vt100` ignores `CSI f` (HVP), a program which probes the screen size
+that way would get the wrong position, and its whole screen would be painted in
+the wrong place. `emulation::Hvp` rewrites the final `f` to `H` before the
+parser sees it; the rewrite is one byte for one byte, so the filter's offsets
+and its split-query detection are unaffected.
 
 ### Tab removal
 
@@ -889,7 +907,14 @@ no installed binary. The suite is also independent of `LS_COLORS`:
 or blank, and `app::color::test::*` covers the fallback and the parsing of an
 explicit value, so `cargo test` works in a bare CI shell. They are
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
-(the foreground/title lookup), `key_event::shell::view::test_*` (`C-s D`
+(the foreground/title lookup),
+`key_event::shell::session::test_cursor_position_query_is_answered` (a
+`printf '\033[5;9H\033[6n'` run in a real `/bin/sh` session gets `CSI 5;9R`
+back through the reader thread), `key_event::shell::graphics::test::*` (the
+kitty queries and the cursor report, including a report split between two reads
+and one which must ignore the bytes after the query),
+`key_event::shell::emulation::test::*` (`CSI f` → `CSI H`, split sequences and
+plain text/OSC/DCS payloads left alone), `key_event::shell::view::test_*` (`C-s D`
 kill-all, `C-s o` kill-others, detach refresh, `attach_active` and its
 cross-tab fallback), `key_event::shell::scroll::test::*`
 (scrolling, paging, top/bottom, wheel, leaving at the bottom),
@@ -973,6 +998,13 @@ A pty harness has one more trap: at startup `ratatui-image`'s
 the query's reader thread keeps reading stdin afterwards, eating whatever keys
 the harness sends. Reply with e.g. `\x1b[6;20;10t\x1b[0n` before typing. A real
 terminal answers immediately, so interactive use is unaffected.
+
+`ratatui`'s `Terminal::clear` (which every attach schedules through
+`app.clear_screen`) asks the real terminal for its cursor position with
+`ESC[6n` and blocks for up to two seconds when nothing answers; reply with e.g.
+`\x1b[10;20R`. Without that reply the app exits with "The cursor position could
+not be read within a normal duration" — the same message a shell session's
+child no longer sees, because hire answers the child's own `ESC[6n` now.
 
 Mouse and paste can be exercised the same way: once the child program enables a
 mouse mode (e.g. `printf '\033[?1000h\033[?1006h'`), write an SGR mouse report

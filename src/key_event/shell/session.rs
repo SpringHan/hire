@@ -325,6 +325,55 @@ mod test {
 
         assert_eq!(title, "sleep");
     }
+
+    /// A program which asks the terminal where the cursor is gets an answer,
+    /// and the answer is the child screen's position. `gh`'s text prompts block
+    /// (and swallow what is typed) while they wait for this report.
+    #[test]
+    fn test_cursor_position_query_is_answered() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut sessions = ShellSessions::new();
+        let id = sessions
+            .open(
+                TabId(0),
+                "/bin/sh",
+                Path::new("/"),
+                GraphicsSupport::disabled(),
+            )
+            .unwrap();
+
+        // Move the cursor to row 5, column 9 and ask where it is. The report is
+        // one-based: `CSI 5 ; 9 R`.
+        sessions
+            .get_mut(id)
+            .unwrap()
+            .write(b"printf '\\033[5;9H\\033[6n'\n")
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let answer = b"\x1b[5;9R";
+        let mut replies = Vec::new();
+
+        while !replies.windows(answer.len()).any(|window| window == answer) {
+            assert!(
+                Instant::now() < deadline,
+                "the cursor report was not answered: {replies:?}"
+            );
+
+            std::thread::sleep(Duration::from_millis(20));
+
+            for (shell, event) in sessions.drain_graphics() {
+                if shell == id
+                    && let GraphicsEvent::Reply(bytes) = event
+                {
+                    replies.extend_from_slice(&bytes);
+                }
+            }
+        }
+    }
 }
 
 

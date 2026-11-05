@@ -283,16 +283,24 @@ loop {
         Ok(n) => {
             let mut parser = screen.lock().unwrap_or_else(|err| err.into_inner());
             let (rows, cols) = parser.screen().size();
-            let mut text = |chunk: &[u8]| parser.process(chunk);
             let mut emit = |event| { let _ = graphics.events.send((id, event)); };
-            // Kitty graphics APCs are split off; the text still goes to vt100.
-            filter.feed(&buf[..n], rows, cols, &mut text, &mut emit);
+            // Kitty graphics APCs are split off, `CSI f` becomes `CSI H`, and
+            // the text still goes to vt100; a `CSI 6n` is answered from the
+            // cursor position the parser has at that point.
+            filter.feed(&buf[..n], rows, cols, &mut *parser, &mut emit);
         }
     }
 }
 let _ = exited.send(id);   // main loop reaps the child and cleans the tab
 ```
 
+- The child is attached to a real terminal, but `vt100` is only an emulation of
+  one. Two queries matter for interactive programs: `CSI 6n` (cursor position)
+  is answered from `parser.screen().cursor_position()`, and `CSI f` (HVP, which
+  `vt100` does not implement) is translated to `CSI H` by `emulation::Hvp`
+  before the parser sees it. `gh`'s prompts move the cursor to the bottom right
+  with HVP and ask for its position to size the terminal; without the answer
+  they block and eat the keys typed at the prompt.
 - Closing the master (dropping the session) sends `SIGHUP` to the session's
   process group, so children of the shell do not survive. `kill()` is still
   called explicitly, and `process_group_leader()` may be used with

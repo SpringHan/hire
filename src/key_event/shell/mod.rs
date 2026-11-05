@@ -4,6 +4,7 @@ mod utils;
 mod types;
 mod input;
 mod graphics;
+mod emulation;
 mod pty;
 mod session;
 mod view;
