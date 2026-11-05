@@ -520,7 +520,8 @@ file's full path in a read-only page), `output_path` (run the configured
 `gui_file_open_cmd` with the selected path or the current directory appended
 when it's set, otherwise write that path to the temp/output file; both honor
 `quit_after_output`) and `jump_to_temp_file` (jump to the path stored in that
-file).
+file; `normalize_target` strips trailing separators so a `/home/` entry becomes
+`/home` before `goto_dir`).
 
 **`key_event/sudo_session.rs`** — `SessionTabs` (the focused tab index plus every
 tab's path, `hide_files` flag and selected file index) is serialized to a
@@ -575,7 +576,9 @@ or title + expanded command line), renders the title bar
 (`user@host`, shortened path, selected file name) and the item statistics,
 calls `check_app_error` (turns `app.app_error` into a red command-line message),
 then lays out and draws the parent/current/child blocks, the command line and
-the completion popup. When `selected_block` is `Block::Shell`, it short-circuits
+the completion popup. `title_bar_path` canonicalises the browser path to exactly
+one trailing separator, so a path which still ends with `/` does not render as
+`/home//name`. When `selected_block` is `Block::Shell`, it short-circuits
 to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
 shell screen and the bottom band is the shell status line. The title's tab badge
 shows the mounted shell count (`|1:2|`).
@@ -896,6 +899,9 @@ sections), `key_event::shell::menu::test::*` (the shell menu's `D`
 confirmation, the cross-tab list/borrow and the `x` scope),
 `ui::shell_block::test::*` (the idle status line and the prefix
 hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
+`key_event::simple_operations::test::*` covers the temp-file target
+normalisation (`/home/` → `/home`) and `ui::test::*` the title's single
+trailing separator.
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

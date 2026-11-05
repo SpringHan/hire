@@ -55,6 +55,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .split(chunks[0]);
     
     let computer_info_block = Block::default();
+    let title_path = title_bar_path(app);
     let computer_info = Paragraph::new(
         Line::from(
             vec![
@@ -63,16 +64,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
                     app.term_colors.executable_style
                 ),
                 Span::styled(
-                    format!(
-                        "  {}{}",
-                        short_display_path(app),
-                        // Show a slash when needed.
-                        if app.path.to_string_lossy() == "/" {
-                            ""
-                        } else {
-                            "/"
-                        }
-                    ),
+                    format!("  {}", title_path),
                     app.term_colors.dir_style
                 ),
                 {
@@ -312,4 +304,60 @@ fn short_display_path(app: &App) -> String {
     let shorted_path = splited_path.join("/");
 
     format!("/{}", shorted_path)
+}
+
+/// The path shown in the title bar, with exactly one trailing separator.
+///
+/// `app.path` may still carry a trailing separator (a path read from the temp
+/// file, an old tab state, a shortened path, ...). The file name is appended
+/// right after this string, so a blind extra `/` would render `/home//name`.
+fn title_bar_path(app: &App) -> String {
+    let path = short_display_path(app);
+
+    if path == "/" {
+        return path
+    }
+
+    let path = path.trim_end_matches('/');
+
+    if path.is_empty() {
+        String::from("/")
+    } else {
+        format!("{path}/")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn test_title_bar_path_has_exactly_one_trailing_separator() {
+        let mut app = App::default();
+
+        app.goto_dir("/", Some(false)).unwrap();
+        assert_eq!(title_bar_path(&app), "/");
+
+        // A normal directory, then the same path with trailing separators.
+        let dir = std::env::temp_dir().join(format!(
+            "hire-title-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        let plain = dir.to_string_lossy().into_owned();
+
+        app.path = PathBuf::from(&plain);
+        assert_eq!(title_bar_path(&app), format!("{plain}/"));
+
+        app.path = PathBuf::from(format!("{plain}/"));
+        assert_eq!(title_bar_path(&app), format!("{plain}/"));
+
+        app.path = PathBuf::from(format!("{plain}///"));
+        assert_eq!(title_bar_path(&app), format!("{plain}/"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

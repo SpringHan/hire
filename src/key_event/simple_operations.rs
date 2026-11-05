@@ -101,7 +101,81 @@ pub fn jump_to_temp_file(app: &mut App) -> AppResult<()> {
         return Ok(())
     }
 
+    // Paths copied from a shell often keep a trailing separator (`/home/`).
+    // `app.path` is shown as `<path>/<file>` in the title and by
+    // `print_full_path`, so store it without one; a lone "/" (or "///") is
+    // still the root.
+    let target_path = normalize_target(&target_path);
+
     app.record_path_history();
-    app.goto_dir(target_path.trim(), None)?;
+    app.goto_dir(target_path, None)?;
     Ok(())
+}
+
+/// Remove the trailing separators from a directory path read from the temp
+/// file, keeping `/` for the root.
+fn normalize_target(target: &str) -> &str {
+    let target = target.trim().trim_end_matches('/');
+
+    if target.is_empty() {
+        "/"
+    } else {
+        target
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!(
+            "hire-jump-{}-{}-{}",
+            std::process::id(),
+            tag,
+            nanos
+        ));
+
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_normalize_target() {
+        assert_eq!(normalize_target("/home/"), "/home");
+        assert_eq!(normalize_target("/home///"), "/home");
+        assert_eq!(normalize_target("/"), "/");
+        assert_eq!(normalize_target("///"), "/");
+        assert_eq!(normalize_target("relative/"), "relative");
+        assert_eq!(normalize_target("  /home/ \n"), "/home");
+    }
+
+    #[test]
+    fn test_jump_to_temp_file_strips_trailing_separators() {
+        let dir = temp_dir("trailing");
+        let temp = dir.join("hire.tmp");
+        fs::write(&temp, format!("{}///\n", dir.to_string_lossy())).unwrap();
+
+        let mut app = App {
+            temp_file: temp.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        jump_to_temp_file(&mut app).unwrap();
+
+        assert_eq!(app.path.to_string_lossy(), dir.to_string_lossy());
+        // The target is consumed, as before.
+        assert_eq!(fs::read_to_string(&temp).unwrap(), "");
+    }
 }
