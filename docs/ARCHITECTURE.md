@@ -467,7 +467,10 @@ overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 *One-shot foreground programs.* `ShellCommand` now only has the
 `Command(shell, args)` variant; `shell_process` temporarily leaves the alternate
 screen, runs the program on the real terminal and restores the TUI (optionally
-refreshing the file list). It is used by `:!`, `shell_command`,
+refreshing the file list). After the optional "press any key" pause it clears
+the real screen and homes the cursor: the program's output stays readable while
+it runs, but the next one-shot command starts on a clean screen instead of below
+the previous one's output. It is used by `:!`, `shell_command`,
 `open_file_in_shell` and `vim_diff`. `fetch_output` captures stdout;
 `execute_command` appends the target path and clears the screen once the
 command exits, since the command runs on hire's own terminal (in raw mode and

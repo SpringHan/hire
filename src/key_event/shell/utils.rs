@@ -7,10 +7,10 @@ use std::process::{Command, Stdio};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::{
     execute,
-    cursor::{Show, Hide},
+    cursor::{Show, Hide, MoveTo},
     event::{self, poll, Event, KeyEventKind},
     terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen,
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
         enable_raw_mode, disable_raw_mode
     }
 };
@@ -104,6 +104,12 @@ pub fn shell_process(
             }
         }
     }
+
+    // The command ran on the real screen and its output is still there. Clear
+    // it and put the cursor back at the top-left, so the next one-shot command
+    // starts on a clean screen instead of below this one's output. Done only
+    // now, after the optional pause, so the output stays readable while it runs.
+    execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
 
     execute!(stdout(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;

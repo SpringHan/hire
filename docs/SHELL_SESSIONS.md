@@ -44,6 +44,7 @@ disable_raw_mode()?;
 execute!(stdout(), LeaveAlternateScreen, Show)?;
 process.spawn()?.wait()?;          // hire is blocked here
 enable_raw_mode()?;
+execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;  // drop the output
 execute!(stdout(), EnterAlternateScreen, Hide)?;
 ```
 
