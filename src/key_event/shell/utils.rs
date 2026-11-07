@@ -150,7 +150,13 @@ pub fn fetch_output<P: AsRef<Path>>(
 ///
 /// The command is split into the program and its arguments by whitespace,
 /// and `target` is appended as the last argument of it.
+///
+/// The command inherits hire's terminal, so it may paint over the UI (a GUI
+/// launcher usually prints nothing, but it is not guaranteed). The screen is
+/// cleared once the command exits: the residue is removed and the reset buffer
+/// makes the next draw repaint the whole UI.
 pub fn execute_command<P: AsRef<Path>>(
+    terminal: &mut DefaultTerminal,
     command: &str,
     target: P
 ) -> AppResult<()>
@@ -167,6 +173,8 @@ pub fn execute_command<P: AsRef<Path>>(
         .arg(target.as_ref())
         .spawn()?
         .wait()?;
+
+    terminal.clear()?;
 
     Ok(())
 }

@@ -380,7 +380,7 @@ pub fn handle_event(
                 );
             }
 
-            output_path(app, false)?;
+            output_path(app, terminal, false)?;
         },
 
         KeyCode::Up => {
@@ -491,7 +491,7 @@ impl AppCommand {
             AppCommand::Delete          => delete_operation(app),
             AppCommand::ShowNaviIndex   => app.navi_index.init(),
             AppCommand::MarkExpand      => app.mark_expand = true,
-            AppCommand::OutputFile      => output_path(app, true)?,
+            AppCommand::OutputFile      => output_path(app, terminal, true)?,
             AppCommand::GotoFile        => jump_to_temp_file(app)?,
             AppCommand::PrevPath        => goto_prev_path(app)?,
             AppCommand::EditDelete      => edit::mark_delete(app)?,

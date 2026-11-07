@@ -3,6 +3,8 @@
 use std::io::{Read, Write};
 use std::fs::OpenOptions;
 
+use ratatui::DefaultTerminal;
+
 use crate::rt_error;
 use crate::utils::CmdContent;
 use crate::config::{Config, ConfigValue};
@@ -36,7 +38,11 @@ pub fn print_full_path(app: &mut App) {
     )
 }
 
-pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
+pub fn output_path(
+    app: &mut App,
+    terminal: &mut DefaultTerminal,
+    file_out: bool
+) -> AppResult<()> {
     let output = if file_out {
         if let Some(file) = app.get_file_saver() {
             app.current_path().join(&file.name)
@@ -53,7 +59,7 @@ pub fn output_path(app: &mut App, file_out: bool) -> AppResult<()> {
         "gui_file_open_cmd"
     ) {
         if !gui_cmd.is_empty() {
-            execute_command(gui_cmd.as_ref(), &output)?;
+            execute_command(terminal, gui_cmd.as_ref(), &output)?;
 
             if app.quit_after_output {
                 app.quit_now = true;

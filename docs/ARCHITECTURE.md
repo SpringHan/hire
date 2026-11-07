@@ -359,7 +359,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
-| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output), open files, working-dir cache. |
+| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), open files, working-dir cache. |
 | `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries (device attributes, cell/text-area size, status, and always the `CSI 6n` cursor report) and forwards placeholder image transmissions to the real terminal. `TextScreen` is the contract with the parser; the text is fed query by query so a report reflects the cursor position at the query. |
 | `key_event/shell/emulation.rs` | `Hvp`: the escape sequences `vt100` does not implement, translated before they reach the parser. Today `CSI f` (HVP) becomes `CSI H` (CUP); programs which cannot read the terminal size otherwise move the cursor to the bottom right with HVP and ask for its position (`gh`'s prompts do). The state survives across reads, so a sequence split between two reads is still translated. |
 | `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter (which also applies the emulation fixes), write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
@@ -468,8 +468,12 @@ overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 `Command(shell, args)` variant; `shell_process` temporarily leaves the alternate
 screen, runs the program on the real terminal and restores the TUI (optionally
 refreshing the file list). It is used by `:!`, `shell_command`,
-`open_file_in_shell` and `vim_diff`. `fetch_output` captures stdout,
-`execute_command` appends the target path, and the working-directory cache
+`open_file_in_shell` and `vim_diff`. `fetch_output` captures stdout;
+`execute_command` appends the target path and clears the screen once the
+command exits, since the command runs on hire's own terminal (in raw mode and
+inside the alternate screen) and whatever it printed would stay on the browser
+otherwise. The clear also resets the render buffer, so the next frame repaints
+the whole UI. The working-directory cache
 (`fetch_working_directory`, `set_working_directory`, `load_working_directory`)
 serves `--working-directory` and the state-line indicator.
 
@@ -520,7 +524,8 @@ rendered by `ui/shell_block.rs`.
 file's full path in a read-only page), `output_path` (run the configured
 `gui_file_open_cmd` with the selected path or the current directory appended
 when it's set, otherwise write that path to the temp/output file; both honor
-`quit_after_output`) and `jump_to_temp_file` (jump to the path stored in that
+`quit_after_output`; it hands the terminal to `execute_command` so the UI is
+cleared after an external command) and `jump_to_temp_file` (jump to the path stored in that
 file; `normalize_target` strips trailing separators so a `/home/` entry becomes
 `/home` before `goto_dir`).
 
