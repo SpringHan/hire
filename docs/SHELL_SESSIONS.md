@@ -702,6 +702,12 @@ one-shot foreground program: `:!<cmd>` (`command/cmd_utils.rs`),
 `shell_command` from the keymap, `open_file_in_shell` (text files with the
 configured editor, everything else with `xdg-open`), and `vim_diff`.
 
+What it does not leave to chance is how the words reach the program: the
+selected item of `$.` and the paths hire itself passes are shell-quoted when the
+words are joined, so a file name with a space in it stays one argument of the
+`shell -c` string instead of being split. The `:!` line accepts `$.` too, and
+Tab completion inserts the selected name quoted there.
+
 ---
 
 ## 10. Main loop (`src/main.rs`)

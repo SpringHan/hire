@@ -134,12 +134,14 @@ pub fn vim_diff(
         terminal,
         ShellCommand::Command(
             None,
-            CommandStr::from_strs(vec![
-                "vim",
-                "-d",
-                &selected_file,
-                &marked_file
-            ])
+            vec![
+                CommandStr::Str("vim"),
+                CommandStr::Str("-d"),
+                // Both paths are single arguments even when they contain a
+                // space.
+                CommandStr::Quoted(&selected_file),
+                CommandStr::Quoted(&marked_file)
+            ]
         ),
         false
     )?;

@@ -248,7 +248,10 @@ impl<'a> App<'a> {
                         terminal,
                         ShellCommand::Command(
                             Some(shell_program),
-                            CommandStr::from_strs(command_slices)
+                            // `$.` is the selected item; it is quoted when
+                            // the words are joined, so a file name with a
+                            // space stays one argument.
+                            CommandStr::from_slices(command_slices)
                         ),
                         true
                     )?;

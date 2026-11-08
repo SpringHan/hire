@@ -65,7 +65,7 @@ pub fn shell_process(
 
     // Add process arguments
     process.arg("-c").arg(
-        CommandStr::join_from_keymap(args, app)?
+        CommandStr::join_command(args, app)?
     );
 
     // Check whether current command needs to wait for user's key press
@@ -218,7 +218,8 @@ where P: AsRef<Path>
             None,
             vec![
                 CommandStr::Str(&program),
-                CommandStr::Str(file_path.to_str().unwrap())
+                // The path is one argument even when it contains a space.
+                CommandStr::Quoted(file_path.to_str().unwrap())
             ]
         ),
         refresh

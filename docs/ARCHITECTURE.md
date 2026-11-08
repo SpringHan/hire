@@ -288,7 +288,11 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
   `quit_command_mode`.
 - `App::command_parse` — parse an entered `:command` line. Handles `/` search,
   `:rename`, `:create_file`, `:create_dir`, `:create_symlink`, `:!<shell>`
-  commands, dispatching to `command/cmds.rs` and `key_event/shell`.
+  commands, dispatching to `command/cmds.rs` and `key_event/shell`. The words
+  after `:!<shell>` go through `CommandStr::from_slices`, so `$.` is the
+  selected item there as well, and it is quoted when the words are joined for
+  the shell: the shell then receives it as one argument even when the name has
+  a space in it. A file name the user quotes stays exactly as typed.
 - `expand_init` / `expand_quit` / `expand_scroll` — the expanded command-line
   view (used to display menus and long messages).
 
@@ -373,7 +377,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/path_history.rs` | Path history menu: `goto_prev_path`, `path_history_operation` / `path_history_switch`. |
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
-| `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
+| `key_event/shell/types.rs` | `CommandStr` (`Str` as written, `Quoted` shell-quoted, `SelectedItem`), `ShellCommand` (one-shot foreground commands), `$.` substitution and `shell_quote`. |
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), open files (text with `file_read_program`, everything else with `xdg-open`), working-dir cache. |
 | `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries (device attributes, cell/text-area size, status, and always the `CSI 6n` cursor report) and forwards placeholder image transmissions to the real terminal. `TextScreen` is the contract with the parser; the text is fed query by query so a report reflects the cursor position at the query. |
 | `key_event/shell/emulation.rs` | `Hvp`: the escape sequences `vt100` does not implement, translated before they reach the parser. Today `CSI f` (HVP) becomes `CSI H` (CUP); programs which cannot read the terminal size otherwise move the cursor to the bottom right with HVP and ask for its position (`gh`'s prompts do). The state survives across reads, so a sequence split between two reads is still translated. |
@@ -423,6 +427,11 @@ with edit mode through the helpers in `utils`. The cursor is a UTF-8 byte
 offset on a character boundary, so movement and deletion always jump over whole
 characters; the completion popup is positioned and sized by the display width
 (`utils::display_width`) instead of the byte length.
+
+Inside a `:!` line the inserted name is a shell argument, so `completion`
+(`complete_selected_item`) and `update_cmdline` write it through
+`shell_quote`: `Tab` after `:!cat ` inserts `'a b.txt'` and the shell receives
+one argument, while `:rename ` and the other commands keep the name literal.
 
 **`key_event/cursor_movement/`** — `directory_movement` (left/right into
 parent/child, right opens files), `move_cursor` (up/down/scroll/index, also
@@ -482,10 +491,16 @@ overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
 *One-shot foreground programs.* `ShellCommand` now only has the
 `Command(shell, args)` variant; `shell_process` temporarily leaves the alternate
 screen, runs the program on the real terminal and restores the TUI (optionally
-refreshing the file list). After the optional "press any key" pause it clears
-the real screen and homes the cursor: the program's output stays readable while
-it runs, but the next one-shot command starts on a clean screen instead of below
-the previous one's output. It is used by `:!`, `shell_command`,
+refreshing the file list). The arguments are joined by
+`CommandStr::join_command` into the single string `shell -c` runs:
+`Str` words are shell source written by the user and are kept as they are, while
+`Quoted` words (the paths `open_file_in_shell` and `vim_diff` pass) and the
+selected item of `$.` are first run through `shell_quote`. That is what keeps a
+file name with a space, `$` or `'` in it a single argument; without it the shell
+splits the name and the program opens the wrong, partial files. After the
+optional "press any key" pause it clears the real screen and homes the cursor:
+the program's output stays readable while it runs, but the next one-shot
+command starts on a clean screen instead of below the previous one's output. It is used by `:!`, `shell_command`,
 `open_file_in_shell` and `vim_diff`. `open_file_in_shell` picks the program
 with the same `read_to_text` test the preview uses: text files go to
 `file_read_program`, everything else to `xdg-open`. `fetch_output` captures stdout;

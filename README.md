@@ -76,7 +76,9 @@ keymap = [
 
 # Define custom shell commands that can be executed with a key binding
 # Format: "shell_command *Whether refresh displaying files after command* *command*"
-# Use "$." to substitute the currently selected file/directory
+# Use "$." to substitute the currently selected file/directory.
+# The name and the paths hire fills in are quoted when needed, so a file name
+# containing a space, "$" or "'" still arrives as one argument.
 # E.g.
 keymap = [
     # ... other keybindings ...
@@ -84,6 +86,10 @@ keymap = [
     { key = "v", run = "shell_command true vim $." }
 ]
 ```
+
+The same substitution works in a command-line shell command: `:!bash vim $.` runs
+`bash -c "vim '<selected file>'"`. Quoting a file name yourself (as in
+`:!bash vim 'a b.txt'`) is passed through to the shell unchanged.
 
 #### Shell scroll keys
 
@@ -327,6 +333,7 @@ keymap = [
 - Expand command line: `Alt-Tab`
 - Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
+- Complete the selected file name: `Tab` right after a space inserts the name of the item selected in the browser. In a `:!` command it is inserted quoted (`'a b.txt'`), so a space in it does not split it into several arguments; other commands take the name literally.
 
 ## TODO
 

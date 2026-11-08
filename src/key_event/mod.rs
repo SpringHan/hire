@@ -645,15 +645,11 @@ impl AppCommand {
             },
 
             AppCommand::ShellCommand(cmd_vec, refresh) => {
-                let cmd = cmd_vec.iter()
-                    .map(|_line| {
-                        if _line == "$." {
-                            CommandStr::SelectedItem
-                        } else {
-                            CommandStr::Str(_line)
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                let cmd = CommandStr::from_slices(
+                    cmd_vec.iter()
+                        .map(|_line| _line.as_str())
+                        .collect()
+                );
 
                 shell_process(
                     app,

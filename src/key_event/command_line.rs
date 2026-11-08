@@ -4,6 +4,7 @@ use std::borrow::Cow;
 
 use ratatui::widgets::ListState;
 
+use super::shell::shell_quote;
 use crate::{
     utils::{
         cursor_from_insertion_point,
@@ -183,6 +184,7 @@ pub fn update_cmdline(
     let err_msg = "Cannot get any candidate for completion";
 
     let (content, _) = content_info.unwrap();
+    let is_shell = content.starts_with(":!");
     let mut command_slice = str_split(content);
 
     let new_value = option_get!(
@@ -196,11 +198,22 @@ pub fn update_cmdline(
     if command_slice.len() == 1 {
         command_slice[0] = format!(":{}", new_value);
     } else {
+        // The candidate is a file name in a `:!` command, where it becomes an
+        // argument of a shell command: quote it, so a space in the name cannot
+        // split it into several arguments.
+        let candidate = if is_shell {
+            shell_quote(new_value.as_ref())
+        } else {
+            new_value.as_ref().to_owned()
+        };
+
         let slice = command_slice.last_mut().unwrap();
         *slice = if slice.starts_with("./") {
-            format!("./{}", new_value.as_ref())
+            // Only the part after `./` is quoted; the shell joins the two
+            // pieces into one word.
+            format!("./{}", candidate)
         } else {
-            new_value.as_ref().into()
+            candidate
         };
     }
 
@@ -406,10 +419,30 @@ fn complete_selected_item(app: &mut App) -> bool {
         None => return false,
     };
 
+    // In a `:!` command the name becomes an argument of a shell command, so it
+    // is quoted: otherwise a space in it would split it into several arguments.
+    let inserted = if is_shell_command_line(&app.selected_block) {
+        shell_quote(&selected_name)
+    } else {
+        selected_name
+    };
+
     // The previous completion is meaningless after inserting a new name.
     app.command_completion.reset();
 
-    insert_before_cursor(&mut app.selected_block, &selected_name)
+    insert_before_cursor(&mut app.selected_block, &inserted)
+}
+
+/// Whether the command line being edited is a `:!` shell command.
+fn is_shell_command_line(app_block: &Block) -> bool {
+    if let Block::CommandLine(
+        CmdContent::String(ref content),
+        _
+    ) = *app_block {
+        content.starts_with(":!")
+    } else {
+        false
+    }
 }
 
 /// Check whether the cursor of the command line is placed right after a space.
@@ -843,5 +876,81 @@ mod test {
 
         // The popup is sized by the display width (five CJK characters).
         assert_eq!(app.command_completion.popup_position().1, 10);
+    }
+
+    fn app_with_selected(content: &str, name: &str) -> App<'static> {
+        let mut app = app_with(content, CursorPos::End);
+        app.current_files = vec![file_saver(name)];
+        app.selected_item.current_select(Some(0));
+        app
+    }
+
+    /// The name completed into a `:!` line becomes an argument of a shell
+    /// command, so it is quoted: the shell then keeps the space inside it.
+    #[test]
+    fn test_completion_quotes_selected_item_in_shell_command() {
+        let mut app = app_with_selected(":!bash vim ", "a b.txt");
+
+        assert!(completion(&mut app).is_ok());
+        assert_command_line(&app, ":!bash vim 'a b.txt'", CursorPos::End);
+
+        // A name without a space is quoted as well: `$`, `*` and `'` in it
+        // must not be read as shell syntax.
+        let mut app = app_with_selected(":!bash vim ", "a$b.txt");
+
+        assert!(completion(&mut app).is_ok());
+        assert_command_line(&app, ":!bash vim 'a$b.txt'", CursorPos::End);
+    }
+
+    /// Other commands take the name literally, so it is not quoted there.
+    #[test]
+    fn test_completion_keeps_selected_item_in_other_commands() {
+        let mut app = app_with_selected(":rename ", "a b.txt");
+
+        assert!(completion(&mut app).is_ok());
+        assert_command_line(&app, ":rename a b.txt", CursorPos::End);
+    }
+
+    #[test]
+    fn test_completion_quotes_candidate_in_shell_command() {
+        let mut app = app_with(":!bash vim a", CursorPos::End);
+        app.command_completion.candidates = vec![
+            std::borrow::Cow::Borrowed("a b.txt")
+        ];
+        app.command_completion.selected_item.select(Some(0));
+
+        update_cmdline(
+            &mut app.selected_block,
+            &mut app.command_completion
+        ).unwrap();
+        assert_command_line(&app, ":!bash vim 'a b.txt'", CursorPos::End);
+
+        // The `./` prefix stays outside of the quotes; the shell still reads
+        // the whole thing as one word.
+        let mut app = app_with(":!bash vim ./a", CursorPos::End);
+        app.command_completion.candidates = vec![
+            std::borrow::Cow::Borrowed("a b.txt")
+        ];
+        app.command_completion.selected_item.select(Some(0));
+
+        update_cmdline(
+            &mut app.selected_block,
+            &mut app.command_completion
+        ).unwrap();
+        assert_command_line(&app, ":!bash vim ./'a b.txt'", CursorPos::End);
+
+        // A candidate of a command which is not a shell command is written
+        // as it is.
+        let mut app = app_with(":create_symlink a", CursorPos::End);
+        app.command_completion.candidates = vec![
+            std::borrow::Cow::Borrowed("a b.txt")
+        ];
+        app.command_completion.selected_item.select(Some(0));
+
+        update_cmdline(
+            &mut app.selected_block,
+            &mut app.command_completion
+        ).unwrap();
+        assert_command_line(&app, ":create_symlink a b.txt", CursorPos::End);
     }
 }
