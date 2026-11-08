@@ -127,6 +127,19 @@ pub struct App<'a> {
     /// tab when the current tab has none.
     pub shell_recent: Vec<ShellId>,
 
+    /// The shell pinned with `C-s *` (one at a time).
+    ///
+    /// `C-s b` in a shell view and the `attach_pinned` command in the browser
+    /// attach it from anywhere, borrowing its tab when it belongs to another
+    /// one. The pin is cleared when the session goes away.
+    pub pinned_shell: Option<ShellId>,
+
+    /// The shell the shell menu was opened from, if any (`C-s t`).
+    ///
+    /// The menu replaces the view, so closing it without attaching anything
+    /// returns to this shell instead of dropping the user into the browser.
+    pub shell_menu_origin: Option<ShellId>,
+
     /// The tab to go back to after detaching a shell borrowed from another tab.
     ///
     /// Attaching a shell of another tab switches the current tab for the
@@ -227,6 +240,8 @@ impl<'a> Default for App<'a> {
             shell_pending_kill_others: None,
             shell_pending_kill_all: None,
             shell_recent: Vec::new(),
+            pinned_shell: None,
+            shell_menu_origin: None,
             shell_return_tab: None,
             shell_digits: String::new(),
             shell_digit_deadline: None,

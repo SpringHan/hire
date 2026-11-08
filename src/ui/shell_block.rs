@@ -117,7 +117,7 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let cwd = shorten_path(&session.meta.cwd, home.as_deref(), CWD_MAX_LEN);
 
-    let left = Line::from(vec![
+    let mut left = Line::from(vec![
         Span::styled(
             session.display_title(),
             app.term_colors.executable_style,
@@ -125,6 +125,15 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
         .add_modifier(Modifier::BOLD),
         Span::raw(format!("  {cwd}  [{pos}/{total}]")),
     ]);
+
+    // The pinned shell is the one `C-s b` attaches from anywhere.
+    if app.pinned_shell == Some(id) {
+        left.push_span(
+            Span::raw("  [pinned]")
+                .yellow()
+                .add_modifier(Modifier::BOLD),
+        );
+    }
 
     let hint = if let Some(tab_id) = app.shell_pending_kill_all {
         let count = app
@@ -173,7 +182,8 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
         Some((
             String::from(
                 "PREFIX  d: detach  n/p: switch  c: new  x: kill  \
-                 D: all  o: others  [: scroll",
+                 D: all  o: others  t: menu  *: pin  b: pinned  \
+                 [: scroll",
             ),
             Style::default().cyan().add_modifier(Modifier::BOLD),
         ))
@@ -292,6 +302,31 @@ mod test {
         tab.shells.push(id);
         tab.active_shell = Some(id);
         app.selected_block = Block::Shell(id);
+    }
+
+    /// A pinned shell is marked in the status line, so the one `C-s b`
+    /// attaches from anywhere is recognizable at a glance.
+    #[test]
+    fn test_status_line_marks_the_pinned_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        attach_test_shell(&mut app);
+        let id = app.selected_block.shell_id().unwrap();
+
+        let left = |app: &App| shell_status_lines(app)[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(!left(&app).contains("[pinned]"));
+
+        app.pinned_shell = Some(id);
+
+        assert!(left(&app).contains("[pinned]"));
     }
 
     /// The idle status line has no key hint; pressing the prefix shows it.

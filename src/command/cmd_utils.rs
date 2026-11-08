@@ -70,6 +70,12 @@ impl<'a> App<'a> {
         }
 
         self.switch_case = None;
+
+        // The shell menu may have been opened from an attached shell
+        // (`C-s t`); closing it comes back there instead of dropping the user
+        // into the browser. Nothing happens for a menu opened from the
+        // browser or for any other command line.
+        self.leave_shell_menu();
     }
 
     /// The function will change content in command line.

@@ -43,7 +43,14 @@ impl SwitchStruct for ShellMenuState {
     }
 }
 
+/// Open the shell menu.
+///
+/// The same page serves the browser's `T` and `C-s t` inside an attached
+/// shell. The shell the menu is opened from is remembered, so closing the menu
+/// without attaching anything returns there instead of the browser.
 pub fn shell_operation(app: &mut App) -> AppResult<()> {
+    app.shell_menu_origin = app.selected_block.shell_id();
+
     let state = ShellMenuState::default();
 
     SwitchCase::new(
@@ -346,6 +353,16 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
             );
             line.push_span(Span::raw(format!("{marker} {title}  {cwd}")));
 
+            // `C-s b` and the browser's `attach_pinned` always attach this one,
+            // so the list has to show which shell that is.
+            if app.pinned_shell == Some(*id) {
+                line.push_span(
+                    Span::raw("  [pinned]")
+                        .yellow()
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+
             if !alive {
                 line.push_span(Span::raw("  (exited)").red());
             }
@@ -542,6 +559,57 @@ mod test {
         assert!(!menu_text(&app).contains("Kill all"));
         assert_eq!(app.tab_list.current_tab().shells.len(), 1);
         assert_eq!(app.shell_sessions.alive_count(), 1);
+    }
+
+    /// The menu marks the shell pinned with `C-s *`, so the one `C-s b`
+    /// attaches is visible before typing a number.
+    #[test]
+    fn test_menu_marks_the_pinned_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = mount_shell(&mut app);
+        app.pinned_shell = Some(id);
+
+        shell_operation(&mut app).unwrap();
+
+        assert!(menu_text(&app).contains("[pinned]"));
+    }
+
+    /// Opening the menu from an attached shell (`C-s t`) and closing it with
+    /// any other key returns to that shell instead of the browser.
+    #[test]
+    fn test_menu_closed_from_a_shell_returns_to_it() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = mount_shell(&mut app);
+        super::super::attach(&mut app, id).unwrap();
+
+        shell_operation(&mut app).unwrap();
+        assert_eq!(app.shell_menu_origin, Some(id));
+
+        let case = app.switch_case.clone().expect("the shell menu is open");
+        switch_match(&mut app, case, 'z').unwrap();
+
+        assert_eq!(app.selected_block.shell_id(), Some(id));
+        assert_eq!(app.shell_menu_origin, None);
+        assert!(app.switch_case.is_none());
+    }
+
+    /// The browser's menu still closes to the browser.
+    #[test]
+    fn test_menu_closed_from_the_browser_goes_to_the_browser() {
+        let mut app = App::default();
+
+        menu(&mut app, &['z']);
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(!app.selected_block.is_shell());
     }
 
     /// `D` on a tab without shells does not ask, it just says there is nothing

@@ -75,6 +75,9 @@ pub enum AppCommand {
     /// the second element refers to whether refreshing showing file items.
     ShellCommand(Vec<String>, bool),
 
+    /// Attach the shell pinned with `C-s *`.
+    AttachPinned,
+
     // Edit Mode
     QuitEdit,
     EditDelete,
@@ -121,6 +124,7 @@ impl AppCommand {
             "cmdline_shell"     => Self::CmdShell,
             "shell_menu"        => Self::ShellMenu,
             "attach_shell"      => Self::ShellAttach,
+            "attach_pinned"     => Self::AttachPinned,
             "goto_file"         => Self::GotoFile,
             "prev_path"         => Self::PrevPath,
             "edit_mode"         => Self::EditMode,
@@ -230,6 +234,15 @@ mod test {
         assert!(matches!(
             AppCommand::from_str("attach_shell").unwrap(),
             AppCommand::ShellAttach
+        ));
+    }
+
+    /// The shipped keymaps bind `*` to this command.
+    #[test]
+    fn test_attach_pinned_command() {
+        assert!(matches!(
+            AppCommand::from_str("attach_pinned").unwrap(),
+            AppCommand::AttachPinned
         ));
     }
 }

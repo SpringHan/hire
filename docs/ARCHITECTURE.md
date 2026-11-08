@@ -195,7 +195,10 @@ Responsibilities:
   `shell_pending_kill_others` (the shell which stays, every other one of its tab
   is killed) and `shell_pending_kill_all` (a tab id; every shell of that tab),
   `shell_recent` (the most recently attached shells, newest first — `B`'s
-  fallback when the current tab has none) and `shell_return_tab` (the tab to go
+  fallback when the current tab has none), `pinned_shell` (the shell `C-s b`
+  and the browser's `attach_pinned` attach from anywhere),
+  `shell_menu_origin` (the shell the menu was opened from with `C-s t`, so
+  closing the menu returns there) and `shell_return_tab` (the tab to go
   back to after detaching a borrowed shell),
   `shell_digits` and `shell_digit_deadline` (numbered selection), `clear_screen`
   (full repaint after attaching/detaching) and `shell_notice` (an error shown in
@@ -272,7 +275,7 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | File | Purpose |
 | --- | --- |
 | `command/mod.rs` | Wires the submodules and re-exports `cmds::*` and `AppCommand`. |
-| `command/types.rs` | `AppCommand` enum and `AppCommand::from_str` (keymap string → command). |
+| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding) and `AppCommand::from_str` (keymap string → command). |
 | `command/cmds.rs` | Filesystem commands: `rename_file`, `create_file`, `create_symlink`, `file_exists`. |
 | `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (set/append/quit/parse, history, expand). |
 
@@ -385,9 +388,9 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/session.rs` | `ShellMeta`, `ShellSession`, `ShellSessions`: the per-tab shell registry. `display_title` names the program running in the session (its foreground process), falling back to the shell program; `drain_graphics` hands the reader threads' graphics events to the main loop. |
 | `key_event/shell/input.rs` | `KeySpec` (key + modifiers parsed from `C-s`/`M-u`/`PageUp`/…), `ShellPrefix` (built on `KeySpec`), `encode_key` (`KeyEvent` → terminal bytes) and `encode_paste`. |
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
-| `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s [` scroll mode), exit cleanup, numbered selection, `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
+| `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback; `attach_pinned` handles the pin), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s t` shell menu, `C-s *` pin, `C-s b` attach the pin, `C-s [` scroll mode), exit cleanup, numbered selection, `App::forget_shell` (drop the pin/menu origin of a removed shell), `App::leave_shell_menu` (restore the shell the menu was opened from), `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
 | `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu`): lists the current tab's shells first and then the shells of the other tabs (`menu_entries`); digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab, `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view): lists the current tab's shells first and then the shells of the other tabs (`menu_entries`); digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab, `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
@@ -535,7 +538,13 @@ back, so borrowing a background shell does not leave the user on a different
 tab. From the browser, `attach_shell` (`B`) calls `attach_active`, which
 attaches the shell the tab used last (or the most recent shell of another tab
 when this tab has none); it is the quick counterpart of the shell menu and
-needs no numbering. `handle_view_key`
+needs no numbering. `C-s *` pins the attached shell (`App.pinned_shell`), and
+`C-s b` / the browser's `attach_pinned` (`*`) attach it from anywhere, with the
+same borrow-and-return behaviour; the pin is cleared by `App::forget_shell`
+when the session goes away. `C-s t` opens the shell menu from the view: the
+origin is stored in `App.shell_menu_origin`, and `quit_command_mode` calls
+`leave_shell_menu` so closing the menu attaches that shell again instead of
+returning to the browser. `handle_view_key`
 implements the attached-view state machine: the prefix chord (`C-s`, from
 `shell_prefix`), detach/switch/create/kill, and the numbered selection
 (0-based; with more than ten shells the digits are accumulated and committed on
@@ -620,7 +629,7 @@ hidden flag and selection, never shells.
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
-| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line; the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
+| `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line (`[pinned]` marks the pinned shell); the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;

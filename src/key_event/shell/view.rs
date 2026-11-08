@@ -34,6 +34,7 @@ use super::{
     graphics::GraphicsEvent,
     inside as mouse_inside,
     scroll,
+    shell_operation,
     GraphicsSupport,
 };
 
@@ -86,6 +87,35 @@ pub fn attach_active(app: &mut App) -> AppResult<()> {
     attach(app, id)
 }
 
+/// Attach the shell pinned with `C-s *`.
+///
+/// The pin is one shell at a time and survives detaching, so the program the
+/// user keeps in the background (a music player, a server, …) is one command
+/// away from the browser (`attach_pinned`) and from any attached shell
+/// (`C-s b`). A pin which points at a session that has exited is dropped and
+/// reported instead of leaving a key that silently does nothing.
+pub fn attach_pinned(app: &mut App) -> AppResult<()> {
+    let Some(id) = app.pinned_shell else {
+        rt_error!("No shell is pinned (pin one with `C-s *`)")
+    };
+
+    if !app.shell_sessions.is_alive(id) {
+        app.pinned_shell = None;
+        rt_error!("The pinned shell has exited")
+    }
+
+    attach(app, id)
+}
+
+/// Pin the attached shell, or unpin it when it already is the pinned one.
+pub fn toggle_pin(app: &mut App, id: ShellId) {
+    app.pinned_shell = if app.pinned_shell == Some(id) {
+        None
+    } else {
+        Some(id)
+    };
+}
+
 /// The most recently attached shell which belongs to another tab.
 fn recent_shell(app: &App, current_tab: TabId) -> Option<ShellId> {
     app.shell_recent.iter().copied().find(|id| {
@@ -124,6 +154,7 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     }
 
     app.switch_case = None;
+    app.shell_menu_origin = None;
     app.command_error = false;
     app.command_expand = false;
     app.command_scroll = None;
@@ -337,6 +368,13 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
                     app.shell_pending_kill_others = Some(id);
                 }
             },
+            // Open the shell menu from the shell: the same page the browser's
+            // `T` opens, with the shells of every tab. Closing it without
+            // attaching anything comes back here.
+            KeyCode::Char('t') => return shell_operation(app),
+            // Pin/unpin the attached shell; `C-s b` attaches it from anywhere.
+            KeyCode::Char('*') => toggle_pin(app, id),
+            KeyCode::Char('b') => return attach_pinned(app),
             // Browse the shell's history. The configured `shell_scroll_mode`
             // keys then scroll; `q`/`Esc` returns to the live screen.
             KeyCode::Char('[') => scroll::enter(app, id),
@@ -518,6 +556,39 @@ impl App<'_> {
         self.shell_recent.truncate(64);
     }
 
+    /// Drop the state which points at `id`, once the session is gone.
+    ///
+    /// Called from every place which removes a shell from its tab, so a pin
+    /// or the shell menu's origin never keeps pointing at a dead session.
+    pub fn forget_shell(&mut self, id: ShellId) {
+        if self.pinned_shell == Some(id) {
+            self.pinned_shell = None;
+        }
+
+        if self.shell_menu_origin == Some(id) {
+            self.shell_menu_origin = None;
+        }
+    }
+
+    /// Leave the shell menu.
+    ///
+    /// The menu replaces the view it was opened from, so closing it without
+    /// attaching anything attaches the shell it was opened from (`C-s t`)
+    /// again instead of dropping the user into the browser. A menu opened
+    /// from the browser has no origin and leaves the browser in place.
+    /// `quit_command_mode` calls this, and every close path goes through it.
+    pub fn leave_shell_menu(&mut self) -> bool {
+        let Some(origin) = self.shell_menu_origin.take() else {
+            return false
+        };
+
+        if !self.shell_sessions.is_alive(origin) {
+            return false
+        }
+
+        attach(self, origin).is_ok()
+    }
+
     /// Reap exited sessions and repair the tab/view state.
     pub fn handle_shell_events(&mut self) {
         let exited = self.shell_sessions.drain_exits();
@@ -562,6 +633,8 @@ impl App<'_> {
             .into_iter()
             .filter(|shell| *shell != id)
             .collect::<Vec<_>>();
+
+        self.forget_shell(id);
 
         // Picking the next shell must happen before `tab_list` is borrowed
         // mutably.
@@ -625,6 +698,10 @@ impl App<'_> {
 
         self.shell_sessions.close_many(&shells);
 
+        for id in &shells {
+            self.forget_shell(*id);
+        }
+
         if let Some(tab) = self.tab_list.tab_by_id_mut(tab_id) {
             tab.shells.clear();
             tab.active_shell = None;
@@ -663,6 +740,10 @@ impl App<'_> {
         }
 
         self.shell_sessions.close_many(&others);
+
+        for id in &others {
+            self.forget_shell(*id);
+        }
 
         if let Some(tab) = self.tab_list.tab_by_id_mut(tab_id) {
             tab.shells.retain(|id| *id == keep);
@@ -1390,6 +1471,128 @@ mod test {
         handle_view_mouse(wheel(true, false), &mut app).unwrap();
         assert!(app.shell_scroll_mode);
         assert!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback() > 0);
+    }
+
+    /// `C-s *` pins the attached shell and `C-s b` attaches it from a tab
+    /// which has no shell of its own, borrowing the pinned shell's tab.
+    #[test]
+    fn test_pin_attaches_the_shell_from_another_tab() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('*'), KeyModifiers::SHIFT);
+
+        assert_eq!(app.pinned_shell, Some(id));
+
+        detach(&mut app);
+        app.tab_list.push(app.path.clone(), false);
+        let other_index = app.tab_list.len() - 1;
+        app.tab_list.set_current(other_index);
+        let other_tab = app.tab_list.current_tab().id;
+
+        attach_pinned(&mut app).unwrap();
+
+        assert_eq!(app.selected_block.shell_id(), Some(id));
+        assert_eq!(app.shell_return_tab, Some(other_tab));
+
+        // Detaching returns to the tab the pinned shell was borrowed from.
+        detach(&mut app);
+        assert_eq!(app.tab_list.current(), other_index);
+
+        // `C-s b` attaches the pinned shell from the view of another shell
+        // as well.
+        let second = open_test_shell(&mut app);
+        attach(&mut app, second).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('b'), KeyModifiers::empty());
+
+        assert_eq!(app.selected_block.shell_id(), Some(id));
+    }
+
+    /// `C-s *` is a toggle, and the pin never outlives its session.
+    #[test]
+    fn test_pin_toggles_and_is_forgotten_with_the_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('*'), KeyModifiers::SHIFT);
+        assert_eq!(app.pinned_shell, Some(id));
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('*'), KeyModifiers::SHIFT);
+        assert_eq!(app.pinned_shell, None);
+
+        toggle_pin(&mut app, id);
+        assert_eq!(app.pinned_shell, Some(id));
+
+        // Removing the shell drops the pin: `C-s b` then reports it instead of
+        // pointing at a dead session.
+        detach(&mut app);
+        let tab_id = app.shell_sessions.get(id).unwrap().tab;
+        app.remove_shell_from_tab(tab_id, id);
+        app.shell_sessions.close(id);
+
+        assert_eq!(app.pinned_shell, None);
+        assert!(attach_pinned(&mut app).is_err());
+    }
+
+    /// Without a pin the command reports it instead of leaving the browser.
+    #[test]
+    fn test_attach_pinned_without_a_pin_reports_an_error() {
+        let mut app = App::default();
+
+        assert!(attach_pinned(&mut app).is_err());
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+    }
+
+    /// `C-s t` opens the shell menu from the shell view; closing the menu
+    /// brings that shell back (`leave_shell_menu`), not the browser.
+    #[test]
+    fn test_menu_opened_from_a_shell_returns_to_it() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+
+        press(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('t'), KeyModifiers::empty());
+
+        assert_eq!(app.shell_menu_origin, Some(id));
+        assert!(app.switch_case.is_some());
+        assert!(matches!(app.selected_block, Block::CommandLine(_, _)));
+
+        assert!(app.leave_shell_menu());
+
+        assert_eq!(app.selected_block.shell_id(), Some(id));
+        assert_eq!(app.shell_menu_origin, None);
+        assert!(app.switch_case.is_none());
+    }
+
+    /// A menu opened from the browser has no shell to return to.
+    #[test]
+    fn test_menu_opened_from_the_browser_has_no_origin() {
+        let mut app = App::default();
+
+        shell_operation(&mut app).unwrap();
+
+        assert_eq!(app.shell_menu_origin, None);
+        assert!(!app.leave_shell_menu());
     }
 
     /// Leaving the shell view re-reads the directory, so files the shell

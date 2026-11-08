@@ -476,6 +476,9 @@ prefix_active?
   ├─ 'c' → create a new shell on this tab and attach it
   ├─ 'x' → ask to kill the attached shell (prompt in the status line)
   ├─ 'D' → ask to kill every shell mounted on this tab
+  ├─ 't' → open the shell menu (closing it returns to this shell)
+  ├─ '*' → pin / unpin the attached shell
+  ├─ 'b' → attach the pinned shell
   ├─ the prefix chord again → send a literal prefix byte
   └─ other → cancel the prefix, then forward the key (do not swallow typing)
 prefix matches?
@@ -625,6 +628,24 @@ impl App<'_> {
   reset the shell's scrollback offset to the live screen; set
   `selected_block = Block::Shell(id)`; set `active_shell`; set
   `app.clear_screen = true`; record the shell in `App.shell_recent`.
+- `attach_pinned` (the browser's `attach_pinned` command — default key `*`,
+  and `C-s b` inside the view): attach `App.pinned_shell`. `C-s *` toggles the
+  pin on the attached shell; one shell is pinned at a time, and the pin
+  survives detaching and switching tabs, so a program kept in the background
+  is one key away from anywhere. A pin pointing at a session which has exited
+  is cleared and reported instead of making the key a silent no-op. The shell
+  menu and the status line show `[pinned]`.
+- `C-s t` opens the shell menu from the view. `App.shell_menu_origin` remembers
+  the shell it was opened from, and `quit_command_mode` calls
+  `leave_shell_menu`, which attaches that shell again when it is still alive:
+  closing the menu with `Esc` (or any key which is not a menu command, or the
+  error path) restores the view instead of dropping the user into the browser.
+  A menu opened from the browser has no origin and closes to the browser as
+  before.
+- `App::forget_shell(id)` drops the state which points at a session — the pin
+  and the menu origin. It is called from every removal path
+  (`remove_shell_from_tab`, `close_tab_shells`, `close_other_shells`), so
+  neither can keep pointing at a dead shell.
 - `detach`: clear the prefix/pending state, set
   `selected_block = Block::Browser(app.root())`, set `clear_screen`, then
   `refresh_after_shell`: re-read the current directory (the shell may have
@@ -898,15 +919,16 @@ AppBlock::Shell(_) => {
 
 Left: the program running in the shell (`ShellSession::display_title` — `vim`
 while vim owns the terminal, `bash` at the prompt), start directory, tab
-ordinal (`[2/3]`). Right: **nothing at all in the idle state** — the hint is
-only rendered once `shell_prefix` has been pressed, so an attached shell looks
-like a plain terminal and the bottom-right corner stays free. The right line is
-`PREFIX d: detach  n/p: switch  c: new  x: kill  D: all  o: others  [: scroll`
-while `shell_prefix_active` is set; `SCROLL n  k/j: line  PgUp/PgDn: page
-g/G: top/bottom  q: back` while `shell_scroll_mode` is set — the key labels are
-taken from the configured `shell_scroll_mode` bindings
-(`Keymap::shell_scroll_label`), so a remapped key is shown instead of the
-default one; `Shell #N` while digits are being typed; `Kill shell "vim"?
+ordinal (`[2/3]`), and `[pinned]` when this shell is the pinned one.
+
+Right: **nothing at all in the idle state** — the hint is only rendered once
+`shell_prefix` has been pressed, so an attached shell looks like a plain
+terminal and the bottom-right corner stays free. The right line is
+`PREFIX  d: detach  n/p: switch  c: new  x: kill  D: all  o: others  t: menu  *: pin  b: pinned  [: scroll`
+while `shell_prefix_active` is set; `SCROLL n  k/j: line  PgUp/PgDn: page  g/G: top/bottom  q: back`
+while `shell_scroll_mode` is set — the key labels are taken from the configured
+`shell_scroll_mode` bindings (`Keymap::shell_scroll_label`), so a remapped key
+is shown instead of the default one; `Shell #N` while digits are being typed; `Kill shell "vim"?
 (y/N)` while `shell_pending_kill` is set (the same display name); `Kill all N
 shell(s) of this tab? (y/N)` while `shell_pending_kill_all` is set; `Kill N
 other shell(s)? (y/N)` while `shell_pending_kill_others` is set; and an

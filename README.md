@@ -210,6 +210,8 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 - `T` (`shell_menu`) — list the shells which can be attached: the current tab's shells first (their numbers are unchanged, starting at `0`), then the shells of the other tabs grouped under `Tab N`. Digits attach one, `n` creates a new shell on the current tab, `x` followed by a number kills one, and `D` kills every shell of the current tab (the tab stays open; press `y` to confirm). `x` and `D` only ever touch the current tab.
 - Attaching a shell of another tab **borrows** it: hire switches to that tab internally (the title bar shows it while the shell is in front) and, on detach, refreshes the shell's own tab and then returns you to the tab you were on. So `C-s d` puts you back where you started. The prefix commands keep working on the shell's own tab (`C-s c` opens there, `C-s n/p` cycle its shells), because that is the tab the view belongs to.
 - `B` (`attach_shell`) — go straight back to the shell this tab used last, without opening the shell menu. The tab remembers the shell which was attached last (`Tab::active_shell`), however it was chosen (`S`, the menu, `C-s n`/`C-s p` or `C-s <number>`), so it follows you across detach/attach. On a tab without a shell, `B` borrows the shell of another tab which was attached most recently, with the same "refresh and return" behaviour; an error is shown only when no other tab has a shell either.
+- `C-s *` pins the attached shell (one at a time); `C-s b` attaches the pinned shell from any shell, and `*` (`attach_pinned`) attaches it from the browser. The pin survives detaching and switching tabs, so a program you keep in the background (a music player, a server, …) is one key away; it is cleared when that shell exits. The menu and the shell status line mark the pinned shell with `[pinned]`.
+- `C-s t` opens the same shell menu from inside an attached shell, so a shell of any tab can be attached without leaving the view first. Closing the menu without attaching anything (for example with `Esc`) returns to the shell it was opened from.
 - The shell menu and the attached shell's status line name the program **currently running** in the shell (`vim`, `htop`, `nvim`, …), not just the shell program it was started with. A shell sitting at its prompt shows its own name (`bash`, `zsh`), so several shells started with the same `default_shell` can be told apart at a glance.
 - While a shell is attached every key is forwarded to it; the prefix chord `C-s` (`shell_prefix`) gives hire a command. The status line only lists the prefix commands after `C-s` has been pressed, so the bottom of the screen stays clean while the shell is used normally:
 
@@ -217,6 +219,9 @@ Removing a tab kills the shell sessions mounted on it, so whenever a mounted she
 | --- | --- |
 | `C-s d` | Detach: the file browser comes back, the shell keeps running on the tab |
 | `C-s n` / `C-s p` | Attach the next / previous shell of the tab |
+| `C-s t` | Open the shell menu (attach a shell of any tab); closing it returns to the current shell |
+| `C-s *` | Pin / unpin the attached shell (one pin at a time) |
+| `C-s b` | Attach the pinned shell from anywhere |
 | `C-s <number>` | Attach the shell with that number (0-based) |
 | `C-s c` | Create a new shell on this tab and attach it |
 | `C-s x` | Kill the attached shell (press `y` to confirm) |
