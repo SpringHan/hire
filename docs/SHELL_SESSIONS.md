@@ -708,6 +708,14 @@ words are joined, so a file name with a space in it stays one argument of the
 `shell -c` string instead of being split. The `:!` line accepts `$.` too, and
 Tab completion inserts the selected name quoted there.
 
+Nor does it leave `Ctrl-C` to chance: the program shares hire's process group,
+so the terminal sends the interrupt to hire as well. `InterruptGuard` ignores
+`SIGINT` and `SIGQUIT` in hire from just after the spawn until the terminal is
+back in raw mode, so the key stops the program and hire goes on to its "press
+any key" pause; the old dispositions come back when the guard is dropped.
+`fetch_output` uses the same guard, so `Ctrl-C` cancels `fzf` and the search
+script rather than ending hire.
+
 ---
 
 ## 10. Main loop (`src/main.rs`)

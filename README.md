@@ -91,6 +91,9 @@ The same substitution works in a command-line shell command: `:!bash vim $.` run
 `bash -c "vim '<selected file>'"`. Quoting a file name yourself (as in
 `:!bash vim 'a b.txt'`) is passed through to the shell unchanged.
 
+While such a program runs, `Ctrl-C` (or `Ctrl-\`) stops the program only: hire
+keeps running and comes back to the browser after the "press any key" pause.
+
 #### Shell scroll keys
 
 Two extra arrays bind the keys of the attached shell view (see "Shell Sessions").

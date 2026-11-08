@@ -4,6 +4,7 @@ use std::io::{self, stdout};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use libc::{sighandler_t, SIG_IGN, SIGINT, SIGQUIT};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::{
     execute,
@@ -30,6 +31,50 @@ pub fn default_shell(app: &App) -> AppResult<String> {
         Ok(shell.as_ref().to_owned())
     } else {
         Ok(std::env::var("SHELL")?)
+    }
+}
+
+/// The signals a terminal sends to the foreground process group when the user
+/// presses `Ctrl-C` or `Ctrl-\`.
+const INTERRUPT_SIGNALS: [libc::c_int; 2] = [SIGINT, SIGQUIT];
+
+/// Ignore the interrupt signals until the guard is dropped.
+///
+/// A one-shot program runs in hire's own process group, so pressing `Ctrl-C`
+/// sends the signal to hire as well, and hire would exit although the user
+/// only wanted to stop the program it runs. Hire ignores the signal while the
+/// program runs; the dispositions which were in place before are put back on
+/// drop, so nothing stays ignored after the program exits.
+///
+/// The guard has to be created *after* the program was spawned: a signal which
+/// is already ignored when a child is forked is inherited by it, and then the
+/// program would ignore `Ctrl-C` too.
+struct InterruptGuard {
+    previous: [(libc::c_int, sighandler_t); 2],
+}
+
+impl InterruptGuard {
+    fn ignore() -> Self {
+        let mut previous: [(libc::c_int, sighandler_t); 2] = [(0, 0); 2];
+
+        for (idx, signal) in INTERRUPT_SIGNALS.iter().enumerate() {
+            // SAFETY: only the disposition of this process is changed, and the
+            // old handler is put back in `drop`.
+            previous[idx] = (*signal, unsafe { libc::signal(*signal, SIG_IGN) });
+        }
+
+        Self { previous }
+    }
+}
+
+impl Drop for InterruptGuard {
+    fn drop(&mut self) {
+        for (signal, handler) in self.previous {
+            // SAFETY: `handler` is what `libc::signal` returned for `signal`
+            // when the guard was created, so it is the disposition which was
+            // in place before (a handler, `SIG_DFL` or `SIG_IGN`).
+            unsafe { libc::signal(signal, handler); }
+        }
     }
 }
 
@@ -88,9 +133,15 @@ pub fn shell_process(
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, Show)?;
 
-    process.spawn()?.wait()?;
-
+    // The program is in hire's process group, so the terminal sends its
+    // `Ctrl-C` to hire too. Ignore it here (after the spawn, so the program
+    // itself keeps the signal) until the terminal is back in raw mode, where
+    // `Ctrl-C` is a key event instead of a signal.
+    let mut child = process.spawn()?;
+    let interrupts = InterruptGuard::ignore();
+    child.wait()?;
     enable_raw_mode()?;
+    drop(interrupts);
 
     // Wait for user press
     if wait_for_press {
@@ -144,9 +195,15 @@ pub fn fetch_output<P: AsRef<Path>>(
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, Show)?;
 
-    let output = _command.spawn()?.wait_with_output()?;
-
+    // Same as in `shell_process`: `Ctrl-C` stops the program (fzf, the search
+    // script, …) instead of hire. The guard is set after the spawn so the
+    // program still receives the signal.
+    let child = _command.spawn()?;
+    let interrupts = InterruptGuard::ignore();
+    let output = child.wait_with_output()?;
     enable_raw_mode()?;
+    drop(interrupts);
+
     execute!(stdout(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
 
@@ -324,5 +381,41 @@ mod test {
         );
         assert_eq!(normalize_working_dir(""), None);
         assert_eq!(normalize_working_dir("   \n"), None);
+    }
+
+    /// The interrupt signals are ignored while a one-shot program runs, and
+    /// the dispositions which were in place before are restored afterwards, so
+    /// nothing stays ignored for the rest of the process.
+    #[test]
+    fn test_interrupt_guard_restores_the_dispositions() {
+        // Start from a known state: the test binary may have inherited
+        // `SIG_IGN` (it is started in the background by some harnesses).
+        let inherited = INTERRUPT_SIGNALS.map(|signal| (
+            signal,
+            // SAFETY: the old disposition is put back at the end.
+            unsafe { libc::signal(signal, libc::SIG_DFL) }
+        ));
+
+        {
+            let _guard = InterruptGuard::ignore();
+
+            for signal in INTERRUPT_SIGNALS {
+                // SAFETY: `SIG_IGN` only changes the disposition of this
+                // process; the guard puts the old one back.
+                let current = unsafe { libc::signal(signal, SIG_IGN) };
+                assert_eq!(current, SIG_IGN);
+            }
+        }
+
+        for signal in INTERRUPT_SIGNALS {
+            // SAFETY: `SIG_DFL` is the state the test set up above.
+            let restored = unsafe { libc::signal(signal, libc::SIG_DFL) };
+            assert_eq!(restored, libc::SIG_DFL);
+        }
+
+        for (signal, handler) in inherited {
+            // SAFETY: `handler` is what the process had before the test.
+            unsafe { libc::signal(signal, handler); }
+        }
     }
 }

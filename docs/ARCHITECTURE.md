@@ -378,7 +378,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr` (`Str` as written, `Quoted` shell-quoted, `SelectedItem`), `ShellCommand` (one-shot foreground commands), `$.` substitution and `shell_quote`. |
-| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), open files (text with `file_read_program`, everything else with `xdg-open`), working-dir cache. |
+| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), `InterruptGuard` (a `Ctrl-C` stops the running program, not hire), open files (text with `file_read_program`, everything else with `xdg-open`), working-dir cache. |
 | `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries (device attributes, cell/text-area size, status, and always the `CSI 6n` cursor report) and forwards placeholder image transmissions to the real terminal. `TextScreen` is the contract with the parser; the text is fed query by query so a report reflects the cursor position at the query. |
 | `key_event/shell/emulation.rs` | `Hvp`: the escape sequences `vt100` does not implement, translated before they reach the parser. Today `CSI f` (HVP) becomes `CSI H` (CUP); programs which cannot read the terminal size otherwise move the cursor to the bottom right with HVP and ask for its position (`gh`'s prompts do). The state survives across reads, so a sequence split between two reads is still translated. |
 | `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter (which also applies the emulation fixes), write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
@@ -500,10 +500,21 @@ file name with a space, `$` or `'` in it a single argument; without it the shell
 splits the name and the program opens the wrong, partial files. After the
 optional "press any key" pause it clears the real screen and homes the cursor:
 the program's output stays readable while it runs, but the next one-shot
-command starts on a clean screen instead of below the previous one's output. It is used by `:!`, `shell_command`,
-`open_file_in_shell` and `vim_diff`. `open_file_in_shell` picks the program
-with the same `read_to_text` test the preview uses: text files go to
-`file_read_program`, everything else to `xdg-open`. `fetch_output` captures stdout;
+command starts on a clean screen instead of below the previous one's output. It
+is used by `:!`, `shell_command`, `open_file_in_shell` and `vim_diff`.
+
+The program stays in hire's process group, so the terminal delivers a `Ctrl-C`
+(`SIGINT`) or `Ctrl-\` (`SIGQUIT`) to hire as well, and hire would exit although
+the user only wanted to stop the program. `InterruptGuard` makes hire ignore
+both from just after the spawn (so the child does not inherit the ignored
+disposition) until the terminal is back in raw mode, where `Ctrl-C` is a key
+event; the dispositions which were in place before are restored when the guard
+is dropped. `fetch_output` uses the same guard, so `Ctrl-C` cancels `fzf` or the
+search script instead of ending hire.
+
+`open_file_in_shell` picks the program with the same `read_to_text` test the
+preview uses: text files go to `file_read_program`, everything else to
+`xdg-open`. `fetch_output` captures stdout;
 `execute_command` appends the target path and clears the screen once the
 command exits, since the command runs on hire's own terminal (in raw mode and
 inside the alternate screen) and whatever it printed would stay on the browser
