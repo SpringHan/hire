@@ -172,10 +172,10 @@ Responsibilities:
 
 | File | Purpose |
 | --- | --- |
-| `app/mod.rs` | Defines the central `App<'a>` struct and its core implementation. Re-exports `Macro`/`MacroStatus`/`MacroTarget`, `TermColors`, `FileSaver`, `sort`. |
+| `app/mod.rs` | Defines the central `App<'a>` struct and its core implementation. Re-exports `Macro`/`MacroStatus`/`MacroTarget`, `TermColors`, `FileSaver`, `Preview`, `sort`. |
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
 | `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles; `from_ls_colors` falls back to `app/default_ls_colors.txt` when the variable is missing or blank. |
-| `app/image_preview.rs` | `ImagePreview`: terminal image support detection, decode/resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
+| `app/image_preview.rs` | `ImagePreview`, `Preview`: terminal image support detection, preview (decode / `xdg-mime` type) and resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
 
 **`app/mod.rs`** is the heart of the data model:
@@ -211,7 +211,12 @@ Responsibilities:
   `select_normal`, `update_with_prev_selected`, `partly_update_block`.
 - Navigation & lookup: `goto_dir`, `root`, `current_path`, `search_file`,
   `get_file_saver`, `get_file_saver_mut`, `get_directory_mut`, `hide_or_show`.
-- Preview: `set_file_content`.
+- Preview: `set_file_content` (text, or the path handed to the preview thread)
+  and `apply_preview` (the thread's result, applied only while its path is
+  still the selected file; `selected_file_path` is the check). The thread
+  decides between an image and the file's `xdg-mime` type, so a directory's
+  listing can never be covered by a late result and the previous file's
+  preview can never be taken for the next one's.
 - Marked files: `append_marked_file(s)`, `marked_file_contains`,
   `marked_file_contains_path`, `remove_marked_file`, `clear_path_marked_files`.
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
@@ -233,11 +238,21 @@ zsh `LS_COLORS`, a standard `dircolors` value). An empty value is treated like
 an unset one, so the styles are still readable instead of all-default.
 
 **`app/image_preview.rs`** — wraps `ratatui-image`'s `Picker` and
-`ThreadProtocol`; spawns a decode thread and a resize/encode thread and returns
+`ThreadProtocol`; spawns a preview thread and a resize/encode thread and returns
 receivers to the main loop. `ImagePreview::useless` tells the loop whether there
 is anything to render. The picker is queried once at startup (`CSI 16t` gives the
 cell size used both for the preview and for the shells' kitty pixel size);
 `Picker` is not `Copy`, so the accessors borrow it.
+
+The preview thread receives paths through a channel and blocks while there is
+nothing to do (no polling loop, so an idle hire does not burn a core). Requests
+are coalesced to the newest one, so holding a movement key through a directory
+does not queue a decode per file. For each path it either decodes an image or
+runs `xdg-mime query filetype` (`utils::file_mime`) and answers with
+`Preview::Image` / `Preview::FileType`; the query runs on this thread so the UI
+never waits on it. `App::apply_preview` drops the answer unless the path is
+still the selected file, which is what keeps a late type or image off another
+file's preview and off a directory's listing.
 
 The preview itself is drawn by `ui/child_block.rs`: `StatefulImage` (the
 replacement of the old `ThreadImage`) renders into `block.inner(layout)`, and
@@ -359,7 +374,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr`, `ShellCommand` (one-shot foreground commands) and `$.` substitution. |
-| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), open files, working-dir cache. |
+| `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), open files (text with `file_read_program`, everything else with `xdg-open`), working-dir cache. |
 | `key_event/shell/graphics.rs` | `GraphicsSupport`, `GraphicsFilter`: splits kitty graphics APC sequences out of the shell output, answers the child's terminal queries (device attributes, cell/text-area size, status, and always the `CSI 6n` cursor report) and forwards placeholder image transmissions to the real terminal. `TextScreen` is the contract with the parser; the text is fed query by query so a report reflects the cursor position at the query. |
 | `key_event/shell/emulation.rs` | `Hvp`: the escape sequences `vt100` does not implement, translated before they reach the parser. Today `CSI f` (HVP) becomes `CSI H` (CUP); programs which cannot read the terminal size otherwise move the cursor to the bottom right with HVP and ask for its position (`gh`'s prompts do). The state survives across reads, so a sequence split between two reads is still translated. |
 | `key_event/shell/pty.rs` | `PtyProcess`: spawn in a PTY (with the pixel size derived from the cell size), reader thread parsing into the shared `vt100` screen through the graphics filter (which also applies the emulation fixes), write, resize, kill + reap, and `foreground_pid` (the terminal's current foreground process group). |
@@ -471,7 +486,9 @@ refreshing the file list). After the optional "press any key" pause it clears
 the real screen and homes the cursor: the program's output stays readable while
 it runs, but the next one-shot command starts on a clean screen instead of below
 the previous one's output. It is used by `:!`, `shell_command`,
-`open_file_in_shell` and `vim_diff`. `fetch_output` captures stdout;
+`open_file_in_shell` and `vim_diff`. `open_file_in_shell` picks the program
+with the same `read_to_text` test the preview uses: text files go to
+`file_read_program`, everything else to `xdg-open`. `fetch_output` captures stdout;
 `execute_command` appends the target path and clears the screen once the
 command exits, since the command runs on hire's own terminal (in raw mode and
 inside the alternate screen) and whatever it printed would stay on the browser

@@ -699,8 +699,8 @@ and browse, and `exit` drops back to the browser exactly as today.
 
 The existing `shell_process` stays untouched for everything that must remain a
 one-shot foreground program: `:!<cmd>` (`command/cmd_utils.rs`),
-`shell_command` from the keymap, `open_file_in_shell` (the file reader), and
-`vim_diff`.
+`shell_command` from the keymap, `open_file_in_shell` (text files with the
+configured editor, everything else with `xdg-open`), and `vim_diff`.
 
 ---
 

@@ -25,6 +25,7 @@ use crate::key_event::{
 };
 use crate::utils::{
     read_to_text,
+    file_type_label,
     MarkedFiles,
     FileContent,
     SearchFile,
@@ -36,6 +37,7 @@ use crate::utils::{
 pub use macro_utils::*;
 pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
+pub use image_preview::Preview;
 
 pub struct App<'a> {
     // Core
@@ -770,13 +772,17 @@ impl<'a> App<'a> {
 
                             // Try to display image file
                             if self.image_preview.with_image_feat() {
+                                // The preview thread runs asynchronously: blank
+                                // the pane so the previous file's preview
+                                // cannot be taken for this one meanwhile.
+                                self.file_content = FileContent::Text(Text::default());
                                 self.image_preview.send_path(file_path)?;
                                 self.image_preview.useless = false;
 
                                 return Ok(())
                             }
 
-                            content = Text::raw("Non Text File");
+                            content = Text::raw(file_type_label(&file_path));
                         }
                     } else {
                         content = Text::raw("Non Normal File");
@@ -787,6 +793,45 @@ impl<'a> App<'a> {
         }
 
         Ok(())
+    }
+
+    /// Apply the preview the preview thread produced for `path`.
+    ///
+    /// The thread runs asynchronously, so the selection may have moved on (to
+    /// another file, or to a directory) while it was busy. A late result must
+    /// never replace the current view: it used to paint a file's type over a
+    /// directory's listing, or over the next file's preview.
+    pub fn apply_preview(&mut self, path: PathBuf, preview: Preview) {
+        if self.selected_file_path().as_deref() != Some(path.as_path()) {
+            return
+        }
+
+        match preview {
+            Preview::Image(image) => {
+                match self.image_preview.make_protocol(image) {
+                    Err(err) => self.app_error.add_error(err),
+                    Ok(_) => self.file_content = FileContent::Image,
+                }
+            },
+
+            Preview::FileType(label) => {
+                self.file_content = FileContent::Text(Text::raw(label));
+            }
+        }
+    }
+
+    /// The full path of the selected file.
+    ///
+    /// `None` for a directory (or an empty list): the third column shows the
+    /// directory's contents then, never a file preview.
+    fn selected_file_path(&self) -> Option<PathBuf> {
+        let file = self.get_file_saver()?;
+
+        if !file.is_file {
+            return None
+        }
+
+        Some(self.current_path().join(&file.name))
     }
 
     fn read_files(&mut self, path: &Path) -> io::Result<Vec<FileSaver>> {
@@ -978,4 +1023,84 @@ fn get_host_info() -> (String, String) {
     };
 
     (host_name, user_name)
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!(
+            "hire-app-{}-{}-{}",
+            std::process::id(),
+            tag,
+            nanos
+        ));
+
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The preview thread may answer after the selection moved on: a result
+    /// for another file must never replace the current preview.
+    #[test]
+    fn test_stale_preview_is_dropped() {
+        let dir = temp_dir("stale");
+        fs::write(dir.join("a.txt"), "text").unwrap();
+        fs::write(dir.join("b.txt"), "text").unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        app.file_content = FileContent::Text(Text::raw("before"));
+
+        // `a.txt` is selected; this result belongs to `b.txt`.
+        app.apply_preview(
+            app.current_path().join("b.txt"),
+            Preview::FileType(String::from("text/x-b"))
+        );
+        assert!(app.file_content == FileContent::Text(Text::raw("before")));
+
+        // The result for the selected file is applied.
+        app.apply_preview(
+            app.current_path().join("a.txt"),
+            Preview::FileType(String::from("text/x-a"))
+        );
+        assert!(app.file_content == FileContent::Text(Text::raw("text/x-a")));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A directory's listing must never be covered by a late file preview.
+    #[test]
+    fn test_preview_does_not_cover_a_directory_listing() {
+        let dir = temp_dir("dir");
+        fs::create_dir(dir.join("folder")).unwrap();
+        fs::write(dir.join("folder").join("inner.txt"), "text").unwrap();
+        fs::write(dir.join("a.txt"), "text").unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        // Directories sort first, so the directory is selected and the third
+        // column shows its contents: there is no file preview to replace.
+        assert!(!app.file_content.is_some());
+
+        app.apply_preview(
+            dir.join("a.txt"),
+            Preview::FileType(String::from("text/plain"))
+        );
+        assert!(!app.file_content.is_some());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

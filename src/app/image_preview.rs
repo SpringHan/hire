@@ -3,31 +3,43 @@
 use std::{
     thread,
     path::{Path, PathBuf},
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Mutex,
-        Arc
-    },
+    sync::mpsc::{self, Receiver, Sender},
 };
 
 use image::DynamicImage;
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use ratatui_image::{
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
     errors::Errors,
     picker::Picker,
 };
 
+use crate::utils::file_type_label;
+
 use super::App;
 
 pub type Response = Result<ResizeResponse, Errors>;
+
+/// The path the preview thread was asked for, and what to show for it.
+pub type PreviewUpdate = (PathBuf, Preview);
+
+/// What the preview thread produced for one file.
+#[derive(Debug)]
+pub enum Preview {
+    /// The file decoded as an image.
+    Image(DynamicImage),
+
+    /// The file is not an image: what to show instead, its MIME type.
+    FileType(String),
+}
 
 #[derive(Default)]
 pub struct ImagePreview {
     pub useless: bool,
     picker: Option<Picker>,
     protocol: Option<ThreadProtocol>,
-    image_path: Arc<Mutex<(PathBuf, bool)>>,
+    /// Paths to preview are handed to the preview thread through this channel.
+    path_sender: Option<Sender<PathBuf>>,
     resize_sender: Option<Sender<ResizeRequest>>,
 }
 
@@ -74,21 +86,22 @@ impl ImagePreview {
         }
     }
 
+    /// Ask the preview thread for `path`.
     pub fn send_path(&self, path: PathBuf) -> Result<()> {
-        if let Ok(mut _mutex) = self.image_path.lock() {
-            *_mutex = (path, true);
+        let Some(sender) = self.path_sender.as_ref() else {
+            bail!("The preview thread is not running")
+        };
 
-            return Ok(())
-        }
-
-        bail!("Failed to send path for decoding image thread")
+        sender
+            .send(path)
+            .map_err(|err| anyhow!("Failed to send the path to the preview thread: {err}"))
     }
 }
 
 impl<'a> App<'a> {
     pub fn init_image_picker(
         &mut self
-    ) -> Option<(Receiver<Response>, Receiver<Option<DynamicImage>>)>
+    ) -> Option<(Receiver<Response>, Receiver<PreviewUpdate>)>
     {
         let preview = &mut self.image_preview;
 
@@ -101,53 +114,42 @@ impl<'a> App<'a> {
 
         let (prot_tx, prot_rx)     = mpsc::channel::<Response>();
         let (resize_tx, resize_rx) = mpsc::channel::<ResizeRequest>();
-        let (image_tx, image_rx)   = mpsc::channel::<Option<DynamicImage>>();
+        let (image_tx, image_rx)   = mpsc::channel::<PreviewUpdate>();
+        let (path_tx, path_rx)     = mpsc::channel::<PathBuf>();
 
         // Image resize thread
-        thread::spawn(move || loop {
-            if let Ok(request) = resize_rx.recv() {
+        thread::spawn(move || {
+            while let Ok(request) = resize_rx.recv() {
                 if prot_tx.send(request.resize_encode()).is_err() {
                     break;
                 }
             }
         });
 
-        // Image decode thread
-        let path_ref = Arc::clone(&preview.image_path);
+        // Preview thread: decode the requested path, or describe its type when
+        // it is not an image. `recv` blocks while nothing is asked for, so the
+        // thread costs nothing between previews.
         thread::spawn(move || {
-            let mut current_path = PathBuf::new();
-            let mut decode_result: Option<DynamicImage>;
-
-            loop {
-                if let Ok(mut _ref) = path_ref.try_lock() {
-                    if current_path == _ref.0 && !_ref.1 {
-                        continue;
-                    }
-                    _ref.1 = false;
-                    current_path = _ref.0.to_owned();
-                } else {
-                    continue;
+            while let Ok(mut path) = path_rx.recv() {
+                // Only the newest request matters: browsing a directory must
+                // not queue one decode per file.
+                while let Ok(newer) = path_rx.try_recv() {
+                    path = newer;
                 }
 
-                if current_path.to_string_lossy() != "" {
-                    // Calculate DynamicImage
-                    if let Ok(image_data) = get_image_info(current_path.to_owned()) {
-                        decode_result = image_data;
-                    } else {
-                        decode_result = None;
-                    }
+                let preview = match get_image_info(&path) {
+                    Ok(Some(image)) => Preview::Image(image),
+                    // Not an image, or it cannot be read: show its type.
+                    _ => Preview::FileType(file_type_label(&path)),
+                };
 
-                    // Try to send DynamicImage to channel
-                    if let Ok(_ref) = path_ref.try_lock() {
-                        if _ref.0 == current_path {
-                            image_tx.send(decode_result)
-                                .expect("Failed to send DynamicImage within channel!");
-                        }
-                    }
+                if image_tx.send((path, preview)).is_err() {
+                    break
                 }
             }
         });
 
+        preview.path_sender = Some(path_tx);
         preview.useless = true;
         preview.resize_sender = Some(resize_tx);
 

@@ -2,7 +2,14 @@
 
 mod types;
 
-use std::{borrow::Cow, fs::File, io::Read, sync::atomic::{AtomicU16, Ordering}};
+use std::{
+    borrow::Cow,
+    fs::File,
+    io::Read,
+    path::Path,
+    process::Command,
+    sync::atomic::{AtomicU16, Ordering}
+};
 
 use anyhow::bail;
 use clap::Parser;
@@ -126,6 +133,51 @@ pub fn read_to_text(
     *text_ref = text;
 
     Ok(())
+}
+
+/// Whether `path` is shown as text by the preview.
+///
+/// The preview reads a file with `read_to_text`; what fails there is not text
+/// for it either (it shows an image or the file's MIME type). The same test
+/// decides which program opens the file: an editor for text, the desktop
+/// handler for everything else.
+pub fn is_text_file(path: &Path) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false
+    };
+
+    read_to_text(&mut Text::default(), &file).is_ok()
+}
+
+/// The MIME type `xdg-mime` reports for `path`, e.g. `application/pdf`.
+///
+/// `None` when the query fails: no `xdg-mime`, a missing file, an unknown
+/// type, or a path which is not valid UTF-8.
+pub fn file_mime(path: &Path) -> Option<String> {
+    let output = Command::new("xdg-mime")
+        .args(["query", "filetype"])
+        .arg(path)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None
+    }
+
+    let mime = String::from_utf8(output.stdout).ok()?;
+    let mime = mime.trim();
+
+    if mime.is_empty() {
+        None
+    } else {
+        Some(mime.to_owned())
+    }
+}
+
+/// What the preview shows for a file which is not text: the MIME type
+/// `xdg-mime` reports, or the old label when it cannot answer.
+pub fn file_type_label(path: &Path) -> String {
+    file_mime(path).unwrap_or_else(|| String::from("Non Text File"))
 }
 
 /// Delete word and update content & cursor position.
@@ -699,5 +751,56 @@ mod test {
         delete_word(&mut content, &mut cursor);
         assert_eq!(content, " x");
         assert!(cursor == CursorPos::Index(0));
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!(
+            "hire-utils-{}-{}-{}",
+            std::process::id(),
+            tag,
+            nanos
+        ));
+
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The preview calls a file it cannot decode as UTF-8 a "Non Text File";
+    /// `l` uses the same test to choose an editor or the desktop handler.
+    #[test]
+    fn test_is_text_file() {
+        let dir = temp_dir("text");
+
+        let text = dir.join("text.txt");
+        std::fs::write(&text, "hello\n世界\n").unwrap();
+        assert!(is_text_file(&text));
+
+        // An empty file is text too.
+        let empty = dir.join("empty");
+        std::fs::write(&empty, "").unwrap();
+        assert!(is_text_file(&empty));
+
+        // Invalid UTF-8 is what `read_to_text` rejects.
+        let binary = dir.join("binary.bin");
+        std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        assert!(!is_text_file(&binary));
+
+        assert!(!is_text_file(&dir.join("missing")));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A path `xdg-mime` cannot identify falls back to the old label, whether
+    /// because the file is gone or because `xdg-mime` is not installed.
+    #[test]
+    fn test_file_type_label_falls_back() {
+        let dir = temp_dir("mime");
+        assert_eq!(file_type_label(&dir.join("missing")), "Non Text File");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

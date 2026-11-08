@@ -18,6 +18,7 @@ use ratatui::crossterm::{
 use crate::rt_error;
 use crate::{app::App, error::AppResult};
 use crate::config::{Config, ConfigValue};
+use crate::utils::is_text_file;
 
 use super::{CommandStr, ShellCommand};
 
@@ -193,27 +194,21 @@ pub fn open_file_in_shell<P>(
 where P: AsRef<Path>
 {
     let file_path = file.as_ref();
-    let file_type = file_path
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or_default();
 
-    let mut refresh = false;
-    let shell_command = match file_type {
-        "jpg" | "jpge" | "png" => String::from("feh"),
-        _ => {
-            refresh = true;
-
-            if let ConfigValue::String(_str) = Config::get_value(
-                &app.config,
-                "file_read_program"
-            )
-            {
-                _str.as_ref().to_owned()
-            } else {
-                panic!("Unknown error occurred at open_file_in_shell fn in utils.rs!")
-            }
+    // A text file goes to the configured editor. Anything else (pictures,
+    // PDFs, archives, …) is handed to the desktop's default handler, which is
+    // what the preview shows for it.
+    let (program, refresh) = if is_text_file(file_path) {
+        if let ConfigValue::String(_str) = Config::get_value(
+            &app.config,
+            "file_read_program"
+        ) {
+            (_str.as_ref().to_owned(), true)
+        } else {
+            panic!("Unknown error occurred at open_file_in_shell fn in utils.rs!")
         }
+    } else {
+        (String::from("xdg-open"), false)
     };
 
     shell_process(
@@ -222,7 +217,7 @@ where P: AsRef<Path>
         ShellCommand::Command(
             None,
             vec![
-                CommandStr::Str(&shell_command),
+                CommandStr::Str(&program),
                 CommandStr::Str(file_path.to_str().unwrap())
             ]
         ),

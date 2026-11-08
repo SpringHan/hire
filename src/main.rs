@@ -15,7 +15,6 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, KeyCode, KeyEventKind};
 
 use error::AppResult;
-use utils::FileContent;
 use app::{App, MacroStatus};
 use key_event::{
     execute_macro,
@@ -185,17 +184,8 @@ fn main() -> AppResult<()> {
                 continue;
             }
 
-            if let Ok(data) = irx.try_recv() {
-                if let Some(image) = data {
-                    match app.image_preview.make_protocol(image) {
-                        Err(err) => app.app_error.add_error(err),
-                        Ok(_) => app.file_content = FileContent::Image,
-                    }
-                } else {
-                    app.file_content = FileContent::Text(
-                        Text::raw("Non Text File")
-                    );
-                }
+            if let Ok((path, preview)) = irx.try_recv() {
+                app.apply_preview(path, preview);
             }
 
             if let Ok(response) = prx.try_recv() {

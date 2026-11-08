@@ -51,7 +51,8 @@ default_shell = "bash"
 # GUI commands to show in the interface to avoid a required key press.
 gui_commands = ["lazygit", "vim"]
 
-# Program to use for reading files, such as vim, cat, bat, etc.
+# Program to open text files with, such as vim, cat, bat, etc.
+# Files which are not text (pictures, PDFs, archives, …) are opened with `xdg-open`.
 file_read_program = "vim"
 
 # Command of a GUI program to open the output file/directory, such as xdg-open/emacs.
