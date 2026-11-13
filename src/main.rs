@@ -54,10 +54,11 @@ fn main() -> AppResult<()> {
 
     let mut terminal = ratatui::init();
 
-    // Check, whether to enable working directory mode.
+    // Apply the output mode and the start directory, then open a shell when the
+    // command line asked for one.
     check_output(&args, &mut app);
     check_start_path(&args, &mut app)?;
-    shell_in_workdir(&args, &mut app)?;
+    shell_at_startup(&args, &mut app)?;
 
     'outer: loop {
         if app.quit_now {
@@ -204,8 +205,14 @@ fn main() -> AppResult<()> {
     Ok(())
 }
 
-/// Check whether to enter shell directly.
-fn shell_in_workdir(
+/// Spawn a shell at startup when the command line asks for one.
+///
+/// `--working-directory` changes to the stored working directory first, while
+/// `--shell` uses the directory hire starts in — `--start-from` has already
+/// been applied by the time this runs, so `--start-from <path> --shell` opens
+/// the shell in `<path>`. The two flags conflict, because both would open a
+/// shell and they disagree about the directory.
+fn shell_at_startup(
     args: &utils::Args,
     app: &mut App,
 ) -> AppResult<()> {
@@ -214,7 +221,9 @@ fn shell_in_workdir(
             fetch_working_directory().expect("Cannot fetch working directory!"),
             None
         )?;
+    }
 
+    if args.working_directory || args.shell {
         open_shell(app)?;
     }
 

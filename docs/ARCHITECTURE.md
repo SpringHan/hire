@@ -158,8 +158,10 @@ Responsibilities:
   shells' graphics (`App::handle_shell_graphics`), draw UI, poll/read key
   events, handle the `q` quit shortcut, dispatch keys, drain the search and
   image channels.
-- `shell_in_workdir` — `--working-directory` mode: jump to the stored working
-  directory and spawn a shell immediately.
+- `shell_at_startup` — the startup shell: `--working-directory` (`-w`) jumps to
+  the stored working directory first, `--shell` (`-S`) stays in the directory
+  hire starts in (`--start-from` is applied before this), and either flag then
+  attaches a shell. The two flags conflict.
 - `check_output` / `check_start_path` — apply `--output-file` /
   `--quit-after-output` / `--start-from`.
 - `macro_check_before_key` / `macro_check_with_key` — replay a recorded macro
@@ -697,8 +699,10 @@ command line; the layout arithmetic saturates instead of overflowing.
 **`utils/mod.rs`**
 
 - `Args` — clap-derived CLI options (`--working-directory`, `--start-from`,
-  `--output-file`, `--quit-after-output`), plus the hidden `--sudo-session` /
-  `--config-dir` arguments used by the sudo session.
+  `--shell`, `--output-file`, `--quit-after-output`), plus the hidden
+  `--sudo-session` / `--config-dir` arguments used by the sudo session.
+  `--shell` is `-S` (capital) because `-s` belongs to `--start-from`, and it
+  conflicts with `--working-directory`.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
   expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte

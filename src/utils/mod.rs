@@ -35,6 +35,7 @@ pub struct Args {
     )]
     pub working_directory: bool,
 
+    /// Start the file browser in this directory
     #[arg(
         short,
         long,
@@ -42,6 +43,19 @@ pub struct Args {
         conflicts_with = "working_directory"
     )]
     pub start_from: String,
+
+    /// Directly spawn a shell in the directory hire starts in.
+    ///
+    /// Together with `--start-from <path>` the shell runs in `<path>`.
+    /// `--working-directory` already opens a shell, in the stored working
+    /// directory instead, so it cannot be combined with this flag.
+    #[arg(
+        short = 'S',
+        long,
+        default_value_t = false,
+        conflicts_with = "working_directory"
+    )]
+    pub shell: bool,
 
     /// The target file for output, require a absolute path. The default: /tmp/hire.tmp
     #[arg(short, long, default_value_t = String::from("NULL"))]
@@ -793,6 +807,35 @@ mod test {
         assert!(!is_text_file(&dir.join("missing")));
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `-S` / `--shell` is a boolean of its own and can be combined with the
+    /// start directory, which is what makes `--start-from <path> --shell`
+    /// open the shell there.
+    #[test]
+    fn test_shell_flag() {
+        let args = Args::try_parse_from(["hire", "-S"]).unwrap();
+        assert!(args.shell);
+
+        let args = Args::try_parse_from(["hire", "--shell"]).unwrap();
+        assert!(args.shell);
+
+        let args = Args::try_parse_from(["hire"]).unwrap();
+        assert!(!args.shell);
+
+        let args = Args::try_parse_from([
+            "hire",
+            "--start-from",
+            "/tmp",
+            "--shell"
+        ]).unwrap();
+        assert!(args.shell);
+        assert_eq!(args.start_from, "/tmp");
+
+        // Both modes spawn a shell but disagree about the directory.
+        assert!(
+            Args::try_parse_from(["hire", "-S", "-w"]).is_err()
+        );
     }
 
     /// A path `xdg-mime` cannot identify falls back to the old label, whether

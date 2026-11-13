@@ -714,9 +714,12 @@ impl App<'_> {
   every other session, detaches if the view pointed at one of them, and reduces
   `Tab.shells` to `[keep]` with `active_shell = Some(keep)`.
 
-`AppCommand::Shell` and `--working-directory` both call `open_shell`, so the
-`-w` mode becomes "open hire with a mounted shell": the user can still detach
-and browse, and `exit` drops back to the browser exactly as today.
+`AppCommand::Shell`, `--working-directory` and `--shell` all call `open_shell`,
+so those modes become "open hire with a mounted shell": the user can still
+detach and browse, and `exit` drops back to the browser exactly as today.
+`-w` starts in the stored working directory; `-S` starts in the directory hire
+starts in, which `--start-from` may have already changed (the two flags
+conflict).
 
 The existing `shell_process` stays untouched for everything that must remain a
 one-shot foreground program: `:!<cmd>` (`command/cmd_utils.rs`),

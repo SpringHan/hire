@@ -258,6 +258,7 @@ Notes:
 - `C-s` is normally XOFF. Hire reads the terminal in raw mode and intercepts the chord before forwarding anything, so the shell never sees it. If you run hire inside tmux, or your terminal's own `C-s` handling interferes, set `shell_prefix` to another chord (`C-a`, `C-o`, `F12`, …).
 - Shell sessions live inside the hire process: quitting hire kills them, closing a tab kills the shells mounted on it (the tab menu asks first when shells are mounted), and they are not handed over to a sudo session nor stored in `storage_tabs`.
 - `hire --working-directory` opens a mounted shell as well, so it can be detached and the browser can be used without losing it.
+- `hire --shell` (`-S`) starts with a mounted shell in the directory hire starts in; combined with `--start-from <path>` it drops straight into a shell there (`hire --start-from /srv/project --shell`). `--shell` and `--working-directory` cannot be combined, because both open a shell but disagree about the directory.
 
 ### Navigation Index
 
