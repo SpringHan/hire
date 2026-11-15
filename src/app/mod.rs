@@ -121,6 +121,14 @@ pub struct App<'a> {
     /// in the meantime.
     pub shell_pending_kill_all: Option<TabId>,
 
+    /// A question to go to the browser instead of the shell the view fell
+    /// back to is waiting for `y`.
+    ///
+    /// Set when the attached shell went away after the user had already been
+    /// back in the browser during its life: `y` detaches, any other key stays
+    /// on the fallback shell (see `leave_closed_shell`).
+    pub shell_pending_browser: bool,
+
     /// The shells attached most recently, newest first.
     ///
     /// `attach_active` (`B`) uses it to borrow the last used shell of another
@@ -239,6 +247,7 @@ impl<'a> Default for App<'a> {
             shell_pending_kill: None,
             shell_pending_kill_others: None,
             shell_pending_kill_all: None,
+            shell_pending_browser: false,
             shell_recent: Vec::new(),
             pinned_shell: None,
             shell_menu_origin: None,

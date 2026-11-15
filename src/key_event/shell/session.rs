@@ -43,10 +43,45 @@ pub struct ShellMeta {
     pub cwd: PathBuf,
 }
 
+/// The view a shell was opened from.
+///
+/// It decides where the user goes when the shell goes away: a shell spawned
+/// from the browser belongs to the browser, one spawned from an attached shell
+/// belongs to that shell.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShellOrigin {
+    /// Opened on its own: `S`, `:shell`, `-S`, `-w`, or the shell menu's `n`
+    /// when the menu was opened from the browser.
+    #[default]
+    Browser,
+
+    /// Opened from an attached shell: `C-s c`, or the shell menu's `n` when
+    /// the menu was opened with `C-s t`.
+    Shell,
+}
+
+/// What the view needs to know once a shell goes away.
+///
+/// It is read from the session before it is dropped (see
+/// [`ShellSessions::close`]): where the shell was opened from and whether the
+/// user had already been back in the browser while it was alive.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClosedShell {
+    pub origin: ShellOrigin,
+    pub returned_to_browser: bool,
+}
+
 pub struct ShellSession {
     pub tab: TabId,
     pub meta: ShellMeta,
     pub alive: bool,
+
+    /// Where the shell was opened from.
+    pub origin: ShellOrigin,
+
+    /// The view went back to the browser at least once while this shell was
+    /// alive (`C-s d`, or the `detach` command).
+    pub returned_to_browser: bool,
 
     screen: Arc<Mutex<vt100::Parser>>,
     pty: PtyProcess,
@@ -62,6 +97,14 @@ impl ShellSession {
 
     pub fn write(&mut self, bytes: &[u8]) -> AppResult<()> {
         self.pty.write(bytes)
+    }
+
+    /// The state the view needs to decide where to go once this shell is gone.
+    pub fn closed_state(&self) -> ClosedShell {
+        ClosedShell {
+            origin: self.origin,
+            returned_to_browser: self.returned_to_browser,
+        }
     }
 
     /// The name of the program which currently owns the session's terminal.
@@ -163,13 +206,16 @@ impl ShellSessions {
     ///
     /// `graphics` is what the new terminal tells the child about image support;
     /// the PTY's pixel size is derived from it so programs which read the
-    /// window size in pixels scale their images correctly.
+    /// window size in pixels scale their images correctly. `origin` is the
+    /// view the shell is opened from, kept for the cleanup which decides where
+    /// the user goes when the shell goes away.
     pub fn open(
         &mut self,
         tab: TabId,
         program: &str,
         cwd: &Path,
         graphics: GraphicsSupport,
+        origin: ShellOrigin,
     ) -> AppResult<ShellId>
     {
         let id = ShellId(self.next_id);
@@ -216,6 +262,8 @@ impl ShellSessions {
                     cwd: cwd.to_owned(),
                 },
                 alive: true,
+                origin,
+                returned_to_browser: false,
                 screen,
                 pty,
             },
@@ -238,6 +286,20 @@ impl ShellSessions {
 
     pub fn alive_count(&self) -> usize {
         self.sessions.values().filter(|s| s.alive).count()
+    }
+
+    /// Record that the user is in the browser again, for every running shell.
+    ///
+    /// The browser is one place, not a view of one shell: every session which
+    /// is alive now has been left for the browser during its life, so each of
+    /// them asks before the browser is entered again when it closes (see
+    /// `leave_closed_shell`). A shell opened after the detach starts clean.
+    /// Closed sessions are not in the map, so the loop only visits the running
+    /// ones.
+    pub fn mark_returned_to_browser(&mut self) {
+        for session in self.sessions.values_mut() {
+            session.returned_to_browser = true;
+        }
     }
 
     /// Take the graphics events produced since the last call.
@@ -307,6 +369,7 @@ mod test {
                 "/bin/sh",
                 Path::new("/"),
                 GraphicsSupport::disabled(),
+                ShellOrigin::Browser,
             )
             .unwrap();
         let session = sessions.get_mut(id).unwrap();
@@ -342,6 +405,7 @@ mod test {
                 "/bin/sh",
                 Path::new("/"),
                 GraphicsSupport::disabled(),
+                ShellOrigin::Browser,
             )
             .unwrap();
 

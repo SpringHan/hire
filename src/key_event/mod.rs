@@ -66,6 +66,7 @@ pub use shell::{
     open_shell,
     shell_process,
     fetch_working_directory,
+    ShellOrigin,
 };
 
 // Only the tests outside `key_event` (the shell status line in `ui`) need the
@@ -562,7 +563,7 @@ impl AppCommand {
                 Some(app.hide_files)
             )?,
 
-            AppCommand::Shell => shell::open_shell(app)?,
+            AppCommand::Shell => shell::open_shell(app, shell::ShellOrigin::Browser)?,
 
             AppCommand::ItemMove(direction) => directory_movement(
                 direction,

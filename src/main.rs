@@ -23,6 +23,7 @@ use key_event::{
     handle_view_paste,
     open_shell,
     fetch_working_directory,
+    ShellOrigin,
 };
 
 fn main() -> AppResult<()> {
@@ -224,7 +225,7 @@ fn shell_at_startup(
     }
 
     if args.working_directory || args.shell {
-        open_shell(app)?;
+        open_shell(app, ShellOrigin::Browser)?;
     }
 
     Ok(())

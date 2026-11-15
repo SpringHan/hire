@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::view::{attach, open_shell};
+use super::ShellOrigin;
 use crate::key_event::switch::SwitchStruct;
 
 #[cfg(test)]
@@ -97,7 +98,9 @@ fn shell_switch(
         // Create a new shell on this tab and attach it. `open_shell` clears the
         // switch case itself, so this must not report `true`.
         'n' => {
-            open_shell(app)?;
+            let origin = menu_origin(app);
+
+            open_shell(app, origin)?;
             return Ok(false)
         },
 
@@ -170,6 +173,19 @@ fn shell_switch(
     }
 
     Ok(true)
+}
+
+/// Where a shell created by the menu's `n` belongs.
+///
+/// The menu replaced the view it was opened from, so `shell_menu_origin` is
+/// what tells a shell spawned from a shell (`C-s t`, then `n`) apart from one
+/// spawned from the browser's menu.
+fn menu_origin(app: &App) -> ShellOrigin {
+    if app.shell_menu_origin.is_some() {
+        ShellOrigin::Shell
+    } else {
+        ShellOrigin::Browser
+    }
 }
 
 fn reopen(app: &mut App, state: ShellMenuState) {
@@ -398,6 +414,7 @@ mod test {
                 "/bin/sh",
                 Path::new("/"),
                 GraphicsSupport::disabled(),
+                ShellOrigin::Browser,
             )
             .unwrap();
 
@@ -559,6 +576,22 @@ mod test {
         assert!(!menu_text(&app).contains("Kill all"));
         assert_eq!(app.tab_list.current_tab().shells.len(), 1);
         assert_eq!(app.shell_sessions.alive_count(), 1);
+    }
+
+    /// `n` gives the new shell the origin of the view the menu was opened
+    /// from: after `C-s t` it belongs to the shell, after `T` to the browser.
+    #[test]
+    fn test_new_shell_takes_the_origin_of_the_view() {
+        let mut app = App {
+            shell_menu_origin: Some(ShellId(0)),
+            ..App::default()
+        };
+
+        assert_eq!(menu_origin(&app), ShellOrigin::Shell);
+
+        app.shell_menu_origin = None;
+
+        assert_eq!(menu_origin(&app), ShellOrigin::Browser);
     }
 
     /// The menu marks the shell pinned with `C-s *`, so the one `C-s b`

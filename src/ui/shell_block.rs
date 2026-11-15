@@ -165,6 +165,11 @@ pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
             format!("Kill shell \"{title}\"? (y/N)"),
             Style::default().red().add_modifier(Modifier::BOLD),
         ))
+    } else if app.shell_pending_browser {
+        Some((
+            String::from("Shell closed. Return to the browser? (y/N)"),
+            Style::default().yellow().add_modifier(Modifier::BOLD),
+        ))
     } else if !app.shell_digits.is_empty() {
         Some((
             format!(
@@ -282,7 +287,10 @@ fn to_color(color: vt100::Color) -> Color {
 mod test {
     use std::path::Path;
 
-    use crate::{key_event::GraphicsSupport, utils::Block};
+    use crate::{
+        key_event::{GraphicsSupport, ShellOrigin},
+        utils::Block,
+    };
 
     use super::*;
 
@@ -295,6 +303,7 @@ mod test {
                 "/bin/sh",
                 Path::new("/"),
                 GraphicsSupport::disabled(),
+                ShellOrigin::Browser,
             )
             .unwrap();
 

@@ -129,7 +129,7 @@ mod test {
     use std::path::Path;
 
     use super::*;
-    use crate::key_event::shell::GraphicsSupport;
+    use crate::key_event::shell::{GraphicsSupport, ShellOrigin};
 
     fn open_test_shell(app: &mut App) -> ShellId {
         let tab_id = app.tab_list.current_tab().id;
@@ -140,6 +140,7 @@ mod test {
                 "/bin/sh",
                 Path::new("/"),
                 GraphicsSupport::disabled(),
+                ShellOrigin::Browser,
             )
             .unwrap();
 

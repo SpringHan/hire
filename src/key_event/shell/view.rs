@@ -35,19 +35,29 @@ use super::{
     inside as mouse_inside,
     scroll,
     shell_operation,
+    ClosedShell,
     GraphicsSupport,
+    ShellOrigin,
 };
 
 /// How long a partial shell number is kept before it is committed.
 const DIGIT_COMMIT_DELAY: Duration = Duration::from_millis(450);
 
-pub fn open_shell(app: &mut App) -> AppResult<()> {
+/// Open a new shell on the current tab and attach it.
+///
+/// `origin` is the view the key which opens the shell belongs to (`C-s c`
+/// passes [`ShellOrigin::Shell`], the browser commands pass
+/// [`ShellOrigin::Browser`]); it decides where the view goes when the shell
+/// goes away (see [`leave_closed_shell`]).
+pub fn open_shell(app: &mut App, origin: ShellOrigin) -> AppResult<()> {
     let program = default_shell(app)?;
     let tab_id = app.tab_list.current_tab().id;
     let cwd = app.path.to_owned();
     let graphics = graphics_support(app);
 
-    let id = app.shell_sessions.open(tab_id, &program, &cwd, graphics)?;
+    let id = app
+        .shell_sessions
+        .open(tab_id, &program, &cwd, graphics, origin)?;
 
     let tab = app.tab_list.current_tab_mut();
     tab.shells.push(id);
@@ -164,6 +174,7 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     app.shell_pending_kill = None;
     app.shell_pending_kill_others = None;
     app.shell_pending_kill_all = None;
+    app.shell_pending_browser = false;
     app.shell_notice = None;
     app.mouse_buttons = 0;
     app.clear_shell_digits();
@@ -183,11 +194,18 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
 pub fn detach(app: &mut App) {
     let in_root = app.root();
 
+    // The shell which is in front is not the only one whose life now includes
+    // the browser, so every running shell is marked: whichever of them closes
+    // later asks before the browser is entered again (see
+    // `leave_closed_shell`). A shell opened after this detach is not touched.
+    app.shell_sessions.mark_returned_to_browser();
+
     app.shell_prefix_active = false;
     app.shell_scroll_mode = false;
     app.shell_pending_kill = None;
     app.shell_pending_kill_others = None;
     app.shell_pending_kill_all = None;
+    app.shell_pending_browser = false;
     app.shell_notice = None;
     app.mouse_buttons = 0;
     app.clear_shell_digits();
@@ -299,6 +317,18 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
         return Ok(())
     }
 
+    // A closed shell offers the browser: `y` takes it, any other key stays on
+    // the shell the view fell back to.
+    if app.shell_pending_browser {
+        app.shell_pending_browser = false;
+
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            detach(app);
+        }
+
+        return Ok(())
+    }
+
     // Digits typed after the prefix select a shell by number.
     if !app.shell_digits.is_empty() {
         match key.code {
@@ -354,7 +384,7 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
             KeyCode::Char('d') => detach(app),
             KeyCode::Char('n') => return next_shell(app, true),
             KeyCode::Char('p') => return next_shell(app, false),
-            KeyCode::Char('c') => return open_shell(app),
+            KeyCode::Char('c') => return open_shell(app, ShellOrigin::Shell),
             KeyCode::Char('x') => app.shell_pending_kill = Some(id),
             // Kill every shell mounted on this tab; the tab stays open.
             KeyCode::Char('D') => {
@@ -407,10 +437,11 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
         return Ok(())
     };
 
-    // The kill confirmation owns the input; do not leak clicks to the child.
+    // A pending confirmation owns the input; do not leak clicks to the child.
     if app.shell_pending_kill.is_some() ||
         app.shell_pending_kill_others.is_some() ||
-        app.shell_pending_kill_all.is_some()
+        app.shell_pending_kill_all.is_some() ||
+        app.shell_pending_browser
     {
         return Ok(())
     }
@@ -523,6 +554,7 @@ pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
     if app.shell_pending_kill.is_some() ||
         app.shell_pending_kill_others.is_some() ||
         app.shell_pending_kill_all.is_some() ||
+        app.shell_pending_browser ||
         app.shell_scroll_mode
     {
         return Ok(())
@@ -596,6 +628,11 @@ impl App<'_> {
         for id in exited {
             let tab_id = self.shell_sessions.get(id).map(|session| session.tab);
             let was_attached = self.selected_block.shell_id() == Some(id);
+            let closed = self
+                .shell_sessions
+                .get(id)
+                .map(|session| session.closed_state())
+                .unwrap_or_default();
 
             self.shell_sessions.close(id);
 
@@ -603,14 +640,7 @@ impl App<'_> {
                 .and_then(|tab_id| self.remove_shell_from_tab(tab_id, id));
 
             if was_attached {
-                match next {
-                    Some(next) => {
-                        if attach(self, next).is_err() {
-                            detach(self);
-                        }
-                    },
-                    None => detach(self),
-                }
+                leave_closed_shell(self, closed, next);
             }
         }
     }
@@ -870,20 +900,54 @@ fn write_key(app: &mut App, id: ShellId, key: &KeyEvent) -> AppResult<()> {
 fn close_shell(app: &mut App, id: ShellId) {
     let tab_id = app.shell_sessions.get(id).map(|session| session.tab);
     let was_attached = app.selected_block.shell_id() == Some(id);
+    let closed = app
+        .shell_sessions
+        .get(id)
+        .map(|session| session.closed_state())
+        .unwrap_or_default();
 
     app.shell_sessions.close(id);
 
     let next = tab_id.and_then(|tab_id| app.remove_shell_from_tab(tab_id, id));
 
     if was_attached {
-        match next {
-            Some(next) => {
-                if attach(app, next).is_err() {
-                    detach(app);
-                }
-            },
-            None => detach(app),
-        }
+        leave_closed_shell(app, closed, next);
+    }
+}
+
+/// Move the view on after the attached shell was closed.
+///
+/// `next` is the tab's surviving shell, if any. A tab with a single shell
+/// always goes back to the browser, as it did before. Otherwise the closed
+/// shell decides: one opened from the browser, and never left for it, returns
+/// to the browser; one opened from a shell attaches the tab's previous shell.
+/// A shell the user had already been back in the browser from attaches that
+/// previous shell and asks (`y`) whether the browser is where they want to
+/// continue, instead of guessing.
+fn leave_closed_shell(
+    app: &mut App,
+    closed: ClosedShell,
+    next: Option<ShellId>,
+) {
+    let Some(next) = next else {
+        detach(app);
+        return
+    };
+
+    if closed.origin == ShellOrigin::Browser && !closed.returned_to_browser {
+        detach(app);
+        return
+    }
+
+    if attach(app, next).is_err() {
+        detach(app);
+        return
+    }
+
+    // `attach` clears every pending confirmation, so the question is set after
+    // it. The fallback shell is in front while the user answers.
+    if closed.returned_to_browser {
+        app.shell_pending_browser = true;
     }
 }
 
@@ -1061,7 +1125,7 @@ mod test {
     use std::{
         fs,
         path::Path,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use ratatui::crossterm::event::KeyModifiers;
@@ -1091,10 +1155,21 @@ mod test {
 
     /// Mount a `/bin/sh` session on the current tab, without attaching it.
     fn open_test_shell(app: &mut App) -> ShellId {
+        open_test_shell_from(app, ShellOrigin::Browser)
+    }
+
+    /// Mount a session which was opened from `origin`.
+    fn open_test_shell_from(app: &mut App, origin: ShellOrigin) -> ShellId {
         let tab_id = app.tab_list.current_tab().id;
         let id = app
             .shell_sessions
-            .open(tab_id, "/bin/sh", Path::new("/"), GraphicsSupport::disabled())
+            .open(
+                tab_id,
+                "/bin/sh",
+                Path::new("/"),
+                GraphicsSupport::disabled(),
+                origin,
+            )
             .unwrap();
 
         let tab = app.tab_list.current_tab_mut();
@@ -1635,5 +1710,200 @@ mod test {
         assert!(!app.current_files.iter().any(|file| file.name == "a.txt"));
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A shell spawned from the browser, and never left for it, returns to the
+    /// browser when it closes instead of attaching the tab's other shell.
+    #[test]
+    fn test_shell_opened_from_the_browser_returns_to_the_browser() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let other = open_test_shell(&mut app);
+        let shell = open_test_shell(&mut app);
+        attach(&mut app, shell).unwrap();
+
+        close_shell(&mut app, shell);
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(!app.shell_pending_browser);
+        assert_eq!(app.tab_list.current_tab().shells, vec![other]);
+    }
+
+    /// A shell spawned from another shell (`C-s c`, the menu's `n`) returns to
+    /// that shell when it closes.
+    #[test]
+    fn test_shell_opened_from_a_shell_returns_to_it() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        let second = open_test_shell_from(&mut app, ShellOrigin::Shell);
+        attach(&mut app, second).unwrap();
+
+        close_shell(&mut app, second);
+
+        assert_eq!(app.selected_block.shell_id(), Some(first));
+        assert!(!app.shell_pending_browser);
+    }
+
+    /// The browser is one place: a detach marks every shell which is running
+    /// at that moment, while a shell opened afterwards starts clean.
+    #[test]
+    fn test_detach_marks_every_running_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        let second = open_test_shell(&mut app);
+        attach(&mut app, first).unwrap();
+
+        detach(&mut app);
+
+        for id in [first, second] {
+            assert!(
+                app.shell_sessions.get(id).unwrap().returned_to_browser,
+                "the running shell must remember the browser",
+            );
+        }
+
+        let later = open_test_shell(&mut app);
+
+        assert!(!app.shell_sessions.get(later).unwrap().returned_to_browser);
+    }
+
+    /// A shell opened from the browser and left in the background while the
+    /// user detaches from another shell still asks when it closes: the browser
+    /// visit happened during its life.
+    #[test]
+    fn test_a_detach_from_another_shell_counts_for_the_new_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        let second = open_test_shell(&mut app);
+
+        // Attach the first shell and detach there; the second one is running
+        // all along and never owned the view.
+        attach(&mut app, first).unwrap();
+        detach(&mut app);
+
+        attach(&mut app, second).unwrap();
+        close_shell(&mut app, second);
+
+        assert_eq!(app.selected_block.shell_id(), Some(first));
+        assert!(app.shell_pending_browser);
+    }
+
+    /// A shell the user already went to the browser from asks before the
+    /// browser is entered again; `y` takes it.
+    #[test]
+    fn test_closing_a_shell_which_had_returned_to_the_browser_asks() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        let second = open_test_shell(&mut app);
+        attach(&mut app, second).unwrap();
+
+        // Back to the browser once, then in front again.
+        detach(&mut app);
+        attach(&mut app, second).unwrap();
+
+        close_shell(&mut app, second);
+
+        // The view falls back to the tab's other shell while it asks.
+        assert_eq!(app.selected_block.shell_id(), Some(first));
+        assert!(app.shell_pending_browser);
+
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::empty());
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(!app.shell_pending_browser);
+    }
+
+    /// Any other key answers "no" and stays on the shell the view fell back
+    /// to; the key is not forwarded to that shell.
+    #[test]
+    fn test_the_browser_question_is_cancelled_by_any_other_key() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let first = open_test_shell(&mut app);
+        let second = open_test_shell(&mut app);
+        attach(&mut app, second).unwrap();
+        detach(&mut app);
+        attach(&mut app, second).unwrap();
+
+        close_shell(&mut app, second);
+        press(&mut app, KeyCode::Char('n'), KeyModifiers::empty());
+
+        assert_eq!(app.selected_block.shell_id(), Some(first));
+        assert!(!app.shell_pending_browser);
+    }
+
+    /// A shell which is the tab's only one always goes back to the browser, as
+    /// it did before, even when the user had been there during its life.
+    #[test]
+    fn test_the_only_shell_of_a_tab_returns_to_the_browser() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let id = open_test_shell(&mut app);
+        attach(&mut app, id).unwrap();
+        detach(&mut app);
+        attach(&mut app, id).unwrap();
+
+        close_shell(&mut app, id);
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(!app.shell_pending_browser);
+        assert!(app.tab_list.current_tab().shells.is_empty());
+    }
+
+    /// The exit cleanup applies the same rule as killing the shell: a shell
+    /// spawned from the browser and exited there returns to the browser.
+    #[test]
+    fn test_an_exited_shell_from_the_browser_returns_to_the_browser() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        let other = open_test_shell(&mut app);
+        let shell = open_test_shell(&mut app);
+        attach(&mut app, shell).unwrap();
+
+        app.shell_sessions
+            .get_mut(shell)
+            .unwrap()
+            .write(b"exit\n")
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+
+        while app.selected_block.shell_id() == Some(shell) {
+            assert!(Instant::now() < deadline, "the shell did not exit");
+            app.handle_shell_events();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        assert!(matches!(app.selected_block, Block::Browser(_)));
+        assert!(!app.shell_pending_browser);
+        assert_eq!(app.tab_list.current_tab().shells, vec![other]);
     }
 }
