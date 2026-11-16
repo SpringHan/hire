@@ -90,17 +90,24 @@ pub fn render_command_line<'a>(
                         app.term_colors.orphan_style
                     ).alignment(Alignment::Left));
                 } else {
-                    lines.push(Line::from(vec![
-                        selected_file.permission_span(),
-                        Span::raw(" "),
-                        selected_file.owner_span(),
-                        Span::raw(" "),
-                        selected_file.modified_span(),
-                        Span::raw(" "),
-                        selected_file.size_span(),
-                        Span::raw(" "),
-                        selected_file.symlink_span(app.term_colors.symlink_style)
-                    ]).alignment(Alignment::Left));
+                    // The mode is one styled span per character, so it cannot
+                    // be a single element of the line.
+                    let mut spans = selected_file.mode_spans();
+
+                    spans.push(Span::raw(" "));
+                    spans.push(selected_file.owner_span());
+                    spans.push(Span::raw(" "));
+                    spans.push(selected_file.modified_span());
+                    spans.push(Span::raw(" "));
+                    spans.push(selected_file.size_span());
+                    spans.push(Span::raw(" "));
+                    spans.push(selected_file.symlink_span(
+                        app.term_colors.symlink_style
+                    ));
+
+                    lines.push(
+                        Line::from(spans).alignment(Alignment::Left)
+                    );
                 }
             } else {
                 lines.push(Line::raw("").alignment(Alignment::Left));

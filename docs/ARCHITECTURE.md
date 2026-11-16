@@ -231,9 +231,15 @@ Responsibilities:
 
 **`app/filesaver.rs`** — `FileSaver` stores `name`, `owner`, `is_file`, `is_dir`,
 `executable`, `cannot_read`, `dangling_symlink`, `symlink_file` plus private
-`size`, `permissions` and `modified_time`. It exposes `permission_span`,
-`owner_span`, `modified_span`, `size_span`, `symlink_span`, `read_only`,
-`set_modified`.
+`size`, `permissions` and `modified_time`. It exposes `mode_spans` (the
+`ls -l` style mode, e.g. `-rw-r--r--`, as one styled span per character:
+`mode_string` builds the plain text from the type character of the metadata and
+the setuid/setgid/sticky bits, and `mode_char_style` colours each character from
+the palette `color.rs` uses — `-` quiet dark gray, the type light green, `r`
+light yellow, `w` light red, `x` cyan, and the special bits cyan; the
+spans are empty when the metadata is missing), `owner_span`, `modified_span`,
+`size_span`, `symlink_span`, `read_only` (which still decides whether
+delete/edit operations are refused), `set_modified`.
 `sort()` orders directories before files, each group alphabetically.
 
 **`app/color.rs`** — parses the `LS_COLORS` environment variable into
@@ -686,10 +692,11 @@ single-shell/kill-all/kill-others prompt, typed shell number, or
 `shell_notice`).
 
 **`ui/command_line.rs`** — `render_command_line` draws either the browser state
-line (permission/owner/size/link info on the left and, on the right, the
-working directory path when set plus the status labels
-`WD EXPAND -- RECORDING -- QUIT`) or the editable command line; the
-`Block::Shell` arm reuses `StateLine` for `shell_status_lines`;
+line (the coloured `ls -l` mode string, owner, modified time, size and link info
+on the left — `DENIED` / `DANGLING_SYMLINK` replace it when the metadata could
+not be read — and, on the right, the working directory path when set plus the
+status labels `WD EXPAND -- RECORDING -- QUIT`), or the editable command line;
+the `Block::Shell` arm reuses `StateLine` for `shell_status_lines`;
 `state_labels` builds the status label row; `get_command_line_span_list`
 produces the character spans with the block cursor highlighted, comparing the
 cursor byte offset with `char_indices()` so multi-byte characters are
@@ -987,6 +994,9 @@ no installed binary. The suite is also independent of `LS_COLORS`:
 `TermColors::init` falls back to the bundled palette when the variable is unset
 or blank, and `app::color::test::*` covers the fallback and the parsing of an
 explicit value, so `cargo test` works in a bare CI shell. They are
+`app::filesaver::test::test_mode_string` / `test_mode_spans_colour_each_character`
+(the `ls -l` mode characters and their per-character colours, the special bits
+included — no `/bin/sh` or terminal needed),
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup),
 `key_event::shell::session::test_cursor_position_query_is_answered` (a
