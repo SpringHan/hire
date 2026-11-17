@@ -230,8 +230,6 @@ impl<'a> App<'a> {
                         rt_error!("{argu_err}")
                     }
 
-                    self.marked_files.clear();
-
                     command_slices.remove(0);
                     let files = command_slices;
                     super::cmds::create_symlink(

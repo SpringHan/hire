@@ -306,6 +306,8 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
   selected item there as well, and it is quoted when the words are joined for
   the shell: the shell then receives it as one argument even when the name has
   a space in it. A file name the user quotes stays exactly as typed.
+  `:create_symlink` does not clear the marked files, so a following paste still
+  has the same selection (the paste menu's `s` behaves the same).
 - `expand_init` / `expand_quit` / `expand_scroll` — the expanded command-line
   view (used to display menus and long messages).
 
@@ -388,7 +390,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/interaction.rs` | External tools: `fzf_jump`, `rg_jump`, `vim_diff`. |
 | `key_event/macro_page.rs` | Macro menu: record/execute, and execute-per-marked-file. |
 | `key_event/path_history.rs` | Path history menu: `goto_prev_path`, `path_history_operation` / `path_history_switch`. |
-| `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal. |
+| `key_event/paste_operation.rs` | Paste menu (move/copy/symlink), paste engine, origin removal; a copy or a symlink keeps the marked files for the next paste while a move clears them. |
 | `key_event/shell/mod.rs` | Module wiring; `cmdline_shell` (prefill `:!<shell>`) and re-exports for the session API. |
 | `key_event/shell/types.rs` | `CommandStr` (`Str` as written, `Quoted` shell-quoted, `SelectedItem`), `ShellCommand` (one-shot foreground commands), `$.` substitution and `shell_quote`. |
 | `key_event/shell/utils.rs` | `default_shell`, run one-shot commands (with or without output; `execute_command` clears the screen afterwards, because the command shares hire's terminal), `InterruptGuard` (a `Ctrl-C` stops the running program, not hire), open files (text with `file_read_program`, everything else with `xdg-open`), working-dir cache. |
@@ -497,7 +499,11 @@ to `30` and jump to the one whose number the user types.
 the paste menu (move, copy, force copy/move, symlink, clear marks);
 `paste_files` performs the copy (including recursive directory copy and
 overwrite handling); `make_single_symlink` builds a `:create_symlink` command;
-`remove_origin_files` deletes sources after a move.
+`remove_origin_files` deletes sources after a move. `restore_status` refreshes
+the current directory and clears the marked files unless the menu entry was a
+copy or a symlink: `c`, `o` and `s` keep them, so the same selection is ready
+for the next paste, while a move (`p`/`O`, which consumes its sources) and the
+clear entry (`x`) drop them.
 
 **`key_event/shell/`** — two kinds of shell work.
 
@@ -997,6 +1003,9 @@ explicit value, so `cargo test` works in a bare CI shell. They are
 `app::filesaver::test::test_mode_string` / `test_mode_spans_colour_each_character`
 (the `ls -l` mode characters and their per-character colours, the special bits
 included — no `/bin/sh` or terminal needed),
+`key_event::paste_operation::test::*` (a copy through `c`/`o` or a symlink
+through `s` keeps the marked files, while a move through `p`/`O` and the clear
+entry drop them),
 `key_event::shell::session::test_display_title_follows_the_foreground_program`
 (the foreground/title lookup),
 `key_event::shell::session::test_cursor_position_query_is_answered` (a

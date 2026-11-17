@@ -438,10 +438,10 @@ mod test {
                 Some(Color::Cyan),        // s (setuid)
                 Some(Color::LightYellow), // r
                 Some(Color::DarkGray),    // -
-                Some(Color::LightBlue),   // x
+                Some(Color::Cyan),        // x
                 Some(Color::LightYellow), // r
                 Some(Color::DarkGray),    // -
-                Some(Color::LightBlue),   // x
+                Some(Color::Cyan),        // x
             ],
         );
 
@@ -475,7 +475,7 @@ mod test {
         assert_eq!(colour('-'), Some(Color::DarkGray));
         assert_eq!(colour('r'), Some(Color::LightYellow));
         assert_eq!(colour('w'), Some(Color::LightRed));
-        assert_eq!(colour('x'), Some(Color::LightBlue));
+        assert_eq!(colour('x'), Some(Color::Cyan));
 
         for special in ['s', 'S', 't', 'T'] {
             assert_eq!(colour(special), Some(Color::Cyan), "{special}");

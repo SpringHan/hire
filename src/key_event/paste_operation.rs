@@ -185,6 +185,11 @@ fn paste_switch(
     let current_dir = app.current_path();
     let files = app.marked_files.to_owned();
 
+    // A copy or a symlink keeps the marked files (see `restore_status`), so
+    // the same selection is ready for the next paste; a move consumes its
+    // source files, and `x` (clear the selection) drops the marks.
+    let mut keep_marked_files = false;
+
     match key {
         'p' => {
             let (failed_files, mut _errs) = paste_files(
@@ -216,6 +221,8 @@ fn paste_switch(
             }
 
             crate::command::create_symlink(app, final_files.into_iter())?;
+
+            keep_marked_files = true;
         },
 
         'c' => {
@@ -224,6 +231,8 @@ fn paste_switch(
                 current_dir,
                 false
             ));
+
+            keep_marked_files = true;
         },
 
         'o' => {
@@ -232,6 +241,8 @@ fn paste_switch(
                 current_dir,
                 true
             ));
+
+            keep_marked_files = true;
         },
 
         'O' => {
@@ -265,7 +276,7 @@ fn paste_switch(
         }
     }
 
-    restore_status(app)?;
+    restore_status(app, keep_marked_files)?;
 
     if !errors.is_empty() {
         return Err(errors)
@@ -340,10 +351,187 @@ fn generate_msg(app: &App) -> CmdContent {
     CmdContent::String(msg)
 }
 
-fn restore_status(app: &mut App) -> AppResult<()> {
+/// Refresh the view after the paste menu and clear the marks unless they are
+/// kept.
+///
+/// `keep_marked_files` is set by the copy and symlink entries: their sources
+/// stay where they are, so the marks can be reused for the next paste. A move
+/// consumes its sources and the clear entry exists to drop them, so both still
+/// clear the marks.
+fn restore_status(app: &mut App, keep_marked_files: bool) -> AppResult<()> {
     app.mark_expand = false;
-    app.marked_files.clear();
+
+    if !keep_marked_files {
+        app.marked_files.clear();
+    }
+
     app.goto_dir(app.current_path(), Some(app.hide_files))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use crate::{key_event::switch::switch_match, utils::MarkedFiles};
+
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!(
+            "hire-paste-{}-{}-{}",
+            std::process::id(),
+            tag,
+            nanos
+        ));
+
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Mark `name` in `from` and answer the paste menu with `key` in `target`.
+    fn paste(app: &mut App, from: &Path, name: &str, target: &Path, key: char) {
+        app.goto_dir(target, Some(false)).unwrap();
+
+        let mut marked = MarkedFiles::default();
+        marked.files.insert(name.to_owned(), false);
+        app.marked_files.insert(from.to_path_buf(), marked);
+
+        paste_operation(app).unwrap();
+
+        let case = app.switch_case.clone().expect("the paste menu is open");
+        switch_match(app, case, key).unwrap();
+    }
+
+    fn marks_contain(app: &App, from: &Path, name: &str) -> bool {
+        app.marked_files
+            .get(from)
+            .is_some_and(|marked| marked.files.contains_key(name))
+    }
+
+    /// `c` copies and keeps the selection, so the same files can be pasted
+    /// again; the originals stay where they are.
+    #[test]
+    fn test_copy_keeps_the_marked_files() {
+        let source = temp_dir("copy-source");
+        let target = temp_dir("copy-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 'c');
+
+        assert_eq!(fs::read_to_string(target.join("a.txt")).unwrap(), "new");
+        assert!(source.join("a.txt").exists());
+        assert_eq!(app.marked_files.len(), 1);
+        assert!(marks_contain(&app, &source, "a.txt"));
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
+
+    /// `o` overwrites the target and keeps the selection as well.
+    #[test]
+    fn test_copy_with_overwrite_keeps_the_marked_files() {
+        let source = temp_dir("overwrite-source");
+        let target = temp_dir("overwrite-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+        fs::write(target.join("a.txt"), "old").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 'o');
+
+        assert_eq!(fs::read_to_string(target.join("a.txt")).unwrap(), "new");
+        assert_eq!(app.marked_files.len(), 1);
+        assert!(marks_contain(&app, &source, "a.txt"));
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
+
+    /// `s` creates the symbolic links and keeps the selection as well, so the
+    /// same files can be linked somewhere else next.
+    #[test]
+    fn test_symlink_keeps_the_marked_files() {
+        let source = temp_dir("symlink-source");
+        let target = temp_dir("symlink-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 's');
+
+        let link = target.join("a.txt");
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_link(&link).unwrap(), source.join("a.txt"));
+        assert_eq!(app.marked_files.len(), 1);
+        assert!(marks_contain(&app, &source, "a.txt"));
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
+
+    /// A move keeps the old behaviour: the source is gone, and so are its
+    /// marks.
+    #[test]
+    fn test_move_clears_the_marked_files() {
+        let source = temp_dir("move-source");
+        let target = temp_dir("move-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 'p');
+
+        assert_eq!(fs::read_to_string(target.join("a.txt")).unwrap(), "new");
+        assert!(!source.join("a.txt").exists());
+        assert!(app.marked_files.is_empty());
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
+
+    /// `O` moves with overwrite: the target is replaced and the marks go away.
+    #[test]
+    fn test_move_with_overwrite_clears_the_marked_files() {
+        let source = temp_dir("force-move-source");
+        let target = temp_dir("force-move-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+        fs::write(target.join("a.txt"), "old").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 'O');
+
+        assert_eq!(fs::read_to_string(target.join("a.txt")).unwrap(), "new");
+        assert!(!source.join("a.txt").exists());
+        assert!(app.marked_files.is_empty());
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
+
+    /// `x` is the "clear selected files" entry, so it still drops the marks
+    /// and copies nothing.
+    #[test]
+    fn test_clear_selection_clears_the_marked_files() {
+        let source = temp_dir("clear-source");
+        let target = temp_dir("clear-target");
+        fs::write(source.join("a.txt"), "new").unwrap();
+
+        let mut app = App::default();
+        paste(&mut app, &source, "a.txt", &target, 'x');
+
+        assert!(!target.join("a.txt").exists());
+        assert!(app.marked_files.is_empty());
+
+        fs::remove_dir_all(&source).unwrap();
+        fs::remove_dir_all(&target).unwrap();
+    }
 }
