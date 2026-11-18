@@ -525,7 +525,10 @@ fn update_completion(
             }
         }
     } else {
-        let commands = ["rename", "create_file", "create_dir", "create_symlink"];
+        let commands = [
+            "rename", "create_file", "create_dir", "create_symlink",
+            "reload_config"
+        ];
 
         for cmd in commands.into_iter() {
             if cmd.starts_with(current) {
@@ -909,6 +912,18 @@ mod test {
 
         assert!(completion(&mut app).is_ok());
         assert_command_line(&app, ":rename a b.txt", CursorPos::End);
+    }
+
+    /// The command-line-only commands are completed after the leading `:`.
+    #[test]
+    fn test_completion_suggests_builtin_commands() {
+        let mut app = app_with(":reload", CursorPos::End);
+
+        assert!(completion(&mut app).is_ok());
+        assert_eq!(
+            app.command_completion.candidates,
+            vec![Cow::Borrowed("reload_config")]
+        );
     }
 
     #[test]

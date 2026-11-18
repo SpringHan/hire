@@ -30,6 +30,9 @@ keymap = [
     { key = "8", run = "switch_tab 8" }, # Switch 8th tab
     { key = "9", run = "switch_tab 9" }, # Switch 9th tab
 
+    # Command line
+    { key = ":", run = "enter_command_line" },  # Enter the command line to type a Hire command
+
     # Search
     { key = "/", run = "search"              },  # Start to search file in command line
     { key = "k", run = "move_candidate next" },  # Move to next search match
@@ -63,6 +66,7 @@ keymap = [
 
     # Others
     { key = "R",  run = "refresh"           },  # Refresh file list
+    { key = "r",  run = "reload_config"     },  # Re-read the config files
     { key = "j",  run = "fzf_jump"          },  # Fuzzy find and jump to file
     { key = "D",  run = "vim_diff"          },  # Exec 'vim-diff' to marked & selected files
     { key = "f",  run = "rg_search"         },  # Jump to target file with 'rg'

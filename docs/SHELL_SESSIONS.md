@@ -1208,8 +1208,10 @@ toggle in `config/mod.rs::get_conf_file` may make the app read
 `docs/ARCHITECTURE.md` §6, "Dev config filenames". When preparing a session for
 the shell menu/harness, set `default_shell` in whichever file the active block
 selects, and create the matching keymap file (`keymap_dev.toml` or
-`keymap.toml`); the app panics in `init_keymap` if the keymap file is missing.
-Do not flip the block back just to run a harness.
+`keymap.toml`); a missing or broken keymap is only reported in the command line
+(`init_keymap` no longer panics), but the app then has no browser bindings, so
+the harness still has to provide it. Do not flip the block back just to run a
+harness.
 
 ---
 

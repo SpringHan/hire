@@ -161,6 +161,15 @@ impl<'a> App<'a> {
         }
     }
     
+    /// Enter the command line block with the leading `:` of a hire command,
+    /// so the user can type the command name right away.
+    pub fn enter_command_line(&mut self) {
+        self.selected_block.set_command_line(
+            String::from(":"),
+            CursorPos::End
+        );
+    }
+
     pub fn command_parse(
         &mut self,
         terminal: &mut DefaultTerminal
@@ -238,6 +247,11 @@ impl<'a> App<'a> {
                     )?
                 },
 
+                // Re-read the three config files and apply them to the running
+                // process; the errors are shown in the command line like those
+                // of any other command.
+                ":reload_config" => crate::config::load_config(self)?,
+
                 // Shell command
                 shell if shell.starts_with(":!") => {
                     if command_slices.len() < 2 {
@@ -295,6 +309,26 @@ impl<'a> App<'a> {
                 },
                 Direction::Down => scroll.0 += 1,
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::utils::{Block, CmdContent, CursorPos};
+
+    #[test]
+    fn test_enter_command_line_prefills_the_colon() {
+        let mut app = App::default();
+        app.enter_command_line();
+
+        match app.selected_block {
+            Block::CommandLine(CmdContent::String(ref content), cursor) => {
+                assert_eq!(content, ":");
+                assert!(cursor == CursorPos::End);
+            },
+            _ => panic!("the command line block was not entered"),
         }
     }
 }

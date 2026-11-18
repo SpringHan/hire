@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use ratatui::crossterm::event::KeyEvent;
 
 use crate::option_get;
@@ -130,30 +130,49 @@ fn default_scroll_mode_keys() -> Vec<ScrollBinding> {
 }
 
 pub fn init_keymap(app: &mut App, path: String) -> AppResult<()> {
-    let err_msg = "The format of content in keymap.toml is error";
     let mut errors = AppError::new();
 
     let document = get_document(path)?;
-    let keymap = document.get("keymap")
-        .expect(err_msg)
-        .as_array()
-        .expect(err_msg);
 
-    for table in keymap.iter() {
-        let entry = table.as_inline_table().expect(err_msg);
-        let key = entry.get("key")
-            .expect(err_msg)
-            .as_str()
-            .expect(err_msg);
-        let bind = entry.get("run")
-            .expect(err_msg)
-            .as_str()
-            .expect(err_msg);
+    // The `keymap` array is the only required section: a missing or wrongly
+    // typed one is reported instead of stopping hire, so the optional scroll
+    // sections below are still read.
+    match document.get("keymap").and_then(|item| item.as_array()) {
+        Some(keymap) => {
+            for table in keymap.iter() {
+                // A broken entry is skipped: the other bindings are still
+                // applied.
+                let Some(entry) = table.as_inline_table() else {
+                    errors.add_error(anyhow!(
+                        "`keymap` must be an array of {{ key, run }} tables"
+                    ));
+                    continue
+                };
 
-        match AppCommand::from_str(bind) {
-            Ok(command) => insert_keybinding(app, key, command, err_msg),
-            Err(err) => errors.add_error(err)
-        }
+                let key = entry.get("key").and_then(|key| key.as_str());
+                let bind = entry.get("run").and_then(|run| run.as_str());
+
+                let (Some(key), Some(bind)) = (key, bind) else {
+                    errors.add_error(anyhow!(
+                        "`keymap` entry has no string `key` or `run`"
+                    ));
+                    continue
+                };
+
+                match AppCommand::from_str(bind) {
+                    Ok(command) => {
+                        if let Err(err) = insert_keybinding(app, key, command) {
+                            errors.add_error(err);
+                        }
+                    },
+                    Err(err) => errors.add_error(err)
+                }
+            }
+        },
+
+        None => errors.add_error(anyhow!(
+            "`keymap.toml` has no `keymap` array of {{ key, run }} tables"
+        )),
     }
 
     // The shell scroll sections are optional: without them the built-in
@@ -231,10 +250,11 @@ fn insert_keybinding(
     app: &mut App,
     key: &str,
     command: AppCommand,
-    err_msg: &str
-)
+) -> anyhow::Result<()>
 {
-    let key_char = key.chars().next().expect(err_msg);
+    let Some(key_char) = key.chars().next() else {
+        bail!("`keymap` entry has an empty `key`")
+    };
     
     match command {
         AppCommand::NaviIndexInput(_) => {
@@ -259,6 +279,8 @@ fn insert_keybinding(
             app.keymap.normal_maps.insert(key_char, command);
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -378,6 +400,75 @@ shell_scroll_mode = [
             app.keymap.shell_scroll_mode_get(&key(KeyCode::Char('x'), KeyModifiers::empty())),
             Some(ScrollCommand::PageDown)
         );
+
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn test_broken_entries_are_skipped() {
+        let path = temp_keymap(
+            r#"
+keymap = [
+    { key = "x", run = "refresh" },
+    { key = "", run = "refresh" },
+    { key = "y", run = "no_such_command" },
+    { key = "z" },
+]
+
+shell_scroll = [
+    { key = "M-j", run = "scroll nowhere" },
+]
+"#,
+        );
+
+        let mut app = App::default();
+        let err = init_keymap(&mut app, path.to_string_lossy().into_owned())
+            .unwrap_err();
+
+        assert!(matches!(app.keymap.get('x'), Ok(AppCommand::Refresh)));
+        assert!(app.keymap.get('y').is_err());
+        assert!(app.keymap.get('z').is_err());
+        assert!(!err.to_string().is_empty());
+
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn test_shipped_keymaps_are_valid() {
+        for content in [
+            include_str!("../../keymap_config/default.toml"),
+            include_str!("../../keymap_config/colemak.toml"),
+        ] {
+            let path = temp_keymap(content);
+            let mut app = App::default();
+
+            init_keymap(&mut app, path.to_string_lossy().into_owned())
+                .expect("a shipped keymap preset must load");
+
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_missing_keymap_array_is_reported() {
+        let path = temp_keymap(
+            r#"
+shell_scroll = [
+    { key = "M-j", run = "scroll top" },
+]
+"#,
+        );
+
+        let mut app = App::default();
+        let err = init_keymap(&mut app, path.to_string_lossy().into_owned())
+            .unwrap_err();
+
+        // The optional section is still read when the required one is broken.
+        assert_eq!(
+            app.keymap.shell_scroll_get(&key(KeyCode::Char('j'), KeyModifiers::ALT)),
+            Some(ScrollCommand::Top)
+        );
+        assert!(err.to_string().contains("keymap"), "{err}");
 
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }

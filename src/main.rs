@@ -39,8 +39,11 @@ fn main() -> AppResult<()> {
     let image_recvs = app.init_image_picker();
     let search_recv = app.init_search_channel();
 
-    // Init config information.
-    config::init_config(&mut app)?;
+    // Init config information. A broken entry is skipped by `load_config` and
+    // shown in the command line once the UI runs; it never stops hire.
+    if let Err(err) = config::load_config(&mut app) {
+        app.app_error.append_errors(err.iter());
+    }
 
     // Load the working directory set by the user.
     app.load_working_directory();

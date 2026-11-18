@@ -25,7 +25,7 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
 Hire is an event-driven application built around one mutable state object, `App`.
 
 ### Prcoess
-1. CLI args → App::default() → init_config()
+1. CLI args → App::default() → load_config()
 2. loop:
    a. execute pending macro
    b. reap exited shell sessions; commit a timed-out shell number; mirror the
@@ -287,9 +287,9 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | File | Purpose |
 | --- | --- |
 | `command/mod.rs` | Wires the submodules and re-exports `cmds::*` and `AppCommand`. |
-| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding) and `AppCommand::from_str` (keymap string → command). |
+| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`) and `AppCommand::from_str` (keymap string → command). |
 | `command/cmds.rs` | Filesystem commands: `rename_file`, `create_file`, `create_symlink`, `file_exists`. |
-| `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (set/append/quit/parse, history, expand). |
+| `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (enter/set/append/quit/parse, history, expand). |
 
 **`command/types.rs`** — `AppCommand` enumerates every user-triggerable action
 (tab/goto/paste/delete/search/refresh, path history (`PrevPath` / `PathHistory`),
@@ -299,15 +299,20 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 **`command/cmd_utils.rs`** — extends `App` and `Block`:
 
 - `Block::set_command_line` — replace the command-line content/cursor.
+- `App::enter_command_line` — switch to the command line with a leading `:` so
+  the user can type a hire command right away (`AppCommand::EnterCommandLine`,
+  bound to `:` in the shipped keymaps).
 - `App::command_line_append`, `command_select` (history navigation),
   `quit_command_mode`.
 - `App::command_parse` — parse an entered `:command` line. Handles `/` search,
-  `:rename`, `:create_file`, `:create_dir`, `:create_symlink`, `:!<shell>`
-  commands, dispatching to `command/cmds.rs` and `key_event/shell`. The words
-  after `:!<shell>` go through `CommandStr::from_slices`, so `$.` is the
-  selected item there as well, and it is quoted when the words are joined for
-  the shell: the shell then receives it as one argument even when the name has
-  a space in it. A file name the user quotes stays exactly as typed.
+  `:rename`, `:create_file`, `:create_dir`, `:create_symlink`,
+  `:reload_config` (the same re-read as `AppCommand::ReloadConfig`), and
+  `:!<shell>` commands, dispatching to `command/cmds.rs`, `config::load_config`
+  and `key_event/shell`. The words after `:!<shell>` go through
+  `CommandStr::from_slices`, so `$.` is the selected item there as well, and it
+  is quoted when the words are joined for the shell: the shell then receives it
+  as one argument even when the name has a space in it. A file name the user
+  quotes stays exactly as typed.
   `:create_symlink` does not clear the marked files, so a following paste still
   has the same selection (the paste menu's `s` behaves the same).
 - `expand_init` / `expand_quit` / `expand_scroll` — the expanded command-line
@@ -321,7 +326,7 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 
 | File | Purpose |
 | --- | --- |
-| `config/mod.rs` | Locate/read/write `auto_config.toml` and `user_config.toml`, `init_config`, and the `option_get!` macro. |
+| `config/mod.rs` | Locate/read/write `auto_config.toml` and `user_config.toml`, `load_config` (startup and `reload_config`), and the `option_get!` macro. |
 | `config/types.rs` | `Config` / `ConfigValue` / `AppConfig`: typed user settings and defaults. |
 | `config/keymap.rs` | `Keymap` (normal/edit/navi maps plus the shell scroll bindings) and `keymap.toml` loading. |
 
@@ -335,6 +340,22 @@ is how a sudo session runs with its throw-away config copy. Three files are used
 `file_read_program`, `gui_file_open_cmd`, `shell_prefix`) and `keymap.toml`.
 `get_document`/`write_document` wrap `toml_edit`. The `option_get!` macro
 unwraps an `Option` into an early error return.
+
+`load_config` reads all three files and is used both at startup and by the
+`reload_config` command (`AppCommand::ReloadConfig`). It always rebuilds the
+configuration from the files: before reading, `reset_config` clears the parts
+taken from them (`App::config`, `App::target_dir`, the stored tab groups,
+`App::keymap` and the parsed `App::shell_prefix`), so an entry removed from a
+file disappears on reload while open tabs, mounted shells, the working
+directory, marks and the rest of the `App` state are untouched. Reading is not
+fatal: a file or an entry which cannot be read is skipped and the rest of the
+file and the other files are still applied; every error is collected and
+returned only after the whole configuration has been read, so the caller shows
+them once the new configuration is in place (`main` appends them to
+`App::app_error` at startup, and `AppCommand::execute` returns them for the
+command line). `init_user_config` always pushes the built-in default for every
+setting before applying the file's value, so `Config::get_value` never misses a
+name even when the file cannot be parsed.
 
 **Dev config filenames.** `get_conf_file` contains a deliberate developer
 toggle: the block selecting `auto_config_dev.toml` / `user_config_dev.toml` /
@@ -354,15 +375,19 @@ create the matching file names; see §6, "Dev config filenames".
 
 **`config/keymap.rs`** — `Keymap` keeps three `HashMap<char, AppCommand>`
 (normal, edit, navi index) and two ordered `Vec<(KeySpec, ScrollCommand)>` for the
-attached shell view. `init_keymap` reads `keymap.toml`; `insert_keybinding`
-routes each command into the correct map(s) (e.g. navi-input keys, edit-mode-only
-keys, commands available everywhere). The optional `shell_scroll` and
-`shell_scroll_mode` arrays put a small DSL of scroll commands (`scroll up`,
-`scroll page down`, `scroll top`, `scroll quit`, …) on full key specs
-(`M-u`, `C-b`, `PageUp`, …); they start from built-in defaults (`M-u`/`M-e`,
-`k`/`j`/`PgUp`/`PgDn`/`g`/`G`/`q`/…), and a file entry replaces the binding of
-the same key so a single key can be remapped. `shell_scroll_label` exposes the
-first binding of each command for the status-line hint.
+attached shell view. `init_keymap` reads `keymap.toml`; a missing or wrongly
+typed `keymap` array is reported as an error (the optional scroll sections are
+still read, and hire keeps running without browser bindings instead of
+panicking), and a broken entry is skipped while the other entries are applied.
+`insert_keybinding` routes each command into the correct map(s) (e.g. navi-input
+keys, edit-mode-only keys, commands available everywhere). The optional
+`shell_scroll` and `shell_scroll_mode` arrays put a small DSL of scroll
+commands (`scroll up`, `scroll page down`, `scroll top`, `scroll quit`, …) on
+full key specs (`M-u`, `C-b`, `PageUp`, …); they start from built-in defaults
+(`M-u`/`M-e`, `k`/`j`/`PgUp`/`PgDn`/`g`/`G`/`q`/…), and a file entry replaces
+the binding of the same key so a single key can be remapped.
+`shell_scroll_label` exposes the first binding of each command for the
+status-line hint.
 
 ### `src/error/` — errors
 
@@ -422,7 +447,9 @@ early-returns an `anyhow`-backed error.
   expand). Non-control characters go to the active `SwitchCase`, the command
   line, or the keymap.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
-  into a concrete call into the operation modules. `AppCommand::Shell` calls
+  into a concrete call into the operation modules. `AppCommand::ReloadConfig`
+  calls `config::load_config`, which re-reads the three config files (the
+  returned errors are shown in the command line). `AppCommand::Shell` calls
   `shell::open_shell` (a mounted, attachable session); `AppCommand::ShellMenu`
   opens the shell menu; `AppCommand::ShellAttach` calls
   `shell::attach_active`, which attaches the shell remembered by the current
@@ -799,7 +826,8 @@ metadata shown in the state line and preview.
 
 ### Command line and completion
 
-`:`/`/`/`!` switch `selected_block` to `CommandLine`. `command_parse`
+`:` (`AppCommand::EnterCommandLine`), `/` (search) and `!` (`cmdline_shell`)
+switch `selected_block` to `CommandLine`. `command_parse`
 (`command/cmd_utils.rs`) interprets the line. `Tab` triggers
 `key_event::command_line::completion`, which completes builtin commands, file
 names, or the selected browser item (when the cursor is right after a space) and
@@ -1025,9 +1053,22 @@ cross-tab fallback, the four close rules — browser shell, shell shell, the
 `handle_shell_events`), `key_event::shell::scroll::test::*`
 (scrolling, paging, top/bottom, wheel, leaving at the bottom),
 `key_event::shell::input::test::*` (`KeySpec` parsing/labels, `shell_prefix`),
-`config::keymap::test::*` (the default scroll bindings and the `keymap.toml`
-sections), `key_event::shell::menu::test::*` (the shell menu's `D`
-confirmation, the cross-tab list/borrow and the `x` scope),
+`config::keymap::test::*` (the default scroll bindings, the `keymap.toml`
+sections, the shipped presets loading cleanly, and a broken entry or a missing
+`keymap` array being reported without stopping the other entries),
+`config::test::*` (a reload applies the readable entries of all three files,
+drops entries removed from them, and keeps the defaults of a user config which
+cannot be parsed), `command::types::test::test_reload_config_command`
+(`reload_config` parses to `AppCommand::ReloadConfig`) and
+`test_enter_command_line_command` (`enter_command_line` parses to
+`AppCommand::EnterCommandLine`), `command::cmd_utils::test::*`
+(`enter_command_line` switches to the command line with a leading `:`),
+`key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`,
+`key_event::tab::test::*` (a broken stored tab group is skipped, a missing
+section is accepted, `clear_storage`),
+`key_event::command_line::test_completion_suggests_builtin_commands` (`:reload`
+completes to `reload_config`), `key_event::shell::menu::test::*` (the shell
+menu's `D` confirmation, the cross-tab list/borrow and the `x` scope),
 `ui::shell_block::test::*` (the idle status line and the prefix
 hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
 `key_event::simple_operations::test::*` covers the temp-file target
@@ -1081,9 +1122,12 @@ config directory, check which `format!` block is active in
 | production (committed/default) | `keymap.toml`, `user_config.toml`, `auto_config.toml` |
 | dev (local working-tree toggle) | `keymap_dev.toml`, `user_config_dev.toml`, `auto_config_dev.toml` |
 
-The app creates a missing `auto_config*` file itself, but it panics in
-`init_keymap` if the keymap file is missing, so a harness must create the name
-matching the active block. When the dev block is active:
+The app creates a missing `auto_config*` file itself. A missing or broken
+`keymap*` file is no longer fatal — `init_keymap` reports it in the command
+line and hire starts without browser bindings — but such an app cannot be
+driven by keys, so a harness must create the name matching the active block.
+
+When the dev block is active:
 
 ```bash
 tmp=$(mktemp -d)
@@ -1122,6 +1166,7 @@ For shell sessions, a pty harness also needs a real window size: set
 `TIOCSWINSZ` on the pty (e.g. 40x120). A 0x0 pty makes `WINDOW_HEIGHT` zero and
 the list renderer underflows.
 
-The shipped keymaps don't bind `:`; use the configured `create_file`,
-`create_dir` or `search` key (e.g. `=` in `keymap_config/default.toml`) to reach
-the command line from the browser.
+The shipped keymaps bind `:` to `enter_command_line`, so a harness can press
+`:` and type the command name directly. An older `keymap.toml` without that
+binding still reaches the command line through the configured `create_file`,
+`create_dir` or `search` key (e.g. `=` in `keymap_config/default.toml`).

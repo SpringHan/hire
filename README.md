@@ -127,6 +127,30 @@ defaults listed above (plus the arrow keys, `C-p`/`C-n`/`C-b`/`C-f`,
 entry for a key which already has a default replaces that binding, so a single
 key can be remapped without repeating the whole list.
 
+#### Reloading the configuration
+
+`reload_config` re-reads all three files without restarting hire. The shipped
+keymaps bind it to `r`:
+
+```toml
+keymap = [
+    # ... other keybindings ...
+
+    { key = "r", run = "reload_config" }
+]
+```
+
+If your `keymap.toml` was copied before this command existed, add the binding
+above yourself. The command is also available as `:reload_config` in the
+command line.
+
+The configuration is rebuilt from the files, so an entry you removed
+(a binding, a bookmark or a stored tab group) disappears as well; open tabs,
+mounted shells and the current directory are left alone. An entry which cannot
+be read is skipped while the rest is still applied, and the errors are shown in
+the command line after the new configuration is in place. The same rules apply
+when hire starts: a broken entry never stops it from running.
+
 ## Shell arguments
 
 You can get the arguments by:
@@ -330,6 +354,7 @@ keymap = [
 
 ## Keybindings for command line
 
+- Open the command line (prefilled with `:`): `:` (`enter_command_line`)
 - Cursor move left: `C-b`
 - Cursor move right: `C-f`
 - Cursor move to beginning: `C-a`

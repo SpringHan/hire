@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-use anyhow::bail;
 use toml_edit::{value, DocumentMut};
 use ratatui::{style::Stylize, text::{Line, Text}};
 
@@ -12,7 +11,7 @@ use super::{SwitchCase, SwitchCaseData};
 use crate::app::App;
 use crate::utils::CmdContent;
 use crate::config::{get_document, write_document};
-use crate::error::{AppResult, ErrorType, NotFoundType};
+use crate::error::{AppError, AppResult, ErrorType, NotFoundType};
 
 pub fn goto_operation(app: &mut App) {
     SwitchCase::new(
@@ -139,22 +138,38 @@ fn remove_target_dir(app: &mut App, key: char) -> AppResult<()> {
 }
 
 /// Read config for goto operation.
-pub fn read_config(app: &mut App, document: &DocumentMut) -> anyhow::Result<()> {
+pub fn read_config(app: &mut App, document: &DocumentMut) -> AppResult<()> {
+    let mut errors = AppError::new();
+
     if let Some(item) = document.get("goto_dir") {
-        if let Some(inline_table) = item.as_inline_table() {
-            for e in inline_table.into_iter() {
-                app.target_dir
-                    .entry(e.0.parse().unwrap())
-                    .or_insert(
-                        e.1
-                            .as_str()
-                            .expect("Type error for goto_dir config!")
-                            .to_owned()
-                    );
-            }
-        } else {
-            bail!("Wrong type for goto_dir config")
+        let Some(inline_table) = item.as_inline_table() else {
+            return Err(anyhow::anyhow!(
+                "Wrong type for goto_dir config"
+            ).into())
+        };
+
+        for (key, value) in inline_table.iter() {
+            // A broken bookmark is skipped: the other ones are still usable.
+            let Ok(key) = key.parse::<char>() else {
+                errors.add_error(anyhow::anyhow!(
+                    "The key `{key}` of goto_dir is not a single character"
+                ));
+                continue
+            };
+
+            let Some(path) = value.as_str() else {
+                errors.add_error(anyhow::anyhow!(
+                    "The value of goto_dir key `{key}` must be a string"
+                ));
+                continue
+            };
+
+            app.target_dir.entry(key).or_insert(path.to_owned());
         }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors)
     }
 
     Ok(())
@@ -185,6 +200,25 @@ mod goto_test {
             app.target_dir.get(&'G').map(String::as_str),
             Some("/home/user/Github")
         );
+    }
+
+    #[test]
+    fn test_read_config_skips_broken_bookmarks() {
+        let document: DocumentMut = r#"
+            goto_dir = { h = "/home", toolong = "/tmp", d = 3 }
+        "#
+            .parse()
+            .expect("Invalid TOML document");
+
+        let mut app = App::default();
+        let err = read_config(&mut app, &document).unwrap_err();
+
+        assert_eq!(
+            app.target_dir.get(&'h').map(String::as_str),
+            Some("/home")
+        );
+        assert_eq!(app.target_dir.len(), 1);
+        assert!(err.to_string().contains("goto_dir"), "{err}");
     }
 
     #[test]

@@ -511,6 +511,7 @@ impl AppCommand {
             AppCommand::SudoSession     => sudo_session::sudo_session(app, terminal)?,
             AppCommand::EditGotoTop     => edit::item_navigation(app, Goto::Index(0))?,
             AppCommand::QuitAfterOutput => app.quit_after_output = !app.quit_after_output,
+            AppCommand::ReloadConfig    => crate::config::load_config(app)?,
 
 
             AppCommand::NaviIndexInput(idx)   => app.navi_index.input(idx),
@@ -524,10 +525,7 @@ impl AppCommand {
                 app.mark_expand = false;
             },
 
-            AppCommand::CommandInsert => app.selected_block.set_command_line(
-                String::from(":"),
-                CursorPos::End
-            ),
+            AppCommand::EnterCommandLine => app.enter_command_line(),
 
             AppCommand::EditInsert(end) => app.edit_mode.enter_insert(
                 &mut app.selected_item.current,

@@ -68,24 +68,24 @@ impl<'a> Config<'a> {
                 self.value = Self::get_str(value, err_msg)?,
 
             "gui_commands" => {
-                let _value = value.as_array();
-                if _value.is_none() {
+                let Some(items) = value.as_array() else {
                     bail!("{err_msg}")
+                };
+
+                // The list is built first and stored last: a broken entry skips
+                // the whole property (it keeps its default) instead of leaving
+                // the commands read before it in place.
+                let mut commands = Vec::with_capacity(items.len());
+
+                for item in items.iter() {
+                    let Some(command) = item.as_str() else {
+                        bail!("Meet type error when setting gui_commands")
+                    };
+
+                    commands.push(Cow::Owned(command.to_owned()));
                 }
 
-                let mut command: Option<&str>;
-
-                if let ConfigValue::Vec(ref mut commands) = self.value {
-                    for _command in _value.unwrap().iter() {
-                        command = _command.as_str();
-
-                        if command.is_none() {
-                            bail!("Meet type error when setting gui_commands")
-                        }
-
-                        commands.push(Cow::Owned(command.unwrap().to_owned()));
-                    }
-                }
+                self.value = ConfigValue::Vec(commands);
             },
 
             _ => panic!("Unknow error occurred at value_from fn in types.rs.")

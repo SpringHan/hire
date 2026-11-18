@@ -38,8 +38,15 @@ pub enum AppCommand {
     ShowNaviIndex,
     SingleSymlink,
     PrintFullPath,
-    CommandInsert,
     QuitAfterOutput,
+
+    /// Enter the command line block with a leading `:` so the user can type a
+    /// hire command (the keymap's `enter_command_line`).
+    EnterCommandLine,
+
+    /// Re-read `auto_config.toml`, `user_config.toml` and `keymap.toml` and
+    /// apply them to the running process.
+    ReloadConfig,
 
     /// Run a root instance of hire with the tabs of the current session.
     SudoSession,
@@ -141,8 +148,9 @@ impl AppCommand {
             "full_path"         => Self::PrintFullPath,
             "single_symlink"    => Self::SingleSymlink,
             "show_navi_index"   => Self::ShowNaviIndex,
-            "command_insert"    => Self::CommandInsert,
+            "enter_command_line" => Self::EnterCommandLine,
             "quit_after_output" => Self::QuitAfterOutput,
+            "reload_config"     => Self::ReloadConfig,
 
             "list_scroll" => Self::ListScroll(
                 *option_get!(cmd_arg, command_err) == "next"
@@ -234,6 +242,24 @@ mod test {
         assert!(matches!(
             AppCommand::from_str("attach_shell").unwrap(),
             AppCommand::ShellAttach
+        ));
+    }
+
+    /// `reload_config` re-reads the three config files.
+    #[test]
+    fn test_reload_config_command() {
+        assert!(matches!(
+            AppCommand::from_str("reload_config").unwrap(),
+            AppCommand::ReloadConfig
+        ));
+    }
+
+    /// The shipped keymaps bind `:` to this command.
+    #[test]
+    fn test_enter_command_line_command() {
+        assert!(matches!(
+            AppCommand::from_str("enter_command_line").unwrap(),
+            AppCommand::EnterCommandLine
         ));
     }
 

@@ -217,6 +217,12 @@ impl<'a> TabList<'a> {
         self.current = idx.min(self.list.len().saturating_sub(1));
     }
 
+    /// Drop the stored tab groups; the configuration is read again from
+    /// `auto_config.toml` (`reload_config`).
+    pub fn clear_storage(&mut self) {
+        self.storage.clear();
+    }
+
     /// Remove the tab at `idx`; the current index is kept in range and moves
     /// to the previous tab when the removed one was focused.
     pub fn remove(&mut self, idx: usize) -> Option<Tab> {
