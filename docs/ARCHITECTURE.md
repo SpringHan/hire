@@ -218,12 +218,14 @@ Responsibilities:
   `select_normal`, `update_with_prev_selected`, `partly_update_block`.
 - Navigation & lookup: `goto_dir`, `root`, `current_path`, `search_file`,
   `get_file_saver`, `get_file_saver_mut`, `get_directory_mut`, `hide_or_show`.
-- Preview: `set_file_content` (text, or the path handed to the preview thread)
-  and `apply_preview` (the thread's result, applied only while its path is
-  still the selected file; `selected_file_path` is the check). The thread
-  decides between an image and the file's `xdg-mime` type, so a directory's
-  listing can never be covered by a late result and the previous file's
-  preview can never be taken for the next one's.
+- Preview: `set_file_content` (text, or the path handed to the preview thread;
+  a socket, a FIFO or a device node is never opened — `open(2)` fails with
+  `ENXIO` on a socket and blocks on a FIFO — its `xdg-mime` type is shown
+  instead) and `apply_preview` (the thread's result, applied only while its
+  path is still the selected file; `selected_file_path` is the check). The
+  thread decides between an image and the file's `xdg-mime` type, so a
+  directory's listing can never be covered by a late result and the previous
+  file's preview can never be taken for the next one's.
 - Marked files: `append_marked_file(s)`, `marked_file_contains`,
   `marked_file_contains_path`, `remove_marked_file`, `clear_path_marked_files`.
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
@@ -1003,6 +1005,8 @@ explicit value, so `cargo test` works in a bare CI shell. They are
 `app::filesaver::test::test_mode_string` / `test_mode_spans_colour_each_character`
 (the `ls -l` mode characters and their per-character colours, the special bits
 included — no `/bin/sh` or terminal needed),
+`app::test::test_file_content_of_a_socket_is_its_type` (a socket is previewed by
+its type instead of failing with `ENXIO`),
 `key_event::paste_operation::test::*` (a copy through `c`/`o` or a symlink
 through `s` keeps the marked files, while a move through `p`/`O` and the clear
 entry drop them),

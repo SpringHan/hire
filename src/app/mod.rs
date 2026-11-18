@@ -777,6 +777,18 @@ impl<'a> App<'a> {
                 self.image_preview.useless = true;
             }
 
+            // A socket, a FIFO or a device node is not a file which can be
+            // read: `open(2)` fails with ENXIO on a socket and blocks on a
+            // FIFO, so the entry's type is shown instead of opening it (a
+            // directory never reaches this point; the third column shows its
+            // contents).
+            if !selected_file.is_file && !selected_file.is_dir {
+                self.file_content = FileContent::Text(Text::raw(
+                    file_type_label(&file_path)
+                ));
+                return Ok(())
+            }
+
             match fs::File::open(file_path.to_owned()) {
                 Err(e) => {
                     match e.kind() {
@@ -1100,6 +1112,40 @@ mod test {
             Preview::FileType(String::from("text/x-a"))
         );
         assert!(app.file_content == FileContent::Text(Text::raw("text/x-a")));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A socket cannot be opened for reading (`open(2)` fails with `ENXIO`),
+    /// so selecting one shows its type instead of ending hire with
+    /// "No such device or address".
+    #[test]
+    fn test_file_content_of_a_socket_is_its_type() {
+        let dir = temp_dir("socket");
+        let socket = dir.join("demo.sock");
+
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        drop(listener);
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        app.set_file_content().unwrap();
+
+        let label = match &app.file_content {
+            FileContent::Text(text) => {
+                text.lines.iter()
+                    .flat_map(|line| line.spans.iter())
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            },
+            _ => panic!("the socket's type is shown as text"),
+        };
+
+        // `xdg-mime` names the type; without it the fallback label is used.
+        assert!(
+            label == "inode/socket" || label == "Non Text File",
+            "{label}",
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }
