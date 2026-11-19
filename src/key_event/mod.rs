@@ -383,6 +383,7 @@ pub fn handle_event(
                     edit::generate_msg(),
                     SwitchCaseData::None
                 );
+                return Ok(())
             }
 
             output_path(app, terminal, false)?;
