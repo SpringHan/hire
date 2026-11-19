@@ -246,11 +246,11 @@ fn is_delete_word_separator(_char: char) -> bool {
 /// Check whether the character is a part of a word when the cursor moves or
 /// deletes word by word.
 ///
-/// Whitespace and punctuation like `:` or `.` separate words, so a file name
-/// such as `foo_bar.txt` is made of the words `foo_bar` and `txt`. Non-ASCII
-/// letters (e.g. CJK characters) are word characters.
+/// Whitespace and punctuation like `:`, `.` or `_` separate words, so a file
+/// name such as `foo_bar.txt` is made of the words `foo`, `bar` and `txt`.
+/// Non-ASCII letters (e.g. CJK characters) are word characters.
 pub fn is_word_char(_char: char) -> bool {
-    _char.is_alphanumeric() || _char == '_'
+    _char.is_alphanumeric()
 }
 
 /// Convert a cursor position into the insertion point of a text.
@@ -487,12 +487,13 @@ mod test {
     fn test_is_word_char() {
         assert!(is_word_char('a'));
         assert!(is_word_char('0'));
-        assert!(is_word_char('_'));
         assert!(is_word_char('文'));
         assert!(!is_word_char(' '));
         assert!(!is_word_char('/'));
         assert!(!is_word_char('.'));
         assert!(!is_word_char('-'));
+        // `_` separates words as well, so `foo_bar` is three words.
+        assert!(!is_word_char('_'));
     }
 
     #[test]
@@ -511,6 +512,12 @@ mod test {
         // There is no word left.
         assert_eq!(next_word_end(content, 11), 11);
         assert_eq!(next_word_end("hello  ", 5), 7);
+
+        // `_` separates words.
+        let content = "foo_bar";
+        assert_eq!(next_word_end(content, 0), 3);
+        assert_eq!(next_word_end(content, 3), 7);
+        assert_eq!(next_word_end(content, 7), 7);
     }
 
     #[test]
@@ -528,6 +535,11 @@ mod test {
         // There is no word before the cursor.
         assert_eq!(prev_word_start(content, 0), 0);
         assert_eq!(prev_word_start("  hello", 2), 0);
+
+        // `_` separates words.
+        let content = "foo_bar";
+        assert_eq!(prev_word_start(content, 7), 4);
+        assert_eq!(prev_word_start(content, 4), 0);
     }
 
     #[test]
@@ -566,6 +578,19 @@ mod test {
         cursor_prev_word_start(content, &mut cursor);
         assert!(cursor == CursorPos::Index(0));
 
+        // `_` is a word boundary for the movement as well.
+        let content = "foo_bar";
+        let mut cursor = CursorPos::Index(0);
+
+        cursor_next_word_end(content, &mut cursor);
+        assert!(cursor == CursorPos::Index(3));
+
+        cursor_next_word_end(content, &mut cursor);
+        assert!(cursor == CursorPos::End);
+
+        cursor_prev_word_start(content, &mut cursor);
+        assert!(cursor == CursorPos::Index(4));
+
         // Nothing happens when there is no cursor.
         let mut cursor = CursorPos::None;
         cursor_next_word_end(content, &mut cursor);
@@ -598,6 +623,14 @@ mod test {
         delete_word_before_cursor(&mut content, &mut cursor);
         assert_eq!(content, "abc");
         assert!(cursor == CursorPos::Index(0));
+
+        // `_` is a word separator, so only the word after it is deleted.
+        let mut content = String::from("foo_bar");
+        let mut cursor = CursorPos::End;
+
+        delete_word_before_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "foo_");
+        assert!(cursor == CursorPos::End);
     }
 
     #[test]
@@ -669,6 +702,14 @@ mod test {
 
         delete_word_after_cursor(&mut content, &mut cursor);
         assert_eq!(content, " abc");
+        assert!(cursor == CursorPos::Index(0));
+
+        // `_` is a word separator, so only the word before it is deleted.
+        let mut content = String::from("foo_bar");
+        let mut cursor = CursorPos::Index(0);
+
+        delete_word_after_cursor(&mut content, &mut cursor);
+        assert_eq!(content, "_bar");
         assert!(cursor == CursorPos::Index(0));
 
         // Nothing happens without a cursor.
@@ -745,6 +786,13 @@ mod test {
         let mut cursor = CursorPos::Index(7);
         delete_word(&mut content, &mut cursor);
         assert_eq!(content, "abc.");
+        assert!(cursor == CursorPos::End);
+
+        // `_` is an ASCII punctuation character, so it is a separator here too.
+        let mut content = String::from("foo_bar");
+        let mut cursor = CursorPos::End;
+        delete_word(&mut content, &mut cursor);
+        assert_eq!(content, "foo_");
         assert!(cursor == CursorPos::End);
 
         // Multi-byte characters are never split.

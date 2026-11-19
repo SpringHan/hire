@@ -760,7 +760,8 @@ command line; the layout arithmetic saturates instead of overflowing.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
   expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
-  content is never split).
+  content is never split; its separators are the ASCII punctuation characters,
+  `_` included).
 - Word-wise text editing shared by the command line and edit mode:
   `is_word_char`, `next_word_end` / `prev_word_start`,
   `cursor_next_word_end` / `cursor_prev_word_start`,
