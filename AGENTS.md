@@ -22,6 +22,6 @@ This project is a TUI program written in Rust, which is a file manager.
 1. Whenever you modify the files in workspace, update `docs/ARCHITECTURE.md` instantly.
 2. The `ARCHITECTURE.md` is written for LLMs, use fewer ASCII-art diagrams and more readable text.
 3. Using English to write the comments in code and docs in `docs/` folder.
-4. Add function when it's necessary, in order to make the code more readable.
+4. Only add new function when it's necessary, in order to make the code more readable.
 5. You can get the git repository info, but **never** execute commands that can change git status without my order.
 6. You should add new keybindings into `keymap_config/*.toml` after adding new `AppCommand`.
