@@ -287,7 +287,7 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | File | Purpose |
 | --- | --- |
 | `command/mod.rs` | Wires the submodules and re-exports `cmds::*` and `AppCommand`. |
-| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`) and `AppCommand::from_str` (keymap string → command). |
+| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`, and `EditAppendFsName` for the edit mode's `a`) and `AppCommand::from_str` (keymap string → command). |
 | `command/cmds.rs` | Filesystem commands: `rename_file`, `create_file`, `create_symlink`, `file_exists`. |
 | `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (enter/set/append/quit/parse, history, expand). |
 
@@ -494,13 +494,19 @@ insert mode, cursor movement (including word-wise `Alt-f` / `Alt-b`, the
 deletion, applied to every item whose cursor is active), marking and delete
 flags. Cursors are byte offsets on character boundaries, so multi-byte names
 are edited whole; `save_edit` applies all renames/creations/deletions at once
-behind a confirmation page.
+behind a confirmation page. Insert mode is entered by `enter_insert` (the
+`edit_insert beg` / `end` commands, one fixed position for every active item)
+or by `enter_insert_before_extension` (`edit_append_filename`, the edit-mode
+counterpart of `AppendFsName`): the latter computes the position per item, so
+each cursor lands right before that item's own extension and the command line
+is never opened. Both share `enter_insert_with`, which also handles the marked
+items.
 
 **`key_event/file_operations.rs`** — `append_file_name` (prefill `:rename` for
-the selected file, cursor before the extension), `delete_operation` /
-`delete_switch` (delete menu and confirmation), `delete_file` (physical removal
-plus selection fix-up), `mark_operation` (mark/unmark one or all files) and the
-menu message builders.
+the selected file, cursor before the extension through
+`utils::extension_start`), `delete_operation` / `delete_switch` (delete menu and
+confirmation), `delete_file` (physical removal plus selection fix-up),
+`mark_operation` (mark/unmark one or all files) and the menu message builders.
 
 **`key_event/file_search.rs`** — `FileSearcher` keeps the matched indices and a
 sender to a matching worker thread. `init_search_channel` starts that thread,
@@ -767,6 +773,10 @@ command line; the layout arithmetic saturates instead of overflowing.
   expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
   content is never split; its separators are the ASCII punctuation characters,
   `_` included).
+- `extension_start` — the byte index where a file name's extension starts (its
+  last `.`), shared by the command-line `append_file_name` and the edit-mode
+  `enter_insert_before_extension` so both put the cursor in the same place.
+  `None` when there is no extension (no dot, or only a leading one).
 - Word-wise text editing shared by the command line and edit mode:
   `is_word_char`, `next_word_end` / `prev_word_start`,
   `cursor_next_word_end` / `cursor_prev_word_start`,
@@ -1071,8 +1081,19 @@ drops entries removed from them, and keeps the defaults of a user config which
 cannot be parsed), `command::types::test::test_reload_config_command`
 (`reload_config` parses to `AppCommand::ReloadConfig`) and
 `test_enter_command_line_command` (`enter_command_line` parses to
-`AppCommand::EnterCommandLine`), `command::cmd_utils::test::*`
+`AppCommand::EnterCommandLine`), `test_edit_append_filename_command`
+(`edit_append_filename` parses to `AppCommand::EditAppendFsName`),
+`config::keymap::test::test_edit_bindings_are_routed_to_the_edit_map` (an
+edit-only command never becomes a browser binding),
+`command::cmd_utils::test::*`
 (`enter_command_line` switches to the command line with a leading `:`),
+`utils::test::test_extension_start` (the byte index of the last dot, the
+leading-dot and multi-byte cases), `key_event::file_operations::test::*`
+(`append_file_name` places the `:rename` cursor before the extension),
+`key_event::edit::test::test_enter_insert_before_extension` and
+`test_enter_insert_before_extension_of_marked_items` (the edit-mode
+`append_filename`: insert mode, one cursor per active item, the extension
+untouched),
 `key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`,
 `key_event::tab::test::*` (a broken stored tab group is skipped, a missing
 section is accepted, `clear_storage`),

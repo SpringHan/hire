@@ -179,6 +179,7 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
 
 3. **Text Editing**:
    - Insert text at beginning/end of filenames (`H`/`A` in Colemak, `I`/`A` in QWERTY)
+   - Insert right before the file extension: `a` (`edit_append_filename`), the edit-mode equivalent of `append_filename name`, without opening the command line
    - Move to the next/previous word: `Alt-f` / `Alt-b`; delete a whole word before/after the cursor: `C-Backspace` / `Alt-d`; delete the character after the cursor: `C-d`
 
 4. **Exiting**:

@@ -194,6 +194,20 @@ pub fn file_type_label(path: &Path) -> String {
     file_mime(path).unwrap_or_else(|| String::from("Non Text File"))
 }
 
+/// Return the byte index at which the extension of a file name starts.
+///
+/// The extension starts at the last `.` of the name, so `"foo.tar.gz"` returns
+/// the index of the second dot. `None` is returned when there is no extension:
+/// no dot at all, or only a leading one (`".bashrc"` is a hidden file, not an
+/// extension). The index is a byte offset, so it always lies on a character
+/// boundary, even when the name contains multi-byte characters.
+pub fn extension_start(name: &str) -> Option<usize> {
+    match name.rfind('.') {
+        Some(idx) if idx > 0 => Some(idx),
+        _ => None,
+    }
+}
+
 /// Delete word and update content & cursor position.
 ///
 /// The character right before the cursor decides how much is deleted: a word
@@ -952,5 +966,27 @@ mod test {
         let dir = temp_dir("mime");
         assert_eq!(file_type_label(&dir.join("missing")), "Non Text File");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `extension_start` is shared by the command-line `append_filename` and
+    /// the edit-mode variant, so it has to find the byte index of the last dot.
+    #[test]
+    fn test_extension_start() {
+        assert_eq!(extension_start("foo.txt"), Some(3));
+        assert_eq!(extension_start("foo.tar.gz"), Some(7));
+        assert_eq!(extension_start("abc."), Some(3));
+
+        // No extension: no dot, a leading dot only, or nothing.
+        assert_eq!(extension_start("foo"), None);
+        assert_eq!(extension_start(".bashrc"), None);
+        assert_eq!(extension_start(""), None);
+        assert_eq!(extension_start("."), None);
+
+        // A hidden file may still have an extension.
+        assert_eq!(extension_start(".config.toml"), Some(7));
+
+        // The index is a byte offset, so a multi-byte suffix stays intact.
+        assert_eq!(extension_start("中文.txt"), Some(6));
+        assert_eq!(extension_start("中文.中文"), Some(6));
     }
 }

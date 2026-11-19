@@ -104,6 +104,7 @@ keymap = [
     { key = " ", run = "edit_mark single"      },  # Mark single in edit mode
     { key = "A", run = "edit_insert end"       },  # Insert at end in edit mode
     { key = "H", run = "edit_insert beg"       },  # Insert at beginning in edit mode
+    { key = "a", run = "edit_append_filename"  },  # Insert before the file extension in edit mode
     { key = "v", run = "edit_list_scroll next" },  # Scroll down in edit mode
     { key = "V", run = "edit_list_scroll prev" },  # Scroll up in edit mode
 ]

@@ -269,6 +269,7 @@ fn insert_keybinding(
         AppCommand::EditMoveItem(_) | AppCommand::EditGotoTop |
         AppCommand::EditGotoBottom | AppCommand::EditMark(_) |
         AppCommand::EditDelete | AppCommand::EditInsert(_) |
+        AppCommand::EditAppendFsName |
         AppCommand::EditNew(_) | AppCommand::EditListScroll(_) |
         AppCommand::QuitEdit =>
         {
@@ -400,6 +401,35 @@ shell_scroll_mode = [
             app.keymap.shell_scroll_mode_get(&key(KeyCode::Char('x'), KeyModifiers::empty())),
             Some(ScrollCommand::PageDown)
         );
+
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Edit-mode-only commands are routed into the edit map only, so a new one
+    /// never becomes a browser binding by accident.
+    #[test]
+    fn test_edit_bindings_are_routed_to_the_edit_map() {
+        let path = temp_keymap(
+            r#"
+keymap = [
+    { key = "a", run = "edit_append_filename" },
+    { key = "I", run = "edit_insert beg" },
+]
+"#,
+        );
+
+        let mut app = App::default();
+        init_keymap(&mut app, path.to_string_lossy().into_owned()).unwrap();
+
+        assert!(matches!(
+            app.keymap.edit_get('a').unwrap(),
+            AppCommand::EditAppendFsName
+        ));
+        assert!(matches!(
+            app.keymap.edit_get('I').unwrap(),
+            AppCommand::EditInsert(false)
+        ));
+        assert!(app.keymap.get('a').is_err());
 
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }

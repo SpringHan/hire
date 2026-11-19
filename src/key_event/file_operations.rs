@@ -10,7 +10,7 @@ use super::cursor_movement;
 use super::{SwitchCase, SwitchCaseData};
 
 use crate::app::App;
-use crate::utils::{CmdContent, CursorPos};
+use crate::utils::{extension_start, CmdContent, CursorPos};
 use crate::error::{AppResult, AppError, ErrorType};
 
 // File name modify
@@ -19,33 +19,21 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
     if let Some(file_saver) = file_saver {
         let current_file = &file_saver.name;
 
-        if file_saver.is_dir || to_end {
-            app.selected_block.set_command_line(
-                format!(":rename {}", current_file),
-                CursorPos::End
-            );
-            return Ok(())
-        }
-
-        let cursor_pos = current_file
-            .chars()
-            .rev()
-            .position(|x| x == '.');
+        // The cursor is placed before the extension, so a new name can be typed
+        // without touching it. The `:rename ` prefix is eight bytes long, which
+        // has to be added to the index of the extension inside the name.
+        let cursor_pos = if file_saver.is_dir || to_end {
+            CursorPos::End
+        } else {
+            match extension_start(current_file) {
+                Some(idx) => CursorPos::Index(idx + 8),
+                None => CursorPos::End,
+            }
+        };
 
         app.selected_block.set_command_line(
             format!(":rename {}", current_file),
-            if let Some(idx) = cursor_pos {
-                let idx = current_file.len() - 1 - idx;
-                // In this condition,
-                // the file does not have string about its extension.
-                if idx == 0 {
-                    CursorPos::End
-                } else {
-                    CursorPos::Index(idx + 8)
-                }
-            } else {
-                CursorPos::End
-            }
+            cursor_pos
         );
     } else {
         return Err(ErrorType::NoSelected.pack())
@@ -316,4 +304,84 @@ where I: Iterator<Item = (String, bool)>
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::app::FileSaver;
+    use crate::utils::{Block, CmdContent, CursorPos};
+
+    fn app_with_file(name: &str, is_dir: bool) -> App<'static> {
+        let mut app = App::default();
+        let mut file = FileSaver::default();
+        file.name = name.to_owned();
+        file.is_dir = is_dir;
+        app.current_files = vec![file];
+        app.selected_item.current.select(Some(0));
+
+        app
+    }
+
+    fn command_line<'app, 'a>(app: &'app App<'a>) -> (&'app str, CursorPos) {
+        if let Block::CommandLine(
+            CmdContent::String(ref content),
+            cursor
+        ) = app.selected_block
+        {
+            (content.as_str(), cursor)
+        } else {
+            panic!("append_file_name must fill the command line")
+        }
+    }
+
+    /// The cursor is placed right before the extension, after the `:rename `
+    /// prefix, so a new name can be typed without touching the extension.
+    #[test]
+    fn test_append_file_name_before_extension() {
+        let mut app = app_with_file("foo.txt", false);
+        append_file_name(&mut app, false).unwrap();
+
+        let (content, cursor) = command_line(&app);
+        assert_eq!(content, ":rename foo.txt");
+        assert!(cursor == CursorPos::Index(11));
+
+        // A multi-byte name keeps the index on a character boundary.
+        let mut app = app_with_file("中文.中文", false);
+        append_file_name(&mut app, false).unwrap();
+
+        let (content, cursor) = command_line(&app);
+        assert_eq!(content, ":rename 中文.中文");
+        assert!(cursor == CursorPos::Index(14));
+    }
+
+    #[test]
+    fn test_append_file_name_without_extension() {
+        // A name without an extension, a hidden file and a directory all put
+        // the cursor at the end.
+        for name in ["foo", ".bashrc"] {
+            let mut app = app_with_file(name, false);
+            append_file_name(&mut app, false).unwrap();
+
+            let (_, cursor) = command_line(&app);
+            assert!(cursor == CursorPos::End);
+        }
+
+        let mut app = app_with_file("dir.name", true);
+        append_file_name(&mut app, false).unwrap();
+
+        let (_, cursor) = command_line(&app);
+        assert!(cursor == CursorPos::End);
+    }
+
+    #[test]
+    fn test_append_file_name_to_end() {
+        let mut app = app_with_file("foo.txt", false);
+        append_file_name(&mut app, true).unwrap();
+
+        let (content, cursor) = command_line(&app);
+        assert_eq!(content, ":rename foo.txt");
+        assert!(cursor == CursorPos::End);
+    }
 }

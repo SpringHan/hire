@@ -541,6 +541,11 @@ impl AppCommand {
                 }
             ),
 
+            AppCommand::EditAppendFsName => app.edit_mode
+                .enter_insert_before_extension(
+                    &mut app.selected_item.current
+                ),
+
             AppCommand::Search  => app.selected_block.set_command_line(
                 "/",
                 CursorPos::End

@@ -102,6 +102,10 @@ pub enum AppCommand {
     /// Otherwise insert at the beginning.
     EditInsert(bool),
 
+    /// Enter insert mode with the cursor right before the file extension,
+    /// which is the edit-mode counterpart of [`Self::AppendFsName`].
+    EditAppendFsName,
+
     /// When the value is true, select next item, otherwise the previous one.
     EditMoveItem(bool),
 
@@ -220,6 +224,8 @@ impl AppCommand {
                 *option_get!(cmd_arg, command_err) == "end"
             ),
 
+            "edit_append_filename" => Self::EditAppendFsName,
+
             "edit_list_scroll" => Self::EditListScroll(
                 *option_get!(cmd_arg, command_err) == "next"
             ),
@@ -269,6 +275,17 @@ mod test {
         assert!(matches!(
             AppCommand::from_str("attach_pinned").unwrap(),
             AppCommand::AttachPinned
+        ));
+    }
+
+    /// The edit-mode keymaps bind `a` to this command; unlike
+    /// `append_filename` it takes no argument, because `edit_insert` already
+    /// covers the beginning and the end of the name.
+    #[test]
+    fn test_edit_append_filename_command() {
+        assert!(matches!(
+            AppCommand::from_str("edit_append_filename").unwrap(),
+            AppCommand::EditAppendFsName
         ));
     }
 }

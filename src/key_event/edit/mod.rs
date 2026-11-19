@@ -11,6 +11,7 @@ use crate::{
         cursor_from_insertion_point,
         cursor_insertion_point,
         delete_word,
+        extension_start,
         next_char_boundary,
         prev_char_boundary,
         CmdContent,
@@ -150,10 +151,34 @@ impl EditMode {
         }
     }
 
-    /// Enter insert modal.
+    /// Enter insert modal with the cursor placed at `pos` in every active item.
     pub fn enter_insert(&mut self, state: &mut ListState, pos: CursorPos) {
+        self.enter_insert_with(state, |_| pos);
+    }
+
+    /// Enter insert modal with the cursor right before the extension of every
+    /// active item's name.
+    ///
+    /// This is the edit-mode counterpart of `AppendFsName`: the cursor lands
+    /// right before the last `.`, so a new name can be typed without touching
+    /// the extension, and the command line is never opened. `EditInsert` still
+    /// handles the beginning and the end of the name.
+    pub fn enter_insert_before_extension(&mut self, state: &mut ListState) {
+        self.enter_insert_with(state, |name| match extension_start(name) {
+            Some(idx) => CursorPos::Index(idx),
+            None => CursorPos::End,
+        });
+    }
+
+    /// Enter insert modal, placing the cursor of every active item at the
+    /// position `pos` computes from the item's name.
+    fn enter_insert_with(
+        &mut self,
+        state: &mut ListState,
+        pos: impl Fn(&str) -> CursorPos
+    ) {
         if self.items.is_empty() {
-            return ()
+            return
         }
 
         let mut really_insert = false;
@@ -164,13 +189,13 @@ impl EditMode {
                         really_insert = true;
                     }
 
-                    item.cursor = pos;
+                    item.cursor = pos(&item.editing_name);
                 }
             }
 
             self.marked.clear();
             self.insert = really_insert;
-            return ()
+            return
         }
 
         if let Some(selected_item) = state.selected() {
@@ -180,7 +205,7 @@ impl EditMode {
                     really_insert = true;
                 }
 
-                item.cursor = pos;
+                item.cursor = pos(&item.editing_name);
             }
         }
 
@@ -671,5 +696,89 @@ mod test {
         edit_mode.delete_word_before_cursor();
         assert_eq!(edit_mode.items[0].editing_name, " x");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+    }
+
+    #[test]
+    fn test_enter_insert() {
+        let mut state = ListState::default();
+        state.select(Some(0));
+
+        let mut edit_mode = edit_mode_with("abc", CursorPos::None);
+        edit_mode.enter_insert(&mut state, CursorPos::Index(0));
+
+        assert!(edit_mode.inserting());
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
+    }
+
+    /// The edit-mode `append_filename`: insert mode with the cursor right
+    /// before the extension, without touching the command line.
+    #[test]
+    fn test_enter_insert_before_extension() {
+        let mut state = ListState::default();
+        state.select(Some(0));
+
+        let mut edit_mode = edit_mode_with("oldname.txt", CursorPos::None);
+        edit_mode.enter_insert_before_extension(&mut state);
+
+        assert!(edit_mode.inserting());
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
+
+        // A name without an extension gets the cursor at its end.
+        let mut edit_mode = edit_mode_with("archive", CursorPos::None);
+        edit_mode.enter_insert_before_extension(&mut state);
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // A hidden file has no extension: the leading dot does not split it.
+        let mut edit_mode = edit_mode_with(".bashrc", CursorPos::None);
+        edit_mode.enter_insert_before_extension(&mut state);
+        assert!(edit_mode.items[0].cursor == CursorPos::End);
+
+        // A multi-byte suffix keeps the index on a character boundary.
+        let mut edit_mode = edit_mode_with("中文.中文", CursorPos::None);
+        edit_mode.enter_insert_before_extension(&mut state);
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(6));
+    }
+
+    /// Marked items are inserted at once, each cursor before its own
+    /// extension, which is what `append_filename` does for the command line.
+    #[test]
+    fn test_enter_insert_before_extension_of_marked_items() {
+        let mut edit_mode = EditMode {
+            items: vec![
+                EditItem {
+                    editing_name: String::from("one.txt"),
+                    is_dir: false,
+                    delete: false,
+                    cursor: CursorPos::None,
+                },
+                EditItem {
+                    editing_name: String::from("two.rs"),
+                    is_dir: false,
+                    delete: false,
+                    cursor: CursorPos::None,
+                },
+                EditItem {
+                    editing_name: String::from("three"),
+                    is_dir: false,
+                    delete: false,
+                    cursor: CursorPos::None,
+                },
+            ],
+            marked: vec![0, 2],
+            ..Default::default()
+        };
+
+        let mut state = ListState::default();
+        state.select(Some(1));
+
+        edit_mode.enter_insert_before_extension(&mut state);
+
+        assert!(edit_mode.inserting());
+        assert!(edit_mode.marked.is_empty());
+        assert!(edit_mode.items[0].cursor == CursorPos::Index(3));
+        assert!(edit_mode.items[2].cursor == CursorPos::End);
+
+        // The item which is neither marked nor selected is untouched.
+        assert!(edit_mode.items[1].cursor == CursorPos::None);
     }
 }
