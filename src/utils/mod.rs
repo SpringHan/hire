@@ -458,6 +458,22 @@ pub fn delete_char_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, pos);
 }
 
+/// Delete everything from the cursor to the end of the content and update the
+/// cursor position.
+///
+/// This is the `Ctrl-k` deletion of the command line: `:rename foo.txt` becomes
+/// `:rename ` when the cursor is placed right after `rename `. The cursor stays
+/// at the same insertion point, which becomes the end of the content, and
+/// nothing happens when there is no cursor.
+pub fn delete_to_end(_str: &mut String, cursor: &mut CursorPos) {
+    let Some(pos) = cursor_insertion_point(_str, *cursor) else {
+        return
+    };
+
+    _str.truncate(pos);
+    *cursor = cursor_from_insertion_point(_str, pos);
+}
+
 /// Return the width of `text` when it's rendered in the terminal.
 ///
 /// Wide characters (e.g. CJK ones) take two columns and combining marks take
@@ -813,6 +829,49 @@ mod test {
         delete_word(&mut content, &mut cursor);
         assert_eq!(content, " x");
         assert!(cursor == CursorPos::Index(0));
+    }
+
+    #[test]
+    fn test_delete_to_end() {
+        // Everything after the cursor is deleted; the cursor stays in place.
+        let mut content = String::from("hello world");
+        let mut cursor = CursorPos::Index(5);
+
+        delete_to_end(&mut content, &mut cursor);
+        assert_eq!(content, "hello");
+        assert!(cursor == CursorPos::End);
+
+        // The cursor is normalized to the end when the content is emptied.
+        let mut content = String::from("hello");
+        let mut cursor = CursorPos::Index(0);
+
+        delete_to_end(&mut content, &mut cursor);
+        assert_eq!(content, "");
+        assert!(cursor == CursorPos::End);
+
+        // Nothing to delete at the end of the content.
+        let mut content = String::from("hello");
+        let mut cursor = CursorPos::End;
+
+        delete_to_end(&mut content, &mut cursor);
+        assert_eq!(content, "hello");
+        assert!(cursor == CursorPos::End);
+
+        // Multi-byte characters are never cut.
+        let mut content = String::from("文件abc");
+        let mut cursor = CursorPos::Index(6);
+
+        delete_to_end(&mut content, &mut cursor);
+        assert_eq!(content, "文件");
+        assert!(cursor == CursorPos::End);
+
+        // Nothing happens without a cursor.
+        let mut content = String::from("abc");
+        let mut cursor = CursorPos::None;
+
+        delete_to_end(&mut content, &mut cursor);
+        assert_eq!(content, "abc");
+        assert!(cursor == CursorPos::None);
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {

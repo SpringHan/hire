@@ -157,6 +157,10 @@ pub fn handle_event(
                                 }
                             },
 
+                            // Delete everything after the cursor on the command
+                            // line (`Ctrl-k`, the readline "kill line").
+                            'k' => app.delete_to_end(),
+
                             _ => ()
                         }
                     },

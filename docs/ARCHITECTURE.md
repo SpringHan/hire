@@ -466,11 +466,16 @@ the cursor follows a space); `switch_to` (move through candidates);
 the cursor); `App::cursor_left` / `App::cursor_right`, the word-wise
 `cursor_word_forward` (`Alt-f`) / `cursor_word_backward` (`Alt-b`),
 `delete_word_before_cursor` (`Ctrl-Backspace`) / `delete_word_after_cursor`
-(`Alt-d`) and `delete_char_after_cursor` (`Ctrl-d`), all of which are shared
-with edit mode through the helpers in `utils`. The cursor is a UTF-8 byte
-offset on a character boundary, so movement and deletion always jump over whole
-characters; the completion popup is positioned and sized by the display width
-(`utils::display_width`) instead of the byte length.
+(`Alt-d`), `delete_char_after_cursor` (`Ctrl-d`) and `delete_to_end` (`Ctrl-k`,
+which removes everything after the cursor). Except for `delete_to_end`, which
+only exists on the command line, these are shared with edit mode through the
+helpers in `utils`. A word is a run of alphanumeric characters, so `_`,
+whitespace and punctuation are word boundaries: `Alt-f` walks `foo_bar` in two
+steps, and `Ctrl-Backspace` after it leaves `foo_`.
+The cursor is a UTF-8 byte offset on a character boundary, so movement and
+deletion always jump over whole characters; the completion popup is positioned
+and sized by the display width (`utils::display_width`) instead of the byte
+length.
 
 Inside a `:!` line the inserted name is a shell argument, so `completion`
 (`complete_selected_item`) and `update_cmdline` write it through
@@ -765,8 +770,12 @@ command line; the layout arithmetic saturates instead of overflowing.
 - Word-wise text editing shared by the command line and edit mode:
   `is_word_char`, `next_word_end` / `prev_word_start`,
   `cursor_next_word_end` / `cursor_prev_word_start`,
-  `delete_word_before_cursor` / `delete_word_after_cursor` and
-  `delete_char_after_cursor`.
+  `delete_word_before_cursor` / `delete_word_after_cursor`,
+  `delete_char_after_cursor` and `delete_to_end` (everything after the cursor).
+  A word is a run of alphanumeric characters (`char::is_alphanumeric`, so CJK
+  letters are word characters), which makes every other character —
+  whitespace, punctuation and `_` alike — a separator: `foo_bar.txt` is the
+  words `foo`, `bar` and `txt`.
 - `CursorPos` handling: `cursor_insertion_point` / `cursor_from_insertion_point`
   (byte offset on a character boundary) and `prev_char_boundary` /
   `next_char_boundary` for character-wise movement and deletion.
@@ -1068,7 +1077,9 @@ cannot be parsed), `command::types::test::test_reload_config_command`
 `key_event::tab::test::*` (a broken stored tab group is skipped, a missing
 section is accepted, `clear_storage`),
 `key_event::command_line::test_completion_suggests_builtin_commands` (`:reload`
-completes to `reload_config`), `key_event::shell::menu::test::*` (the shell
+completes to `reload_config`), `key_event::command_line::test_delete_to_end`
+(`Ctrl-k` keeps what is before the cursor and resets the completion popup),
+`key_event::shell::menu::test::*` (the shell
 menu's `D` confirmation, the cross-tab list/borrow and the `x` scope),
 `ui::shell_block::test::*` (the idle status line and the prefix
 hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).

@@ -403,6 +403,25 @@ impl<'a> App<'a> {
             }
         }
     }
+
+    /// Delete everything after the cursor (`Ctrl-k`).
+    ///
+    /// This is a command-line only operation: edit mode has no equivalent.
+    pub fn delete_to_end(&mut self) {
+        if let Block::CommandLine(
+            CmdContent::String(ref mut content),
+            ref mut cursor
+        ) = self.selected_block
+        {
+            let length = content.len();
+            crate::utils::delete_to_end(content, cursor);
+
+            // The candidates are meaningless after the content has changed.
+            if content.len() != length && self.command_completion.show_frame {
+                self.command_completion.reset();
+            }
+        }
+    }
 }
 
 /// Complete the name of the item selected in the file browser into the
@@ -730,6 +749,49 @@ mod test {
         app.command_completion.show_frame = true;
         app.delete_char_after_cursor();
         assert!(!app.command_completion.show_frame());
+    }
+
+    #[test]
+    fn test_delete_to_end() {
+        // Everything after the cursor is deleted; the cursor stays in place.
+        let mut app = app_with(":rename foo.txt", CursorPos::Index(8));
+        app.delete_to_end();
+        assert_command_line(&app, ":rename ", CursorPos::End);
+
+        // The whole content goes when the cursor is at its beginning.
+        let mut app = app_with(":rename", CursorPos::Index(0));
+        app.delete_to_end();
+        assert_command_line(&app, "", CursorPos::End);
+
+        // Nothing to delete at the end of the command line.
+        let mut app = app_with(":rename", CursorPos::End);
+        app.delete_to_end();
+        assert_command_line(&app, ":rename", CursorPos::End);
+
+        // A multi-byte character is never cut in the middle.
+        let mut app = app_with("文件 abc", CursorPos::Index(6));
+        app.delete_to_end();
+        assert_command_line(&app, "文件", CursorPos::End);
+
+        // The completion popup is reset after the deletion.
+        let mut app = app_with(":rename foo", CursorPos::Index(1));
+        app.command_completion.show_frame = true;
+        app.delete_to_end();
+        assert!(!app.command_completion.show_frame());
+
+        // The read-only command line (an error message) is left alone.
+        let mut app = App {
+            selected_block: Block::CommandLine(
+                CmdContent::Text(ratatui::text::Text::raw("readonly")),
+                CursorPos::None
+            ),
+            ..Default::default()
+        };
+        app.delete_to_end();
+        assert!(matches!(
+            app.selected_block,
+            Block::CommandLine(CmdContent::Text(_), CursorPos::None)
+        ));
     }
 
     #[test]

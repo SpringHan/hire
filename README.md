@@ -365,6 +365,7 @@ keymap = [
 - Cursor move to the end of the next word: `Alt-f` (Also in edit mode)
 - Cursor move to the start of the previous word: `Alt-b` (Also in edit mode)
 - Delete the character after the cursor: `C-d` (Also in edit mode)
+- Delete everything after the cursor: `C-k`
 - Expand command line: `Alt-Tab`
 - Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
