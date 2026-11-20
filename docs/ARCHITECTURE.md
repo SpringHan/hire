@@ -17,6 +17,9 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
   `thiserror` + `anyhow` (errors), `chrono` (timestamps), `file-size`,
   `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`, `libc`
   (euid check, `tcgetpgrp` for the foreground program of a shell).
+- **Syntax highlighting:** `syntect` 5 for the text preview, built with
+  `regex-fancy` (a pure-Rust regex engine, so no C library is compiled) and the
+  bundled syntax definitions and themes; see `utils/syntax.rs`.
 
 ---
 
@@ -33,8 +36,9 @@ Hire is an event-driven application built around one mutable state object, `App`
       shells' terminal queries and forward their kitty images to the terminal
    c. clear the terminal if a shell was attached/detached (or an image was
       forwarded: the placeholder cells must be painted after it)
-   d. ui::ui(frame, &mut app)
-   e. poll/read events (16 ms while a shell is attached, 200 ms otherwise)
+   d. apply a finished syntax highlight, then ui::ui(frame, &mut app)
+   e. poll/read events (16 ms while a shell is attached or a syntax highlight
+      is pending, 200 ms otherwise)
    f. handle_event / handle_view_mouse / handle_view_paste
    g. drain search / image channels
 
@@ -157,7 +161,11 @@ Responsibilities:
 - `main()` — the event loop: run pending macro, reap shells, answer/forward the
   shells' graphics (`App::handle_shell_graphics`), draw UI, poll/read key
   events, handle the `q` quit shortcut, dispatch keys, drain the search and
-  image channels.
+  image channels. Before each frame it applies a finished syntax highlight
+  (`App::apply_highlight`) and shortens the poll timeout while one is pending.
+  The first frame sets the window height (`ui::update_file_linenr`) before
+  `init_all_files()`, because the preview stops reading after that many lines:
+  doing it in the old order made the first preview read the whole selected file.
 - `shell_at_startup` — the startup shell: `--working-directory` (`-w`) jumps to
   the stored working directory first, `--shell` (`-S`) stays in the directory
   hire starts in (`--start-from` is applied before this), and either flag then
@@ -178,6 +186,7 @@ Responsibilities:
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
 | `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles; `from_ls_colors` falls back to `app/default_ls_colors.txt` when the variable is missing or blank. |
 | `app/image_preview.rs` | `ImagePreview`, `Preview`: terminal image support detection, preview (decode / `xdg-mime` type) and resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
+| `app/highlight.rs` | `HighlightPreview`: the worker thread which syntax highlights the text preview, and the channels to it; `start` / `request` / `pending` / `take`. |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
 
 **`app/mod.rs`** is the heart of the data model:
@@ -188,8 +197,8 @@ Responsibilities:
   command-line/command-history state; completion state; the file searcher;
   macro attributes; `TermColors`; bookmarks (`target_dir`); path history
   (`path_history`); working directory (`working_directory`); tabs; image
-  preview; edit mode; keymap; loaded config; error queue; output settings;
-  host/user names.
+  preview (`image_preview`); syntax highlighting (`highlight`); edit mode;
+  keymap; loaded config; error queue; output settings; host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
   (`ShellPrefix`), `shell_prefix_active`, `shell_scroll_mode` (the viewport is
   scrolled back, so the scroll bindings own the keys and the mouse),
@@ -226,6 +235,15 @@ Responsibilities:
   thread decides between an image and the file's `xdg-mime` type, so a
   directory's listing can never be covered by a late result and the previous
   file's preview can never be taken for the next one's.
+  The text branch is split in two stages: `set_file_content` reads the file
+  (`utils::read_text_prefix`), shows it as plain text at once (`utils::plain_text`)
+  and hands the text to `HighlightPreview::request`, which highlights it on a
+  worker thread (see `app/highlight.rs`); `apply_highlight` swaps the coloured
+  version in when it arrives, and drops it if its path is no longer the selected
+  one. A file which cannot be read as UTF-8 is the error that sends
+  `set_file_content` to the image or MIME-type preview, so the highlighter never
+  sees non-text content, and a file syntect has no language for is answered with
+  "nothing to highlight" and keeps its plain preview.
 - Marked files: `append_marked_file(s)`, `marked_file_contains`,
   `marked_file_contains_path`, `remove_marked_file`, `clear_path_marked_files`.
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
@@ -277,6 +295,21 @@ sequence with `CellDiffOption::ForcedWidth(1)`. This is required on ratatui
 sixel row symbol embeds the whole image row, so without the forced width the
 diff skips the rest of the screen (only part of the image is drawn and the
 following cells/layout are not updated).
+
+**`app/highlight.rs`** — `HighlightPreview` owns the worker which syntax
+highlights the text preview. The preview is read on the UI thread (one window of
+lines is cheap), but syntect parses every line of that window again for every
+cursor movement, so the parse runs here instead. The UI thread draws the plain
+text at once, `request`s the highlight, and `apply_highlight` replaces it when
+the answer arrives — but only while the answer's path is still the selected
+file, the same guard `apply_preview` uses for images. The worker is one thread
+blocked on a channel between previews (an idle hire spends nothing on it). It
+keeps only the newest request, and the UI thread only the newest answer, so
+neither side can pile up work or text: a cursor moving through a directory
+highlights the file it lands on, not every file it passed. `pending` tells the
+main loop a request is in flight, which is when it polls at 16 ms instead of
+200 ms so the colours appear as soon as they are ready; an answer of `None`
+(there is no language to highlight) ends that wait too.
 
 **`app/macro_utils.rs`** — `Macro` keeps the recorded `KeyEvent` sequence, an
 optional list of `MacroTarget { dir, name }` (used to apply a macro to every
@@ -759,6 +792,7 @@ command line; the layout arithmetic saturates instead of overflowing.
 | File | Purpose |
 | --- | --- |
 | `utils/mod.rs` | CLI `Args`, `Direction`, text helpers, window-height global. |
+| `utils/syntax.rs` | Syntax highlighting of the text preview (`syntect`). |
 | `utils/types.rs` | Core shared enums/structs used across modules. |
 
 **`utils/mod.rs`**
@@ -772,7 +806,11 @@ command line; the layout arithmetic saturates instead of overflowing.
 - `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
   expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
   content is never split; its separators are the ASCII punctuation characters,
-  `_` included).
+  `_` included). `read_to_text` is built from the two helpers the preview calls
+  directly: `read_text_prefix` (the limited read as UTF-8, the failure which
+  means "not text"; buffered, because `File` is not and an unbuffered `bytes()`
+  costs one `read(2)` per byte) and `plain_text` (ANSI parsing plus tab
+  expansion).
 - `extension_start` — the byte index where a file name's extension starts (its
   last `.`), shared by the command-line `append_file_name` and the edit-mode
   `enter_insert_before_extension` so both put the cursor in the same place.
@@ -793,6 +831,34 @@ command line; the layout arithmetic saturates instead of overflowing.
   two columns), used by the command line cursor and the completion popup.
 - The global rendered window height (`WINDOW_HEIGHT`, `update_window_height`,
   `get_window_height`) used to size scrolling and preview reads.
+
+**`utils/syntax.rs`**
+
+`highlight_text(content, path)` is the whole highlighting step: it takes the
+text the UI thread read, and returns `None` when there is nothing to highlight.
+It runs on the highlighting worker (`app/highlight.rs`), never on the UI thread.
+The steps:
+
+- `syntax_for` asks syntect for a syntax: extension first, then file name, then
+  the first line of the file. When there is none (or syntect's "Plain Text",
+  which is what a `.txt` file maps to), `highlight_text` returns `None` and the
+  plain preview the UI thread already drew stays as it is.
+- Otherwise `highlighted_text` runs syntect's `HighlightLines` over the lines
+  (keeping their `\n`, which the parser needs) and turns every highlighted
+  range into a styled `Span`: the theme's foreground colour plus bold, italic
+  and underline. The theme background is not used — the preview is drawn on the
+  terminal's own background, not in an editor window. Tabs are expanded inside
+  each span and the line break is left to the `Line`, as in the plain preview.
+  Content larger than `MAX_HIGHLIGHT_BYTES` (256 KiB) is not highlighted: the
+  read stops after one window of lines, so only a file with extremely long lines
+  (a minified JSON, a base64 blob) gets there, and syntect would parse every
+  byte of a line the terminal shows only the first columns of.
+
+`SYNTAX_SET` and `THEME` are `lazy_static`s: loading them takes milliseconds,
+which is why the first highlight — not just every later one — happens off the
+UI thread. The theme is `base16-ocean.dark`, or `base16-ocean.light` when
+`$COLORFGBG` (`"fg;bg"`, written by many terminals) reports a light background
+(index >= 7); both themes are bundled with syntect.
 
 **`utils/types.rs`**
 
@@ -1011,6 +1077,10 @@ state (e.g. tab operations) is boxed in `SwitchCaseData::Struct`.
   the match list.
 - **Images:** two threads decode and resize/encode images; the main loop polls
   their receivers and updates `file_content` / the image protocol.
+- **Syntax highlighting:** one thread (`HighlightPreview`, started once in
+  `main`) parses the selected file's text for the preview. It keeps only the
+  newest request, the main loop keeps only the newest answer
+  (`App::apply_highlight`), and it blocks on its channel when idle.
 
 ### Macros
 
@@ -1055,6 +1125,17 @@ explicit value, so `cargo test` works in a bare CI shell. They are
 included — no `/bin/sh` or terminal needed),
 `app::test::test_file_content_of_a_socket_is_its_type` (a socket is previewed by
 its type instead of failing with `ENXIO`),
+`app::test::test_file_content_is_syntax_highlighted` (a `.rs` preview is plain
+at first, coloured once the worker answered; a `.txt` one keeps a single default
+style), `app::test::test_stale_highlight_is_dropped` (an answer for another file
+never repaints the preview), `app::highlight::test::*` (the worker answers with
+the path of the file, answers `None` when there is nothing to highlight — so the
+UI stops waiting — and ignores requests when it was not started) and
+`utils::syntax::test::*` (a source file highlighted, tabs expanded, plain text
+and unknown files left as before — the latter still parsing ANSI colours, a
+binary file rejected so the preview shows its MIME type, a line too long to be
+worth highlighting left plain, the `$COLORFGBG` background guess and the two
+bundled themes),
 `key_event::paste_operation::test::*` (a copy through `c`/`o` or a symlink
 through `s` keeps the marked files, while a move through `p`/`O` and the clear
 entry drop them),

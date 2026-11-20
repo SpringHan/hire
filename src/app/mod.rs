@@ -2,8 +2,9 @@
 
 mod color;
 mod filesaver;
-mod macro_utils;
+mod highlight;
 mod image_preview;
+mod macro_utils;
 
 use std::{env, fs, io};
 use std::time::Instant;
@@ -15,6 +16,7 @@ use std::path::{PathBuf, Path};
 use ratatui::layout::Rect;
 use ratatui::text::Text;
 use image_preview::ImagePreview;
+use highlight::HighlightPreview;
 use ratatui::widgets::ListState;
 
 use crate::config::{AppConfig, Keymap};
@@ -24,7 +26,8 @@ use crate::key_event::{
     SwitchCase, TabId,
 };
 use crate::utils::{
-    read_to_text,
+    read_text_prefix,
+    plain_text,
     file_type_label,
     MarkedFiles,
     FileContent,
@@ -185,6 +188,9 @@ pub struct App<'a> {
     // Image Preview
     pub image_preview: ImagePreview,
 
+    // Syntax Highlighting
+    pub highlight: HighlightPreview,
+
     // Edit Mode
     pub edit_mode: EditMode,
 
@@ -270,6 +276,7 @@ impl<'a> Default for App<'a> {
             edit_mode: EditMode::default(),
             navi_index: NaviIndex::default(),
             image_preview: ImagePreview::default(),
+            highlight: HighlightPreview::default(),
             file_searcher: FileSearcher::default(),
 
             // Command
@@ -770,6 +777,9 @@ impl<'a> App<'a> {
             let file_path = self.current_path()
                 .join(&selected_file.name);
             let mut content = Text::default();
+            // The text to hand to the highlighting thread, when the file is
+            // text which could have a language.
+            let mut highlight = None;
 
             // To avoid the wrong display of file content caused by
             // image decoding delay.
@@ -801,34 +811,77 @@ impl<'a> App<'a> {
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
-                        if let Err(_) = read_to_text(&mut content, file) {
-                            // if e.kind() != io::ErrorKind::InvalidData {
-                            //     return Err(e.into())
-                            // }
+                        // The plain text is shown at once; the coloured
+                        // version arrives from the highlighting thread (only
+                        // text content ever reaches it).
+                        let text = read_text_prefix(file).and_then(
+                            |file_content| {
+                                let text = plain_text(&file_content)?;
 
-                            // Try to display image file
-                            if self.image_preview.with_image_feat() {
-                                // The preview thread runs asynchronously: blank
-                                // the pane so the previous file's preview
-                                // cannot be taken for this one meanwhile.
-                                self.file_content = FileContent::Text(Text::default());
-                                self.image_preview.send_path(file_path)?;
-                                self.image_preview.useless = false;
-
-                                return Ok(())
+                                Ok((text, file_content))
                             }
+                        );
 
-                            content = Text::raw(file_type_label(&file_path));
+                        match text {
+                            Ok((text, file_content)) => {
+                                content = text;
+                                highlight = Some(file_content);
+                            },
+                            Err(_) => {
+                                // Try to display image file
+                                if self.image_preview.with_image_feat() {
+                                    // The preview thread runs asynchronously:
+                                    // blank the pane so the previous file's
+                                    // preview cannot be taken for this one
+                                    // meanwhile.
+                                    self.file_content =
+                                        FileContent::Text(Text::default());
+                                    self.image_preview.send_path(file_path)?;
+                                    self.image_preview.useless = false;
+
+                                    return Ok(())
+                                }
+
+                                content = Text::raw(file_type_label(&file_path));
+                            },
                         }
                     } else {
                         content = Text::raw("Non Normal File");
                     }
                 },
             };
+
+            if let Some(file_content) = highlight {
+                self.highlight.request(file_path, file_content);
+            }
+
             self.file_content = FileContent::Text(content);
         }
 
         Ok(())
+    }
+
+    /// Apply the syntax highlighting the highlighting thread finished.
+    ///
+    /// The thread runs asynchronously, so the selection may have moved on: a
+    /// late answer for another file must never replace the current preview,
+    /// which is the same rule `apply_preview` follows for images. An answer
+    /// with no text means there was nothing to highlight (no language, too
+    /// large, a parser error), and the plain preview stays.
+    pub fn apply_highlight(&mut self) {
+        if let Some((path, text)) = self.highlight.take() {
+            self.apply_highlight_for(path, text);
+        }
+    }
+
+    fn apply_highlight_for(&mut self, path: PathBuf, text: Option<Text<'static>>) {
+        if self.selected_file_path().as_deref() != Some(path.as_path()) {
+            return
+        }
+
+        if let Some(text) = text {
+            self.file_content = FileContent::Text(text);
+        }
     }
 
     /// Apply the preview the preview thread produced for `path`.
@@ -1146,6 +1199,110 @@ mod test {
             label == "inode/socket" || label == "Non Text File",
             "{label}",
         );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The spans the text preview consists of.
+    fn preview_styles(app: &App) -> Vec<ratatui::style::Style> {
+        match &app.file_content {
+            FileContent::Text(text) => {
+                text.lines.iter()
+                    .flat_map(|line| line.spans.iter())
+                    .map(|span| span.style)
+                    .collect()
+            },
+            _ => panic!("the preview is text"),
+        }
+    }
+
+    /// Wait for the highlighting thread and apply what it produced, like the
+    /// main loop does.
+    fn apply_highlights(app: &mut App) {
+        let deadline = Instant::now()
+            + std::time::Duration::from_secs(5);
+
+        while app.highlight.pending() && Instant::now() < deadline {
+            app.apply_highlight();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        app.apply_highlight();
+    }
+
+    /// A source file is previewed with syntax colours, while a plain text file
+    /// (and one syntect does not know) keeps the terminal's default style.
+    #[test]
+    fn test_file_content_is_syntax_highlighted() {
+        let dir = temp_dir("highlight");
+        fs::write(
+            dir.join("main.rs"),
+            "fn main() {\n    let answer = 42;\n}\n"
+        ).unwrap();
+        fs::write(dir.join("notes.txt"), "fn main() {\n}\n").unwrap();
+
+        let mut app = App::default();
+        app.highlight.start();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        // `main.rs` sorts first and is selected: the plain text is drawn at
+        // once, the colours follow from the thread.
+        app.set_file_content().unwrap();
+        let plain = preview_styles(&app);
+        assert!(!plain.is_empty());
+        assert!(
+            plain.iter().all(|style| *style == plain[0]),
+            "the preview is plain while the thread works"
+        );
+
+        apply_highlights(&mut app);
+        let styles = preview_styles(&app);
+        assert!(
+            styles.iter().any(|style| *style != styles[0]),
+            "the code is coloured"
+        );
+
+        // `notes.txt` is syntect's plain text: the thread answers with nothing,
+        // so the plain preview stays.
+        app.selected_item.current.select(Some(1));
+        app.set_file_content().unwrap();
+        apply_highlights(&mut app);
+        let styles = preview_styles(&app);
+        assert!(!styles.is_empty());
+        assert!(
+            styles.iter().all(|style| *style == styles[0]),
+            "plain text keeps one style"
+        );
+        assert!(styles[0].fg.is_none(), "{:?}", styles[0]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A highlight which arrives after the cursor moved on must not repaint the
+    /// preview, just like a late image or MIME-type preview.
+    #[test]
+    fn test_stale_highlight_is_dropped() {
+        let dir = temp_dir("stale-highlight");
+        fs::write(dir.join("a.rs"), "fn main() {}\n").unwrap();
+        fs::write(dir.join("b.txt"), "text\n").unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+        app.file_content = FileContent::Text(Text::raw("before"));
+
+        // `a.rs` is selected; this answer belongs to `b.txt`.
+        app.apply_highlight_for(
+            app.current_path().join("b.txt"),
+            Some(Text::raw("highlighted"))
+        );
+        assert!(app.file_content == FileContent::Text(Text::raw("before")));
+
+        // The answer for the selected file is applied.
+        app.apply_highlight_for(
+            app.current_path().join("a.rs"),
+            Some(Text::raw("highlighted"))
+        );
+        assert!(app.file_content == FileContent::Text(Text::raw("highlighted")));
 
         fs::remove_dir_all(&dir).unwrap();
     }

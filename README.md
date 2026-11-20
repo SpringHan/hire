@@ -186,6 +186,25 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
    - `Enter` - Apply edited content to current path
    - `Q`/`Esc` - Quit edit mode
 
+### Syntax Highlighting
+
+The text preview is highlighted with [syntect](https://crates.io/crates/syntect),
+using its bundled syntax definitions and themes. The language is detected from
+the file's extension, its name (`Makefile`, `Dockerfile`, …) or its first line.
+A file syntect has no language for (a `.txt` file, a log, …) is previewed as
+plain text, exactly as before, and a file which is not UTF-8 keeps its image or
+MIME-type preview.
+
+The file is shown as plain text at once; the colours are computed on a
+background thread and appear as soon as they are ready, so moving through a
+directory never waits for the parser (only the file the cursor lands on is
+highlighted, not every file it passed).
+
+The theme is `base16-ocean.dark`, or `base16-ocean.light` when `$COLORFGBG`
+(`"fg;bg"`, set by many terminals) reports a light background. Only the
+foreground colours are used: the preview is drawn on your terminal's own
+background.
+
 ### Output File
 
 The Output File feature allows you to write file/directory paths to a specified output file. This is useful for integration with other tools such as your editor. It's a really convenient way to get target file path with hire.
@@ -381,7 +400,7 @@ keymap = [
 - [x] Add Edit mode for more convenient file editing
 - [x] Mountable shell sessions per tab (tmux-like attach/detach)
 - [ ] Refactor the project
-- [ ] Highlight for file preview
+- [x] Highlight for file preview
 - [x] Migrate to Rust 2024 Edition
 
 ## LICENSE

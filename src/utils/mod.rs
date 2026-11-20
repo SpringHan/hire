@@ -1,11 +1,12 @@
 // Utils for crate.
 
+mod syntax;
 mod types;
 
 use std::{
     borrow::Cow,
     fs::File,
-    io::Read,
+    io::{BufReader, Read},
     path::Path,
     process::Command,
     sync::atomic::{AtomicU16, Ordering}
@@ -18,6 +19,7 @@ use ansi_to_tui::IntoText;
 use lazy_static::lazy_static;
 
 pub use types::*;
+pub use syntax::*;
 
 lazy_static! {
     /// The height of file list & content preview windows.
@@ -111,15 +113,32 @@ pub fn str_split(_string: String) -> Vec<String> {
 /// In the meanwhile, the newline character of Windows will be removed
 /// and the '\t' will be replaced with 4 spaces.
 pub fn read_to_text(
-    text_ref: &mut Text,
+    text_ref: &mut Text<'static>,
     file: &File,
 ) -> anyhow::Result<()>
 {
+    *text_ref = plain_text(&read_text_prefix(file)?)?;
+
+    Ok(())
+}
+
+/// Read the first `get_window_height()` lines of `file` as UTF-8.
+///
+/// The newline character of Windows is removed, so a CRLF file renders like an
+/// LF one. A file which is not valid UTF-8 within those lines is an error: the
+/// preview takes that as "not text" and shows an image or the MIME type
+/// instead.
+///
+/// The preview reads the file on the UI thread (a window of lines is cheap),
+/// then hands the content to the highlighting thread; see `app/highlight.rs`.
+/// The read is buffered because `File` itself is not: unbuffered, `bytes()`
+/// costs one `read(2)` system call per byte.
+pub fn read_text_prefix(file: &File) -> anyhow::Result<String> {
     let line_nr = get_window_height();
 
     let mut idx = 1;
     let mut bytes: Vec<u8> = Vec::new();
-    for _b in file.bytes() {
+    for _b in BufReader::new(file).bytes() {
         let byte = _b?;
         if byte != 13 {
             // To limit content read from file
@@ -135,8 +154,14 @@ pub fn read_to_text(
         }
     }
 
-    let _string = String::from_utf8(bytes)?;
-    let mut text = _string.into_text()?;
+    Ok(String::from_utf8(bytes)?)
+}
+
+/// Turn `content` into `Text`, keeping the ANSI colours a file may contain and
+/// replacing every '\t' with 4 spaces (a tab is a control character in a
+/// `Span`).
+pub fn plain_text(content: &str) -> anyhow::Result<Text<'static>> {
+    let mut text = content.into_text()?;
 
     for line in text.iter_mut() {
         for span in line.iter_mut() {
@@ -144,9 +169,7 @@ pub fn read_to_text(
         }
     }
 
-    *text_ref = text;
-
-    Ok(())
+    Ok(text)
 }
 
 /// Whether `path` is shown as text by the preview.
@@ -990,3 +1013,4 @@ mod test {
         assert_eq!(extension_start("中文.中文"), Some(6));
     }
 }
+

@@ -37,6 +37,7 @@ fn main() -> AppResult<()> {
     let mut initial = true;
     let mut app = App::default();
     let image_recvs = app.init_image_picker();
+    app.highlight.start();
     let search_recv = app.init_search_channel();
 
     // Init config information. A broken entry is skipped by `load_config` and
@@ -86,14 +87,21 @@ fn main() -> AppResult<()> {
             app.clear_screen = false;
         }
 
+        // A finished syntax highlight for the selected file replaces the plain
+        // preview drawn before it.
+        app.apply_highlight();
+
         terminal.draw(|frame| {
             if initial {
                 initial = false;
 
+                // The window height decides how much of a file the preview
+                // reads, so it must be known before the first preview is read.
+                ui::update_file_linenr(frame.area());
+
                 if let Err(err) = app.init_all_files() {
                     app.app_error.append_errors(err.iter());
                 }
-                ui::update_file_linenr(frame.area());
             }
 
             if let Err(err) = ui::ui(frame, &mut app) {
@@ -102,9 +110,11 @@ fn main() -> AppResult<()> {
         })?;
 
         // An attached shell needs a short poll so its output is painted
-        // promptly; the rest of the time the old 200ms cadence is kept.
+        // promptly; the rest of the time the old 200ms cadence is kept. While
+        // the highlighting thread is busy the poll is short too, so the
+        // coloured preview appears as soon as it is ready.
         let shell_view = app.selected_block.is_shell();
-        let timeout = if shell_view {
+        let timeout = if shell_view || app.highlight.pending() {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(200)
