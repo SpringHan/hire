@@ -130,15 +130,15 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         ]
     } else if app.edit_mode.enabled {
         vec![
-            Constraint::Percentage(20),
-            Constraint::Percentage(55),
+            Constraint::Percentage(15),
+            Constraint::Percentage(60),
             Constraint::Percentage(25)
         ]
     } else {
         vec![
-            Constraint::Percentage(25),
-            Constraint::Percentage(30),
-            Constraint::Percentage(45)
+            Constraint::Percentage(20),
+            Constraint::Percentage(40),
+            Constraint::Percentage(40)
         ]
     };
 
