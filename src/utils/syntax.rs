@@ -8,14 +8,44 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style as SynStyle, Theme, ThemeSet};
-use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::parsing::{
+    SyntaxDefinition, SyntaxReference, SyntaxSet, SyntaxSetBuilder
+};
 use syntect::util::LinesWithEndings;
 
+/// Syntax definitions syntect's bundled set does not ship.
+///
+/// The bundled set is Sublime's default package, which has no TOML and no
+/// INI-style syntax, so `Cargo.toml`, `Cargo.lock` and `.conf` files would be
+/// shown as plain text. These two definitions cover them; they are compiled
+/// into the binary.
+const EXTRA_SYNTAXES: [&str; 2] = [
+    include_str!("syntaxes/toml.sublime-syntax"),
+    include_str!("syntaxes/ini.sublime-syntax"),
+];
+
 lazy_static! {
-    /// The syntax definitions bundled with syntect, loaded once: highlighting a
-    /// preview is cheap, but parsing a hundred syntax definitions per keypress
-    /// is not.
+    /// syntect's bundled syntax definitions, loaded once.
     static ref SYNTAX_SET: SyntaxSet = SyntaxSet::load_defaults_newlines();
+
+    /// The definitions of `EXTRA_SYNTAXES`, in a set of their own.
+    ///
+    /// They are not merged into `SYNTAX_SET`: that needs `into_builder()` and
+    /// `build()`, which re-link all 75 bundled syntaxes and cost hundreds of
+    /// milliseconds. A path is looked up in `SYNTAX_SET` first and only a file
+    /// that set does not know is looked up here, so two sets cost nothing.
+    static ref EXTRA_SET: SyntaxSet = {
+        let mut set = SyntaxSetBuilder::new();
+
+        for source in EXTRA_SYNTAXES {
+            set.add(
+                SyntaxDefinition::load_from_str(source, true, None)
+                    .expect("the bundled syntax definition is valid"),
+            );
+        }
+
+        set.build()
+    };
 
     /// The theme the preview is highlighted with, see `theme_name`.
     static ref THEME: Theme = {
@@ -29,30 +59,43 @@ lazy_static! {
 
 /// Highlight `content`, the preview of the file at `path`.
 ///
-/// `None` when there is nothing to highlight: syntect knows no language for the
+/// `None` when there is nothing to highlight: no set knows a language for the
 /// file (a `.txt` file included), the content is too large to be worth it, or
 /// the parser fails. The caller keeps the unhighlighted text it is showing.
 ///
 /// This runs on the highlighting thread (`app/highlight.rs`), never on the UI
 /// thread: syntect parses every line of the window for every cursor movement.
 pub fn highlight_text(content: &str, path: &Path) -> Option<Text<'static>> {
-    syntax_for(path).and_then(|syntax| highlighted_text(content, syntax))
+    let (set, syntax) = syntax_for(path)?;
+
+    highlighted_text(content, set, syntax)
 }
 
-/// The syntax to highlight `path` with.
+/// The set and the syntax to highlight `path` with.
 ///
-/// `None` when syntect knows no language for the file, and for syntect's plain
-/// text syntax (a `.txt` file is shown exactly as before). The detection is
-/// syntect's own: extension, then file name, then the first line of the file
+/// `None` when neither set knows a language for the file, and for syntect's
+/// plain text syntax (a `.txt` file is shown exactly as before). The detection
+/// is syntect's own: extension, then file name, then the first line of the file
 /// (so it can open the file — another reason to run on the worker thread).
-fn syntax_for(path: &Path) -> Option<&'static SyntaxReference> {
-    let syntax = SYNTAX_SET.find_syntax_for_file(path).ok().flatten()?;
+fn syntax_for(
+    path: &Path
+) -> Option<(&'static SyntaxSet, &'static SyntaxReference)> {
+    let mut found = None;
+
+    for set in [&*SYNTAX_SET, &*EXTRA_SET] {
+        if let Some(syntax) = set.find_syntax_for_file(path).ok().flatten() {
+            found = Some((set, syntax));
+            break
+        }
+    }
+
+    let (set, syntax) = found?;
 
     if syntax.name == "Plain Text" {
         return None
     }
 
-    Some(syntax)
+    Some((set, syntax))
 }
 
 /// How much of a preview is still worth highlighting.
@@ -64,13 +107,14 @@ fn syntax_for(path: &Path) -> Option<&'static SyntaxReference> {
 /// unhighlighted instead.
 const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
 
-/// Highlight `content` with `syntax`.
+/// Highlight `content` with `syntax`, which belongs to `set`.
 ///
 /// `None` when the content is too large to be worth highlighting, or when
 /// syntect fails on a line (a syntax definition with a broken regular
 /// expression); the caller then shows the unhighlighted text instead.
 fn highlighted_text(
     content: &str,
+    set: &SyntaxSet,
     syntax: &SyntaxReference,
 ) -> Option<Text<'static>>
 {
@@ -84,7 +128,7 @@ fn highlighted_text(
     // `LinesWithEndings` keeps the newline: the parser needs it to know where
     // a line ends (a block comment does not end with the line).
     for line in LinesWithEndings::from(content) {
-        let ranges = highlighter.highlight_line(line, &SYNTAX_SET).ok()?;
+        let ranges = highlighter.highlight_line(line, set).ok()?;
 
         let spans: Vec<Span> = ranges
             .into_iter()
@@ -369,5 +413,75 @@ mod test {
         assert!(themes.contains_key("base16-ocean.dark"));
         assert!(themes.contains_key("base16-ocean.light"));
     }
-}
 
+    /// `EXTRA_SYNTAXES` is what makes configuration files highlighted: they are
+    /// the formats syntect's bundled set does not know, so these extensions had
+    /// no syntax and the files were shown as plain text.
+    #[test]
+    fn test_config_files_are_highlighted() {
+        let dir = temp_dir("config");
+        let path = dir.join("Cargo.toml");
+
+        let text = preview(
+            &path,
+            b"# comment\n[package]\nname = \"hire\"\ncount = 42\n"
+        );
+
+        assert_eq!(
+            content(&text),
+            "# comment\n[package]\nname = \"hire\"\ncount = 42"
+        );
+
+        let colours = styles(&text);
+        assert!(
+            colours.iter().any(|style| *style != colours[0]),
+            "the TOML file is coloured"
+        );
+
+        // The comment, the table, the key and the value each get their own
+        // colour, so the preview is more than one style of highlight.
+        let distinct = colours
+            .iter()
+            .filter(|style| **style != colours[0])
+            .count();
+        assert!(distinct >= 2, "{colours:?}");
+
+        // `.lock` is TOML as well; `.conf`, `.ini` and `.cfg` are INI-shaped.
+        for name in ["Cargo.lock", "app.conf", "app.ini", "app.cfg"] {
+            let path = dir.join(name);
+            let text = preview(&path, b"[section]\nkey = value\n");
+            let colours = styles(&text);
+
+            assert!(
+                colours.iter().any(|style| *style != colours[0]),
+                "{name} is coloured"
+            );
+        }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The extensions and file names the extra syntaxes claim. A file which
+    /// neither syntect nor the extra definitions know stays plain.
+    #[test]
+    fn test_config_extensions_have_a_syntax() {
+        for name in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "app.conf",
+            "app.ini",
+            "app.cfg",
+            "app.properties",
+            "app.desktop",
+            ".editorconfig",
+            ".env",
+        ] {
+            assert!(
+                syntax_for(Path::new(name)).is_some(),
+                "{name} should have a syntax"
+            );
+        }
+
+        assert!(syntax_for(Path::new("notes.unknown")).is_none());
+    }
+}

@@ -31,9 +31,11 @@ portable-pty = "0.9"
 vt100 = "0.16"
 # Syntax highlighting
 # `regex-fancy` keeps the regex engine pure Rust, so no C library is compiled;
-# only the bundled syntax definitions and themes are used.
+# `yaml-load` reads the extra syntax definitions in `src/utils/syntaxes`; the
+# rest is syntect's bundled definitions and themes.
 syntect = { version = "5.3.0", default-features = false, features = [
-    "parsing", "regex-fancy", "dump-load", "default-syntaxes", "default-themes"
+    "parsing", "regex-fancy", "dump-load", "default-syntaxes", "default-themes",
+    "yaml-load"
 ] }
 
 [profile.release]

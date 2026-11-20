@@ -1,0 +1,68 @@
+%YAML 1.2
+---
+# A small TOML syntax. syntect's bundled syntax set has none, and TOML is what
+# `Cargo.toml`, `Cargo.lock`, `pyproject.toml` and most of the other
+# configuration files a Rust project has are written in.
+name: TOML
+file_extensions:
+  - toml
+  - lock
+scope: source.toml
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.toml
+
+    # `[table]` and `[[array.of.tables]]`: the whole line, or followed by a
+    # comment. A line of an array (`  [1, 2],`) is not a table.
+    - match: '^\s*\[\[[^\]]*\]\](?=\s*(#|$))'
+      scope: entity.name.tag.toml
+    - match: '^\s*\[[^\]]*\](?=\s*(#|$))'
+      scope: entity.name.tag.toml
+
+    # A key is only a key at the beginning of a line, before an `=`.
+    - match: "^[ \t]*(?:[A-Za-z0-9_.-]+|\"[^\"]*\")(?=[ \t]*=)"
+      scope: entity.name.tag.toml
+    - match: '='
+      scope: keyword.operator.assignment.toml
+
+    # Multi-line strings before the single-line ones.
+    - match: '"""'
+      push: string.block
+    - match: "'''"
+      push: literal.block
+    - match: '"'
+      push: string.quoted
+    - match: "'"
+      push: literal.quoted
+
+    - match: '\b(true|false)\b'
+      scope: constant.language.boolean.toml
+    - match: '\b[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})?)?\b'
+      scope: constant.other.date.toml
+    - match: '\b[-+]?(?:0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9_]*(?:\.[0-9][0-9_]*)?(?:[eE][-+]?[0-9]+)?)\b'
+      scope: constant.numeric.toml
+
+  string.block:
+    - meta_scope: string.quoted.double.block.toml
+    - match: '\\[\\"btn]'
+      scope: constant.character.escape.toml
+    - match: '"""'
+      pop: true
+
+  string.quoted:
+    - meta_scope: string.quoted.double.toml
+    - match: '\\[\\"btn]'
+      scope: constant.character.escape.toml
+    - match: '"'
+      pop: true
+
+  literal.block:
+    - meta_scope: string.quoted.single.block.toml
+    - match: "'''"
+      pop: true
+
+  literal.quoted:
+    - meta_scope: string.quoted.single.toml
+    - match: "'"
+      pop: true

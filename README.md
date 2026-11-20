@@ -190,10 +190,16 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
 
 The text preview is highlighted with [syntect](https://crates.io/crates/syntect),
 using its bundled syntax definitions and themes. The language is detected from
-the file's extension, its name (`Makefile`, `Dockerfile`, …) or its first line.
+the file's extension, its name (`Makefile`, `Gemfile`, …) or its first line.
 A file syntect has no language for (a `.txt` file, a log, …) is previewed as
 plain text, exactly as before, and a file which is not UTF-8 keeps its image or
 MIME-type preview.
+
+syntect's bundled set has no TOML and no INI syntax, so hire ships two small
+ones for the configuration files a project is full of: `.toml` and `.lock`
+(`Cargo.toml`, `Cargo.lock`, `pyproject.toml`, …) are highlighted as TOML, and
+`.conf`, `.ini`, `.cfg`, `.properties`, `.desktop`, `.editorconfig`, `.env` and
+`.gitconfig` as INI.
 
 The file is shown as plain text at once; the colours are computed on a
 background thread and appear as soon as they are ready, so moving through a

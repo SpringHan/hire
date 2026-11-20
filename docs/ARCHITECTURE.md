@@ -18,8 +18,9 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
   `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`, `libc`
   (euid check, `tcgetpgrp` for the foreground program of a shell).
 - **Syntax highlighting:** `syntect` 5 for the text preview, built with
-  `regex-fancy` (a pure-Rust regex engine, so no C library is compiled) and the
-  bundled syntax definitions and themes; see `utils/syntax.rs`.
+  `regex-fancy` (a pure-Rust regex engine, so no C library is compiled),
+  `yaml-load` (to read the two extra syntax definitions in `utils/syntaxes/`),
+  and the bundled syntax definitions and themes; see `utils/syntax.rs`.
 
 ---
 
@@ -144,6 +145,7 @@ hire/
     ├── key_event/        # input handling and every interactive operation
     ├── ui/               # ratatui widgets, layout and rendering
     └── utils/            # shared low-level types and helpers
+        └── syntaxes/     # extra .sublime-syntax definitions (TOML, INI)
 ```
 
 ---
@@ -793,6 +795,7 @@ command line; the layout arithmetic saturates instead of overflowing.
 | --- | --- |
 | `utils/mod.rs` | CLI `Args`, `Direction`, text helpers, window-height global. |
 | `utils/syntax.rs` | Syntax highlighting of the text preview (`syntect`). |
+| `utils/syntaxes/` | `.sublime-syntax` definitions the bundled syntect set lacks (TOML, INI), compiled into the binary. |
 | `utils/types.rs` | Core shared enums/structs used across modules. |
 
 **`utils/mod.rs`**
@@ -859,6 +862,21 @@ which is why the first highlight — not just every later one — happens off th
 UI thread. The theme is `base16-ocean.dark`, or `base16-ocean.light` when
 `$COLORFGBG` (`"fg;bg"`, written by many terminals) reports a light background
 (index >= 7); both themes are bundled with syntect.
+
+`syntect`'s bundled set is Sublime's default package and has **no TOML and no
+INI syntax**, so `Cargo.toml`, `Cargo.lock`, `.conf`, `.ini` and `.cfg` files
+used to be previewed as plain text. `EXTRA_SYNTAXES` holds the two definitions in
+`utils/syntaxes/` (embedded with `include_str!`, parsed by the `yaml-load`
+feature). They live in a second, tiny `EXTRA_SET` built by `SyntaxSetBuilder`:
+merging them into the bundled set would take `into_builder()` + `build()`, which
+re-links all 75 bundled syntaxes and costs hundreds of milliseconds, while a
+second lookup only happens for a file the bundled set does not know.
+`syntax_for` therefore returns the set *and* the syntax, and `highlighted_text`
+hands that set back to `HighlightLines`. The TOML definition claims `toml` and
+`lock`; the INI one claims `ini`, `conf`, `cfg`, `properties`, `desktop`,
+`.editorconfig`, `.env` and `gitconfig`. They are deliberately small: comments,
+`[tables]`, `key =`/`key:`, quoted strings (with escapes) and
+numbers/booleans/dates, which is what these files contain.
 
 **`utils/types.rs`**
 
@@ -1134,8 +1152,10 @@ UI stops waiting — and ignores requests when it was not started) and
 `utils::syntax::test::*` (a source file highlighted, tabs expanded, plain text
 and unknown files left as before — the latter still parsing ANSI colours, a
 binary file rejected so the preview shows its MIME type, a line too long to be
-worth highlighting left plain, the `$COLORFGBG` background guess and the two
-bundled themes),
+worth highlighting left plain, the `$COLORFGBG` background guess, the two
+bundled themes, and the configuration formats: a `.toml`/`.lock`/`.conf`/`.ini`
+preview is coloured and every extension the extra definitions claim resolves to
+a syntax),
 `key_event::paste_operation::test::*` (a copy through `c`/`o` or a symlink
 through `s` keeps the marked files, while a move through `p`/`O` and the clear
 entry drop them),
