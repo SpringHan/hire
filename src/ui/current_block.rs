@@ -19,7 +19,13 @@ pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     };
     let current_block = Block::default()
         .border_set(border_set)
-        .borders(Borders::TOP | Borders::BOTTOM | Borders::LEFT);
+        .borders(
+            if app.root() {
+                Borders::ALL
+            } else {
+                Borders::TOP | Borders::BOTTOM | Borders::LEFT
+            }
+        );
 
     let marked_items = if app.root() {
         if let Some(file) = app.get_file_saver() {
