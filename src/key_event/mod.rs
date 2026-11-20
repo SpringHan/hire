@@ -551,6 +551,19 @@ impl AppCommand {
                 CursorPos::End
             ),
 
+            AppCommand::PreviewSearch => app.selected_block.set_command_line(
+                "?",
+                CursorPos::End
+            ),
+
+            AppCommand::PreviewScrollPage(down) => app.preview_scroll_page(down),
+
+            AppCommand::PreviewScrollLine(down) => app.preview_scroll_line(down),
+
+            AppCommand::PreviewScrollColumn(right) => {
+                app.preview_scroll_column(right)
+            },
+
             AppCommand::CreateDir => app.selected_block.set_command_line(
                 ":create_dir ",
                 CursorPos::End
@@ -619,7 +632,11 @@ impl AppCommand {
                 rt_error!("Edit mode cannot enabled in the root directory")
             },
 
-            AppCommand::MoveCandidate(next) => if next {
+            // A preview search owns `n`/`N` while it is active: the file
+            // list's own matches are only used when the preview has no query.
+            AppCommand::MoveCandidate(next) => if app.preview_search_active() {
+                app.preview_move_candidate(next);
+            } else if next {
                 app.next_candidate()?
             } else {
                 app.prev_candidate()?

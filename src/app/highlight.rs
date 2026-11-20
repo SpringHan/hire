@@ -25,11 +25,11 @@ pub type HighlightDone = (PathBuf, Option<Text<'static>>);
 
 /// The thread which highlights the preview's text.
 ///
-/// The preview is read on the UI thread (one window of lines is cheap), but
-/// turning those lines into coloured spans is not: syntect parses every line of
-/// the window again for every cursor movement. One worker does it in the
-/// background, so the UI thread draws the unhighlighted text at once and
-/// replaces it when the answer arrives.
+/// The preview is read on the UI thread (a prefix of at most 256 KiB is cheap
+/// to read), but turning its lines into coloured spans is not: syntect parses
+/// every line of the preview again for every cursor movement. One worker does
+/// it in the background, so the UI thread draws the unhighlighted text at once
+/// and replaces it when the answer arrives.
 ///
 /// Between previews the worker blocks on its channel, so an idle hire spends
 /// nothing on it. Requests and answers are not piled up either: the worker

@@ -41,7 +41,7 @@ Hire is an event-driven application built around one mutable state object, `App`
    e. poll/read events (16 ms while a shell is attached or a syntax highlight
       is pending, 200 ms otherwise)
    f. handle_event / handle_view_mouse / handle_view_paste
-   g. drain search / image channels
+   g. drain the file search, preview search and image channels
 
 ### Modules
 
@@ -73,15 +73,16 @@ Key architectural traits:
 1. **One central state struct.** `App<'a>` (in `app/mod.rs`) owns everything:
    the current path, the three file lists, selection indices, the active block,
    configuration, tabs, macro state, etc. There is no global state except the
-   window height atomic (`utils::WINDOW_HEIGHT`).
+   rendered pane size atoms (`utils::WINDOW_HEIGHT` and `utils::WINDOW_WIDTH`).
 
 2. **Behaviour is attached to `App` from many modules.** The project uses
    "`impl App` block per module" throughout: navigation lives in
    `key_event/cursor_movement`, command-line editing in
-   `key_event/command_line.rs`, search in `key_event/file_search.rs`, shell
-   helpers in `key_event/shell`, command parsing in `command/cmd_utils.rs`, and
-   the core file model in `app/mod.rs`. `app/mod.rs` is the hub that other
-   modules extend.
+   `key_event/command_line.rs`, search in `key_event/file_search.rs`, the text
+   preview's scroll/search in `app/preview.rs`, shell helpers in
+   `key_event/shell`, command parsing in `command/cmd_utils.rs`, and the core
+   file model in `app/mod.rs`. `app/mod.rs` is the hub that other modules
+   extend.
 
 3. **Three block modes.** `utils::Block` is `Browser(bool)` (the file
    browser; the bool means "current directory is `/`"),
@@ -105,9 +106,11 @@ Key architectural traits:
    to a handler function pointer. Extra state is passed through
    `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
 
-6. **Asynchronous work is channel-based.** Incremental file search and image
-   decoding/resizing run on worker threads and communicate with the main loop
-   through `std::sync::mpsc` channels.
+6. **Asynchronous work is channel-based.** Incremental file search, the text
+   preview's search and image decoding/resizing run on worker threads and
+   communicate with the main loop through `std::sync::mpsc` channels. The
+   preview search answers carry a generation number, so an answer for a search
+   (or a file) which was replaced meanwhile is dropped.
 
 7. **Shell sessions are PTY-backed.** Each mounted shell owns a PTY, a reader
    thread and a `vt100` screen. The reader thread parses the PTY output into the
@@ -155,19 +158,22 @@ hire/
 ### `src/main.rs` — entry point
 
 Declares all top-level modules, parses CLI arguments (`utils::Args`), builds the
-default `App`, initializes config, starts the image/search background channels,
-enters the ratatui alternate screen, and runs the main loop.
+default `App`, initializes config, starts the image and search background
+channels (file search and text-preview search), enters the ratatui alternate
+screen, and runs the main loop.
 
 Responsibilities:
 
 - `main()` — the event loop: run pending macro, reap shells, answer/forward the
   shells' graphics (`App::handle_shell_graphics`), draw UI, poll/read key
-  events, handle the `q` quit shortcut, dispatch keys, drain the search and
-  image channels. Before each frame it applies a finished syntax highlight
-  (`App::apply_highlight`) and shortens the poll timeout while one is pending.
+  events, handle the `q` quit shortcut, dispatch keys, drain the file search,
+  preview search and image channels. Before each frame it applies a finished
+  syntax highlight (`App::apply_highlight`) and shortens the poll timeout while
+  one is pending.
   The first frame sets the window height (`ui::update_file_linenr`) before
-  `init_all_files()`, because the preview stops reading after that many lines:
-  doing it in the old order made the first preview read the whole selected file.
+  `init_all_files()`, because the window height is the page size of the file
+  list and the text preview (the preview itself reads by bytes, see
+  `utils::read_text_prefix`).
 - `shell_at_startup` — the startup shell: `--working-directory` (`-w`) jumps to
   the stored working directory first, `--shell` (`-S`) stays in the directory
   hire starts in (`--start-from` is applied before this), and either flag then
@@ -190,6 +196,7 @@ Responsibilities:
 | `app/image_preview.rs` | `ImagePreview`, `Preview`: terminal image support detection, preview (decode / `xdg-mime` type) and resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
 | `app/highlight.rs` | `HighlightPreview`: the worker thread which syntax highlights the text preview, and the channels to it; `start` / `request` / `pending` / `take`. |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
+| `app/preview.rs` | `PreviewState`: the text preview's row/column scroll offsets and search (query, matched lines, current match, search worker channel), `PreviewMatches`; the `App` methods which scroll, search, apply an answer and move between matches. |
 
 **`app/mod.rs`** is the heart of the data model:
 
@@ -199,8 +206,9 @@ Responsibilities:
   command-line/command-history state; completion state; the file searcher;
   macro attributes; `TermColors`; bookmarks (`target_dir`); path history
   (`path_history`); working directory (`working_directory`); tabs; image
-  preview (`image_preview`); syntax highlighting (`highlight`); edit mode;
-  keymap; loaded config; error queue; output settings; host/user names.
+  preview (`image_preview`); syntax highlighting (`highlight`); the text
+  preview's scroll/search state (`preview`); edit mode; keymap; loaded config;
+  error queue; output settings; host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
   (`ShellPrefix`), `shell_prefix_active`, `shell_scroll_mode` (the viewport is
   scrolled back, so the scroll bindings own the keys and the mouse),
@@ -237,15 +245,20 @@ Responsibilities:
   thread decides between an image and the file's `xdg-mime` type, so a
   directory's listing can never be covered by a late result and the previous
   file's preview can never be taken for the next one's.
-  The text branch is split in two stages: `set_file_content` reads the file
-  (`utils::read_text_prefix`), shows it as plain text at once (`utils::plain_text`)
-  and hands the text to `HighlightPreview::request`, which highlights it on a
-  worker thread (see `app/highlight.rs`); `apply_highlight` swaps the coloured
-  version in when it arrives, and drops it if its path is no longer the selected
-  one. A file which cannot be read as UTF-8 is the error that sends
-  `set_file_content` to the image or MIME-type preview, so the highlighter never
-  sees non-text content, and a file syntect has no language for is answered with
-  "nothing to highlight" and keeps its plain preview.
+  The text branch is split in two stages: `set_file_content` reads the file's
+  prefix (`utils::read_text_prefix`, at most `MAX_PREVIEW_BYTES` = 256 KiB),
+  shows it as plain text at once (`utils::plain_text`) and hands the text to
+  `HighlightPreview::request`, which highlights it on a worker thread (see
+  `app/highlight.rs`); `apply_highlight` swaps the coloured version in when it
+  arrives, and drops it if its path is no longer the selected one. The whole
+  prefix is kept (not just the visible window), so `app/preview.rs` can page,
+  scroll and search it. A file which cannot be read as UTF-8 is the error that
+  sends `set_file_content` to the image or MIME-type preview, so the highlighter
+  never sees non-text content, and a file syntect has no language for is
+  answered with "nothing to highlight" and keeps its plain preview.
+  `set_file_content` and `apply_preview` reset `preview` (`reset_preview` drops
+  both the content and its scroll/search state), so a new file or a directory
+  never inherits the previous preview's offset or search.
 - Marked files: `append_marked_file(s)`, `marked_file_contains`,
   `marked_file_contains_path`, `remove_marked_file`, `clear_path_marked_files`.
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
@@ -299,10 +312,10 @@ diff skips the rest of the screen (only part of the image is drawn and the
 following cells/layout are not updated).
 
 **`app/highlight.rs`** — `HighlightPreview` owns the worker which syntax
-highlights the text preview. The preview is read on the UI thread (one window of
-lines is cheap), but syntect parses every line of that window again for every
-cursor movement, so the parse runs here instead. The UI thread draws the plain
-text at once, `request`s the highlight, and `apply_highlight` replaces it when
+highlights the text preview. The preview is read on the UI thread (a prefix of
+at most 256 KiB is cheap to read), but syntect parses every line of it again for
+every cursor movement, so the parse runs here instead. The UI thread draws the
+plain text at once, `request`s the highlight, and `apply_highlight` replaces it when
 the answer arrives — but only while the answer's path is still the selected
 file, the same guard `apply_preview` uses for images. The worker is one thread
 blocked on a channel between previews (an idle hire spends nothing on it). It
@@ -313,6 +326,31 @@ main loop a request is in flight, which is when it polls at 16 ms instead of
 200 ms so the colours appear as soon as they are ready; an answer of `None`
 (there is no language to highlight) ends that wait too.
 
+**`app/preview.rs`** — `PreviewState` keeps the text preview's scroll offset,
+the horizontal column offset, the search (`query`, the matched line indices,
+the current match) and the channel to the search worker.
+`preview_scroll_line` / `preview_scroll_page` move the row offset (a page is
+`get_window_height()`, and the clamp keeps the last line at the bottom of the
+pane); `preview_scroll_column` moves the column one at a time and stops when
+the end of the widest line (`Line::width`) reaches the right edge of the pane
+(`get_window_width()`), so a line which fits cannot be scrolled and the text is
+never shifted off an empty screen. Every jump to a match (`preview_jump_to`,
+used by the search and by `n`/`N`) also returns to the first column, so a
+horizontal scroll cannot hide the match at the beginning of the line.
+`preview_search` sends the lines to the worker
+(an empty query clears the search), `apply_preview_search` jumps to the first
+match at or after the offset — or back to the first one — and ignores an answer
+whose generation is not the current one, so a late answer can neither move
+another file's view nor that of a newer search. `preview_move_candidate` walks
+the matches and wraps around at both ends; `preview_search_active` is true while
+a query is set and the preview is text, which is what makes `n`/`N` navigate the
+preview instead of the file list (a preview search which found nothing still
+owns the keys). The matching rule is the shared `utils::search_indexes`, and the
+worker blocks on its channel between searches, like the file searcher.
+`match_ranges` computes the character ranges of every match in one line (case
+insensitive, mapped back from the lowercased text so a character which expands
+when lowercased still matches as a whole), which `ui/child_block.rs` reverses.
+
 **`app/macro_utils.rs`** — `Macro` keeps the recorded `KeyEvent` sequence, an
 optional list of `MacroTarget { dir, name }` (used to apply a macro to every
 marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
@@ -322,14 +360,19 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | File | Purpose |
 | --- | --- |
 | `command/mod.rs` | Wires the submodules and re-exports `cmds::*` and `AppCommand`. |
-| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`, and `EditAppendFsName` for the edit mode's `a`) and `AppCommand::from_str` (keymap string → command). |
+| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`, `EditAppendFsName` for the edit mode's `a`, and the text preview's `PreviewSearch` / `PreviewScrollPage` / `PreviewScrollLine` / `PreviewScrollColumn`) and `AppCommand::from_str` (keymap string → command). |
 | `command/cmds.rs` | Filesystem commands: `rename_file`, `create_file`, `create_symlink`, `file_exists`. |
 | `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (enter/set/append/quit/parse, history, expand). |
 
 **`command/types.rs`** — `AppCommand` enumerates every user-triggerable action
 (tab/goto/paste/delete/search/refresh, path history (`PrevPath` / `PathHistory`),
-edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
-`from_str` parses the `run = "…"` value of a keymap entry.
+the text preview (`PreviewSearch`, `PreviewScrollPage(bool)`,
+`PreviewScrollLine(bool)`, `PreviewScrollColumn(bool)`), edit mode, navi index,
+shell commands, `shell_command` from the keymap, etc.).
+`from_str` parses the `run = "…"` value of a keymap entry; the preview commands
+are `preview_search`, `preview_scroll_page next|prev`,
+`preview_scroll_line next|prev` and `preview_scroll_column next|prev` (the
+boolean of every scroll command is `next` = true = right/down).
 
 **`command/cmd_utils.rs`** — extends `App` and `Block`:
 
@@ -340,7 +383,9 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 - `App::command_line_append`, `command_select` (history navigation),
   `quit_command_mode`.
 - `App::command_parse` — parse an entered `:command` line. Handles `/` search,
-  `:rename`, `:create_file`, `:create_dir`, `:create_symlink`,
+  `?` search of the text preview (the rest of the line is the query, handled by
+  `App::preview_search` on the search worker), `:rename`, `:create_file`,
+  `:create_dir`, `:create_symlink`,
   `:reload_config` (the same re-read as `AppCommand::ReloadConfig`), and
   `:!<shell>` commands, dispatching to `command/cmds.rs`, `config::load_config`
   and `key_event/shell`. The words after `:!<shell>` go through
@@ -482,7 +527,13 @@ early-returns an `anyhow`-backed error.
   expand). Non-control characters go to the active `SwitchCase`, the command
   line, or the keymap.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
-  into a concrete call into the operation modules. `AppCommand::ReloadConfig`
+  into a concrete call into the operation modules. `AppCommand::PreviewSearch`
+  opens the command line with `?` (like `Search` does with `/`),
+  `PreviewScrollPage` / `PreviewScrollLine` / `PreviewScrollColumn` call the
+  preview scrollers, and
+  `MoveCandidate` (`n`/`N`) goes to `App::preview_move_candidate` while
+  `preview_search_active()` is true — a preview search takes precedence over the
+  file list's matches. `AppCommand::ReloadConfig`
   calls `config::load_config`, which re-reads the three config files (the
   returned errors are shown in the command line). `AppCommand::Shell` calls
   `shell::open_shell` (a mounted, attachable session); `AppCommand::ShellMenu`
@@ -546,7 +597,9 @@ confirmation), `delete_file` (physical removal plus selection fix-up),
 **`key_event/file_search.rs`** — `FileSearcher` keeps the matched indices and a
 sender to a matching worker thread. `init_search_channel` starts that thread,
 `file_search` (async) / `file_search_sync` request matches, and
-`next_candidate` / `prev_candidate` move to the next/previous match.
+`next_candidate` / `prev_candidate` move to the next/previous match. The thread
+matches with `utils::search_indexes`, the same rule the text preview's search
+uses; only the names of the `FileSaver`s are handed to it.
 
 **`key_event/goto_operation.rs`** — the bookmark menu. `goto_switch` handles
 jumping to a stored directory and entering `+`/`-` sub-modes to add/remove a
@@ -726,7 +779,7 @@ hidden flag and selection, never shells.
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
 | `ui/parent_block.rs` | Renders the parent-directory column. |
 | `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list). |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview; image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview; the text preview is drawn from its row/column offsets with the search matches in reverse video, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
@@ -744,6 +797,17 @@ one trailing separator, so a path which still ends with `/` does not render as
 to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
 shell screen and the bottom band is the shell status line. The title's tab badge
 shows the mounted shell count (`|1:2|`).
+
+**`ui/child_block.rs`** — `render_file` draws the image preview or the text:
+`preview_lines` takes the lines which fit in the pane from the preview's row
+offset (the text may have got shorter than the offset, then its last line is
+shown) and `reverse_matches` splits each line's spans at the search ranges, so
+only the matched characters get `Modifier::REVERSED` and the syntax colours of
+the rest are kept. The lines are drawn with a `Paragraph` whose `scroll((0,
+column))` is the preview's horizontal offset (`Wrap` is off, so it truncates
+and shifts instead of wrapping). `update_file_linenr` stores the pane height and
+width: the height is the page size of the list and the preview, the width bounds
+the horizontal scroll.
 
 **`ui/list.rs`** — the reusable `List` / `Item` widgets. `Item` renders a left
 line plus an optional right sidebar; `List` handles the visible window, selection
@@ -806,14 +870,20 @@ command line; the layout arithmetic saturates instead of overflowing.
   `--shell` is `-S` (capital) because `-s` belongs to `--start-from`, and it
   conflicts with `--working-directory`.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
-- `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
-  expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
-  content is never split; its separators are the ASCII punctuation characters,
-  `_` included). `read_to_text` is built from the two helpers the preview calls
-  directly: `read_text_prefix` (the limited read as UTF-8, the failure which
-  means "not text"; buffered, because `File` is not and an unbuffered `bytes()`
-  costs one `read(2)` per byte) and `plain_text` (ANSI parsing plus tab
-  expansion).
+- `str_split`, `read_to_text` (read the preview prefix, strip `\r`, expand
+  tabs, parse ANSI), `delete_word` (character-based, so multi-byte content is
+  never split; its separators are the ASCII punctuation characters, `_`
+  included). `read_to_text` is built from the two helpers the preview calls
+  directly: `read_text_prefix` (reads at most `MAX_PREVIEW_BYTES` = 256 KiB and
+  rejects a prefix which is not UTF-8 — the failure which means "not text"; a
+  character the limit cuts in half is dropped instead of rejecting the file;
+  buffered, because `File` is not and an unbuffered `bytes()` costs one
+  `read(2)` per byte) and `plain_text` (ANSI parsing plus tab expansion). The
+  whole prefix is kept because the text preview pages, scrolls and searches it.
+- `search_indexes` — the indices of the names which contain a query
+  (case-insensitively), or of the first name which equals it. It is shared by
+  the file search (`FileSaver` names) and the text preview's search (`Text`
+  lines), which is why it takes any iterator of strings.
 - `extension_start` — the byte index where a file name's extension starts (its
   last `.`), shared by the command-line `append_file_name` and the edit-mode
   `enter_insert_before_extension` so both put the cursor in the same place.
@@ -832,8 +902,10 @@ command line; the layout arithmetic saturates instead of overflowing.
   `next_char_boundary` for character-wise movement and deletion.
 - `display_width` — the terminal column width of a text (wide characters take
   two columns), used by the command line cursor and the completion popup.
-- The global rendered window height (`WINDOW_HEIGHT`, `update_window_height`,
-  `get_window_height`) used to size scrolling and preview reads.
+- The global rendered pane size: `WINDOW_HEIGHT` (`update_window_height`,
+  `get_window_height`) sizes list scrolling and the text preview's pages, while
+  `WINDOW_WIDTH` (`update_window_width`, `get_window_width`) bounds the text
+  preview's horizontal scroll.
 
 **`utils/syntax.rs`**
 
@@ -852,10 +924,11 @@ The steps:
   and underline. The theme background is not used — the preview is drawn on the
   terminal's own background, not in an editor window. Tabs are expanded inside
   each span and the line break is left to the `Line`, as in the plain preview.
-  Content larger than `MAX_HIGHLIGHT_BYTES` (256 KiB) is not highlighted: the
-  read stops after one window of lines, so only a file with extremely long lines
-  (a minified JSON, a base64 blob) gets there, and syntect would parse every
-  byte of a line the terminal shows only the first columns of.
+  Content which reaches `MAX_HIGHLIGHT_BYTES` (256 KiB, the same limit as
+  `MAX_PREVIEW_BYTES`) is not highlighted: a file that large is shown plain,
+  because syntect would parse every byte of it (a minified JSON, a base64 blob)
+  although the terminal shows only the first columns of a line, and the
+  highlight runs again for every cursor movement.
 
 `SYNTAX_SET` and `THEME` are `lazy_static`s: loading them takes milliseconds,
 which is why the first highlight — not just every later one — happens off the
@@ -930,12 +1003,14 @@ metadata shown in the state line and preview.
 
 ### Command line and completion
 
-`:` (`AppCommand::EnterCommandLine`), `/` (search) and `!` (`cmdline_shell`)
+`:` (`AppCommand::EnterCommandLine`), `/` (search), `?` (the text preview's
+search, `AppCommand::PreviewSearch`) and `!` (`cmdline_shell`)
 switch `selected_block` to `CommandLine`. `command_parse`
-(`command/cmd_utils.rs`) interprets the line. `Tab` triggers
-`key_event::command_line::completion`, which completes builtin commands, file
-names, or the selected browser item (when the cursor is right after a space) and
-shows a candidate popup (`ui/cmdline_popup.rs`).
+(`command/cmd_utils.rs`) interprets the line: `/` searches the file list, `?`
+the selected file's preview (asynchronously, see `app/preview.rs`). `Tab`
+triggers `key_event::command_line::completion`, which completes builtin
+commands, file names, or the selected browser item (when the cursor is right
+after a space) and shows a candidate popup (`ui/cmdline_popup.rs`).
 
 ### Shell sessions
 
@@ -1093,6 +1168,12 @@ state (e.g. tab operations) is boxed in `SwitchCaseData::Struct`.
 - **Search:** `FileSearcher` sends `(query, exact, files)` to a worker thread
   started by `init_search_channel`; the main loop polls the receiver and updates
   the match list.
+- **Preview search:** `init_preview_search_channel` starts the thread which
+  searches the text preview's lines; its answers are `PreviewMatches`
+  (generation + matched line indices). The main loop polls the receiver and
+  calls `apply_preview_search`, which drops an answer of a replaced search. The
+  thread uses the same `utils::search_indexes` rule as the file search and
+  blocks on its channel between queries.
 - **Images:** two threads decode and resize/encode images; the main loop polls
   their receivers and updates `file_content` / the image protocol.
 - **Syntax highlighting:** one thread (`HighlightPreview`, started once in
@@ -1115,7 +1196,7 @@ when files are marked, execution is repeated for every marked target.
 | Path | Purpose |
 | --- | --- |
 | `Cargo.toml` | Package metadata, dependencies and the size-optimized release profile (`opt-level = 's'`, LTO, stripped). |
-| `keymap_config/default.toml`, `keymap_config/colemak.toml` | Shipped keymap presets; `install.sh` copies the selected one to `~/.config/springhan/hire/keymap.toml`. |
+| `keymap_config/default.toml`, `keymap_config/colemak.toml` | Shipped keymap presets; `install.sh` copies the selected one to `~/.config/springhan/hire/keymap.toml`. Every text preview command is bound in both (page `>`/`<`; line `J`/`K` and column `)`/`(` in `default`, line `E`/`U` and column `I`/`N` in `colemak`). |
 | `scripts/hire-rg.sh` | `rg` + `fzf` helper invoked by the `rg_search` command. |
 | `install.sh` | Builds the release binary and installs the binary, keymap and scripts. |
 | `README.md` | User documentation (configuration, features, keybindings). |
@@ -1146,7 +1227,19 @@ its type instead of failing with `ENXIO`),
 `app::test::test_file_content_is_syntax_highlighted` (a `.rs` preview is plain
 at first, coloured once the worker answered; a `.txt` one keeps a single default
 style), `app::test::test_stale_highlight_is_dropped` (an answer for another file
-never repaints the preview), `app::highlight::test::*` (the worker answers with
+never repaints the preview), `app::preview::test::*` (one line, one page, one
+column and the end of the text are reachable and clamped, a directory is not
+scrollable and has nothing to search; the search is case-insensitive, jumps to
+the first match at or below the view,
+`n`/`N` walk the matches with wrap-around, an empty query clears it, and an
+answer of a replaced search never moves the view; the character ranges of the
+matches across spans, multi-byte text and a lowercasing expansion),
+`ui::child_block::test::test_reverse_matches_splits_the_spans` (only the matched
+characters are reversed, the rest of the line keeps its style),
+`utils::test::test_search_indexes` (the shared case-insensitive substring and
+exact-name matching) and `test_preview_read_is_limited_but_keeps_utf8` (the byte
+limit, a character cut by it and invalid UTF-8 in the middle),
+`app::highlight::test::*` (the worker answers with
 the path of the file, answers `None` when there is nothing to highlight — so the
 UI stops waiting — and ignores requests when it was not started) and
 `utils::syntax::test::*` (a source file highlighted, tabs expanded, plain text
@@ -1184,6 +1277,8 @@ cannot be parsed), `command::types::test::test_reload_config_command`
 `test_enter_command_line_command` (`enter_command_line` parses to
 `AppCommand::EnterCommandLine`), `test_edit_append_filename_command`
 (`edit_append_filename` parses to `AppCommand::EditAppendFsName`),
+`test_preview_commands` (`preview_search` and the `next`/`prev` forms of the
+three preview scroll commands parse, and the argument is required),
 `config::keymap::test::test_edit_bindings_are_routed_to_the_edit_map` (an
 edit-only command never becomes a browser binding),
 `command::cmd_utils::test::*`

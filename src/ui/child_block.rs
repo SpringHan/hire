@@ -6,13 +6,17 @@ use ratatui_image::{StatefulImage, Resize};
 use ratatui::{
     buffer::CellDiffOption,
     symbols::{border::{Set, PLAIN}, line},
-    widgets::{Block, Borders},
+    widgets::{Block, Borders, Paragraph},
     layout::Rect,
-    text::Text,
+    style::Modifier,
+    text::{Line, Span, Text},
     Frame
 };
 
-use crate::{app::App, utils::{update_window_height, FileContent}};
+use crate::{
+    app::App,
+    utils::{update_window_height, update_window_width, FileContent}
+};
 
 use super::{list::List, utils::render_list};
 
@@ -85,7 +89,16 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
         bail!("Failed to get image protocol of current image")
     }
 
-    frame.render_widget(content_para(app)?, block.inner(layout));
+    let inner = block.inner(layout);
+    let column = u16::try_from(app.preview.column()).unwrap_or(u16::MAX);
+
+    // `Paragraph` is what shifts the lines horizontally; the vertical window is
+    // already cut by `preview_lines`.
+    frame.render_widget(
+        Paragraph::new(Text::from(preview_lines(app, inner.height)?))
+            .scroll((0, column)),
+        inner
+    );
     frame.render_widget(block, layout);
 
     Ok(())
@@ -120,13 +133,138 @@ fn pin_image_cells(frame: &mut Frame, area: Rect) {
 
 pub fn update_file_linenr(area: Rect) {
     update_window_height(area.height);
+    update_window_width(area.width);
 }
 
-/// Wrap current file content with Pragraph Widget.
-fn content_para<'a>(app: &'a App,) -> anyhow::Result<&'a Text<'a>> {
-    if let FileContent::Text(ref content) = app.file_content {
-        Ok(content)
-    } else {
+/// The lines of the text preview which fit in `height` rows.
+///
+/// The preview starts at its scroll offset, so paging and searching move the
+/// window over the text instead of rereading the file. The column offset is
+/// applied by the `Paragraph` the lines are rendered with. Every occurrence of
+/// the preview search query is drawn with `Modifier::REVERSED`, which keeps the
+/// match visible whatever the syntax highlighting painted there.
+fn preview_lines<'a>(
+    app: &'a App,
+    height: u16
+) -> anyhow::Result<Vec<Line<'a>>>
+{
+    let FileContent::Text(ref content) = app.file_content else {
         bail!("Unknown error occurred when rendering file content!")
+    };
+
+    let total = content.lines.len();
+    // The text may have got shorter than the offset (a new file, a resize):
+    // show its last line instead of nothing at all.
+    let start = app.preview.offset().min(total.saturating_sub(1));
+    let end = start.saturating_add(height as usize).min(total);
+
+    Ok(content.lines[start..end]
+        .iter()
+        .map(|line| reverse_matches(line, &app.preview.match_ranges(line)))
+        .collect())
+}
+
+/// Reverse the matched character ranges of `line`.
+///
+/// The spans are split at the boundaries of the ranges, so only the matched
+/// characters are reversed and the rest of the line keeps its syntax colours.
+fn reverse_matches<'a>(
+    line: &Line<'a>,
+    ranges: &[(usize, usize)]
+) -> Line<'a>
+{
+    if ranges.is_empty() {
+        return line.to_owned()
+    }
+
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut char_idx = 0;
+
+    for span in &line.spans {
+        let mut run = String::new();
+        let mut run_reversed = false;
+
+        // The span's own style, reversed when the run it belongs to matched.
+        let styled = |content: String, reversed: bool| {
+            let style = if reversed {
+                span.style.add_modifier(Modifier::REVERSED)
+            } else {
+                span.style
+            };
+
+            Span::styled(content, style)
+        };
+
+        for ch in span.content.chars() {
+            let reversed = ranges.iter().any(|(start, end)| {
+                char_idx >= *start && char_idx < *end
+            });
+
+            // The reversed flag changed: the characters collected so far keep
+            // the style of their own range.
+            if !run.is_empty() && reversed != run_reversed {
+                spans.push(styled(std::mem::take(&mut run), run_reversed));
+            }
+
+            run_reversed = reversed;
+            run.push(ch);
+            char_idx += 1;
+        }
+
+        if !run.is_empty() {
+            spans.push(styled(run, run_reversed));
+        }
+    }
+
+    let mut reversed = line.to_owned();
+    reversed.spans = spans;
+
+    reversed
+}
+
+#[cfg(test)]
+mod test {
+    use ratatui::style::Color;
+
+    use super::*;
+
+    /// Only the matched characters are reversed; the characters before and
+    /// after them keep their span's style.
+    #[test]
+    fn test_reverse_matches_splits_the_spans() {
+        let style = ratatui::style::Style::new().fg(Color::Red);
+        let line = Line::from(vec![
+            Span::styled("hello ", style),
+            Span::styled("needle", style),
+            Span::styled(" world", style),
+        ]);
+
+        let reversed = reverse_matches(&line, &[(6, 12)]);
+
+        let content: String = reversed.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(content, "hello needle world");
+
+        let highlighted: Vec<&str> = reversed.spans
+            .iter()
+            .filter(|span| {
+                span.style.add_modifier.contains(Modifier::REVERSED)
+            })
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(highlighted, vec!["needle"]);
+
+        // Without a match the line is returned as it is.
+        assert_eq!(reverse_matches(&line, &[]).spans.len(), line.spans.len());
+
+        // A match which covers the whole line reverses all of it.
+        let reversed = reverse_matches(&line, &[(0, 18)]);
+        assert!(
+            reversed.spans.iter().all(|span| {
+                span.style.add_modifier.contains(Modifier::REVERSED)
+            })
+        );
     }
 }

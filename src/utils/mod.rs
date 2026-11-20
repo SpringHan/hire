@@ -24,6 +24,10 @@ pub use syntax::*;
 lazy_static! {
     /// The height of file list & content preview windows.
     pub static ref WINDOW_HEIGHT: AtomicU16 = AtomicU16::new(0);
+
+    /// The width of the content preview window, used to bound the preview's
+    /// horizontal scrolling.
+    pub static ref WINDOW_WIDTH: AtomicU16 = AtomicU16::new(0);
 }
 
 #[derive(Parser)]
@@ -109,7 +113,8 @@ pub fn str_split(_string: String) -> Vec<String> {
     str_vec
 }
 
-/// Read limited lines from file, and pass content as `Text` structure to `text_ref`.
+/// Read the preview prefix of `file`, and pass the content as a `Text`
+/// structure to `text_ref`.
 /// In the meanwhile, the newline character of Windows will be removed
 /// and the '\t' will be replaced with 4 spaces.
 pub fn read_to_text(
@@ -122,39 +127,60 @@ pub fn read_to_text(
     Ok(())
 }
 
-/// Read the first `get_window_height()` lines of `file` as UTF-8.
+/// The number of bytes the text preview reads from a file.
+///
+/// The preview holds the whole file up to this limit, so the text can be paged
+/// and searched; a larger file is only previewed up to the limit (there is no
+/// way to scroll past it). It is the same limit as
+/// `utils::syntax::MAX_HIGHLIGHT_BYTES`, which shows a file that fills it
+/// unhighlighted.
+pub const MAX_PREVIEW_BYTES: usize = 256 * 1024;
+
+/// Read up to [`MAX_PREVIEW_BYTES`] bytes of `file` as UTF-8.
 ///
 /// The newline character of Windows is removed, so a CRLF file renders like an
-/// LF one. A file which is not valid UTF-8 within those lines is an error: the
-/// preview takes that as "not text" and shows an image or the MIME type
+/// LF one. A file which is not valid UTF-8 within the bytes read is an error:
+/// the preview takes that as "not text" and shows an image or the MIME type
 /// instead.
 ///
-/// The preview reads the file on the UI thread (a window of lines is cheap),
-/// then hands the content to the highlighting thread; see `app/highlight.rs`.
-/// The read is buffered because `File` itself is not: unbuffered, `bytes()`
-/// costs one `read(2)` system call per byte.
+/// The preview holds this whole prefix (not just the visible window) because
+/// the text can be paged and searched; the read is limited by bytes, so a file
+/// whose first 256 KiB is text still arrives in one piece. A multi-byte
+/// character which the limit cuts in half is dropped instead of making the
+/// whole file look like binary data.
+///
+/// The preview reads the file on the UI thread, then hands the content to the
+/// highlighting thread; see `app/highlight.rs`. The read is buffered because
+/// `File` itself is not: unbuffered, `bytes()` costs one `read(2)` system call
+/// per byte.
 pub fn read_text_prefix(file: &File) -> anyhow::Result<String> {
-    let line_nr = get_window_height();
-
-    let mut idx = 1;
+    let mut read = 0;
     let mut bytes: Vec<u8> = Vec::new();
-    for _b in BufReader::new(file).bytes() {
+
+    for _b in BufReader::new(file).bytes().take(MAX_PREVIEW_BYTES) {
+        read += 1;
+
         let byte = _b?;
         if byte != 13 {
-            // To limit content read from file
-            if byte == 10 {
-                if idx == line_nr {
-                    break;
-                }
-
-                idx += 1;
-            }
-
             bytes.push(byte);
         }
     }
 
-    Ok(String::from_utf8(bytes)?)
+    // The limit may have cut the last character in half; that is an artifact of
+    // the read, not a sign that the file is not text.
+    let at_limit = read == MAX_PREVIEW_BYTES;
+
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text),
+        Err(err) if at_limit && err.utf8_error().error_len().is_none() => {
+            let valid = err.utf8_error().valid_up_to();
+            let bytes = err.into_bytes();
+
+            Ok(String::from_utf8(bytes[..valid].to_vec())
+                .expect("the bytes before the cut are valid UTF-8"))
+        },
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Turn `content` into `Text`, keeping the ANSI colours a file may contain and
@@ -215,6 +241,42 @@ pub fn file_mime(path: &Path) -> Option<String> {
 /// `xdg-mime` reports, or the old label when it cannot answer.
 pub fn file_type_label(path: &Path) -> String {
     file_mime(path).unwrap_or_else(|| String::from("Non Text File"))
+}
+
+/// The indices of the names which match `query`.
+///
+/// `exactly` selects the first name which equals the query (the jump-to-file
+/// search used by `goto_file`-style commands); otherwise every name which
+/// contains it is returned, case-insensitively. The same rule is used for the
+/// file list and for the lines of the text preview, which is why the names are
+/// an iterator of strings instead of a file type.
+pub fn search_indexes<'a, I>(query: &str, names: I, exactly: bool) -> Vec<usize>
+where I: IntoIterator<Item = &'a str>
+{
+    let query = if !exactly {
+        query.to_lowercase()
+    } else {
+        query.to_owned()
+    };
+
+    let mut indexes: Vec<usize> = Vec::new();
+
+    for (idx, name) in names.into_iter().enumerate() {
+        if exactly {
+            if name == query.as_str() {
+                indexes.push(idx);
+                break
+            }
+
+            continue
+        }
+
+        if name.to_lowercase().contains(&query) {
+            indexes.push(idx);
+        }
+    }
+
+    indexes
 }
 
 /// Return the byte index at which the extension of a file name starts.
@@ -530,6 +592,17 @@ pub fn update_window_height(height: u16) {
 
 pub fn get_window_height() -> u16 {
     WINDOW_HEIGHT.load(Ordering::Acquire)
+}
+
+pub fn update_window_width(width: u16) {
+    let current = WINDOW_WIDTH.load(Ordering::Acquire);
+    if current != width {
+        WINDOW_WIDTH.store(width, Ordering::Release);
+    }
+}
+
+pub fn get_window_width() -> u16 {
+    WINDOW_WIDTH.load(Ordering::Acquire)
 }
 
 #[cfg(test)]
@@ -1011,6 +1084,71 @@ mod test {
         // The index is a byte offset, so a multi-byte suffix stays intact.
         assert_eq!(extension_start("中文.txt"), Some(6));
         assert_eq!(extension_start("中文.中文"), Some(6));
+    }
+
+    /// The file list and the text preview share one matching rule: a
+    /// case-insensitive substring, or one exact name for a jump.
+    #[test]
+    fn test_search_indexes() {
+        let names = ["alpha.rs", "beta.txt", "Alpha.md"];
+
+        assert_eq!(
+            search_indexes("alpha", names.iter().copied(), false),
+            vec![0, 2]
+        );
+        assert_eq!(
+            search_indexes("", names.iter().copied(), false),
+            vec![0, 1, 2]
+        );
+
+        // An exact search keeps the case and stops at the first equal name.
+        assert_eq!(
+            search_indexes("beta", names.iter().copied(), true),
+            Vec::<usize>::new()
+        );
+        assert_eq!(
+            search_indexes("beta.txt", names.iter().copied(), true),
+            vec![1]
+        );
+    }
+
+    /// The preview reads the whole file up to [`MAX_PREVIEW_BYTES`], so it can
+    /// be paged and searched, and a character the limit cuts in half does not
+    /// turn the file into "not text".
+    #[test]
+    fn test_preview_read_is_limited_but_keeps_utf8() {
+        let dir = temp_dir("preview-read");
+
+        // `take()` stops in the middle of the three-byte `中`.
+        let path = dir.join("cut.txt");
+        let mut content = "a".repeat(MAX_PREVIEW_BYTES - 1).into_bytes();
+        content.extend_from_slice("中".as_bytes());
+        std::fs::write(&path, &content).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let text = read_text_prefix(&file).unwrap();
+        assert_eq!(text.len(), MAX_PREVIEW_BYTES - 1);
+
+        // The same incomplete character at the end of a shorter file is a
+        // decoding error, not the limit's doing.
+        let path = dir.join("broken.txt");
+        let mut content = b"abc".to_vec();
+        content.push("中".as_bytes()[0]);
+        std::fs::write(&path, &content).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        assert!(read_text_prefix(&file).is_err());
+
+        // Invalid UTF-8 in the middle is an error: a binary file is previewed
+        // by its type, not as the text before its first binary byte.
+        let path = dir.join("binary.dat");
+        let mut content = b"text\n".to_vec();
+        content.push(0xff);
+        content.extend_from_slice(b"more");
+        std::fs::write(&path, &content).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        assert!(read_text_prefix(&file).is_err());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

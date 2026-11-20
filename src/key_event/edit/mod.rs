@@ -387,6 +387,7 @@ pub fn item_navigation(
         } else {
             // BUG: Maybe there'll be a bug.
             app.file_content = FileContent::Text(Text::default());
+            app.preview.reset();
         }
     }
 

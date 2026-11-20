@@ -5,6 +5,7 @@ mod filesaver;
 mod highlight;
 mod image_preview;
 mod macro_utils;
+mod preview;
 
 use std::{env, fs, io};
 use std::time::Instant;
@@ -41,6 +42,7 @@ pub use macro_utils::*;
 pub use color::TermColors;
 pub use filesaver::{sort, FileSaver};
 pub use image_preview::Preview;
+pub use preview::PreviewState;
 
 pub struct App<'a> {
     // Core
@@ -191,6 +193,10 @@ pub struct App<'a> {
     // Syntax Highlighting
     pub highlight: HighlightPreview,
 
+    // Text Preview
+    /// The scroll offset and the search of the text preview.
+    pub preview: PreviewState,
+
     // Edit Mode
     pub edit_mode: EditMode,
 
@@ -277,6 +283,7 @@ impl<'a> Default for App<'a> {
             navi_index: NaviIndex::default(),
             image_preview: ImagePreview::default(),
             highlight: HighlightPreview::default(),
+            preview: PreviewState::default(),
             file_searcher: FileSearcher::default(),
 
             // Command
@@ -391,7 +398,7 @@ impl<'a> App<'a> {
     pub fn refresh_child_item(&mut self) {
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
-            self.file_content.reset();
+            self.reset_preview();
             return ()
         }
 
@@ -547,7 +554,7 @@ impl<'a> App<'a> {
 
             self.child_files = child_files;
             if self.file_content.is_some() {
-                self.file_content.reset();
+                self.reset_preview();
             }
         } else {
             // See the note at the definition of App structure.
@@ -673,7 +680,7 @@ impl<'a> App<'a> {
         let root = self.root();
 
         self.selected_item = ItemIndex::default();
-        self.file_content.reset();
+        self.reset_preview();
 
 
         // Refresh parent
@@ -770,6 +777,9 @@ impl<'a> App<'a> {
 impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
         use io::ErrorKind;
+
+        // A new file starts at its first line, with no search of the old one.
+        self.preview.reset();
 
         let selected = self.get_file_saver();
         if let Some(selected_item) = selected {
@@ -895,6 +905,10 @@ impl<'a> App<'a> {
             return
         }
 
+        // An image or a type label replaces the text: its scroll offset and
+        // search must not survive.
+        self.preview.reset();
+
         match preview {
             Preview::Image(image) => {
                 match self.image_preview.make_protocol(image) {
@@ -960,7 +974,7 @@ impl<'a> App<'a> {
     {
         self.path = PathBuf::from(dir.as_ref());
         self.selected_item = ItemIndex::default();
-        self.file_content.reset();
+        self.reset_preview();
         self.child_files.clear();
 
         self.hide_files = if let Some(hide) = hide_files {

@@ -64,7 +64,7 @@ lazy_static! {
 /// the parser fails. The caller keeps the unhighlighted text it is showing.
 ///
 /// This runs on the highlighting thread (`app/highlight.rs`), never on the UI
-/// thread: syntect parses every line of the window for every cursor movement.
+/// thread: syntect parses every line of the preview for every cursor movement.
 pub fn highlight_text(content: &str, path: &Path) -> Option<Text<'static>> {
     let (set, syntax) = syntax_for(path)?;
 
@@ -100,11 +100,11 @@ fn syntax_for(
 
 /// How much of a preview is still worth highlighting.
 ///
-/// The read stops after one window of lines, so only a file with extremely long
-/// lines reaches this (a minified JSON, a base64 blob). syntect parses every
-/// byte of such a line while the terminal can only show its first columns, and
-/// the highlight runs again for every cursor movement, so such a file is shown
-/// unhighlighted instead.
+/// It is the same limit as `utils::MAX_PREVIEW_BYTES`, so the preview never
+/// holds more text than this; a file which fills the preview is shown
+/// unhighlighted, because syntect would parse every byte of it (a minified
+/// JSON, a base64 blob) although the terminal can only show the first columns
+/// of a line, and the highlight runs again for every cursor movement.
 const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
 
 /// Highlight `content` with `syntax`, which belongs to `set`.
@@ -118,7 +118,7 @@ fn highlighted_text(
     syntax: &SyntaxReference,
 ) -> Option<Text<'static>>
 {
-    if content.len() > MAX_HIGHLIGHT_BYTES {
+    if content.len() >= MAX_HIGHLIGHT_BYTES {
         return None
     }
 

@@ -39,6 +39,7 @@ fn main() -> AppResult<()> {
     let image_recvs = app.init_image_picker();
     app.highlight.start();
     let search_recv = app.init_search_channel();
+    let preview_search_recv = app.init_preview_search_channel();
 
     // Init config information. A broken entry is skipped by `load_config` and
     // shown in the command line once the UI runs; it never stops hire.
@@ -95,8 +96,8 @@ fn main() -> AppResult<()> {
             if initial {
                 initial = false;
 
-                // The window height decides how much of a file the preview
-                // reads, so it must be known before the first preview is read.
+                // The window height is the page size of the list and the text
+                // preview, so it must be known before the first frame draws.
                 ui::update_file_linenr(frame.area());
 
                 if let Err(err) = app.init_all_files() {
@@ -191,6 +192,11 @@ fn main() -> AppResult<()> {
             if let Err(err) = app.next_candidate() {
                 app.app_error.append_errors(err.iter());
             }
+        }
+
+        // Preview search handler
+        if let Ok(matches) = preview_search_recv.try_recv() {
+            app.apply_preview_search(matches);
         }
 
         // Image perview handler
