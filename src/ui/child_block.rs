@@ -5,7 +5,7 @@ use ratatui_image::{StatefulImage, Resize};
 
 use ratatui::{
     buffer::CellDiffOption,
-    symbols::{border::{Set, PLAIN}, line},
+    symbols::{border::{self, Set}, line},
     widgets::{Block, Borders, Paragraph},
     layout::Rect,
     style::Modifier,
@@ -20,14 +20,19 @@ use crate::{
 
 use super::{list::List, utils::render_list};
 
-pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
-    let border_set = Set {
+/// The border set of the columns which close the browser's rounded frame on
+/// the right: the child column and the file preview.
+fn right_end_border_set() -> Set<'static> {
+    Set {
         top_left: line::NORMAL.horizontal_down,
         bottom_left: line::NORMAL.horizontal_up,
-        ..PLAIN
-    };
+        ..border::ROUNDED
+    }
+}
+
+pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
     let child_block = Block::default()
-        .border_set(border_set)
+        .border_set(right_end_border_set())
         .borders(Borders::ALL);
 
     // Update file linenr
@@ -57,13 +62,8 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
 }
 
 pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Result<()> {
-    let border_set = Set {
-        top_left: line::NORMAL.horizontal_down,
-        bottom_left: line::NORMAL.horizontal_up,
-        ..PLAIN
-    };
     let block = Block::default()
-        .border_set(border_set)
+        .border_set(right_end_border_set())
         .borders(Borders::ALL);
 
     update_file_linenr(block.inner(layout));

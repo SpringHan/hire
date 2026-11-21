@@ -780,11 +780,11 @@ hidden flag and selection, never shells.
 | File | Purpose |
 | --- | --- |
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
-| `ui/parent_block.rs` | Renders the parent-directory column. |
-| `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list). |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview; the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
+| `ui/parent_block.rs` | Renders the parent-directory column, the left end of the browser's rounded frame. |
+| `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list); it closes the rounded frame on the right in the root directory. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
-| `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
+| `ui/cmdline_popup.rs` | Renders the completion candidate popup as a rounded floating box. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
 | `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line (`[pinned]` marks the pinned shell); the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
@@ -800,6 +800,23 @@ one trailing separator, so a path which still ends with `/` does not render as
 to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
 shell screen and the bottom band is the shell status line. The title's tab badge
 shows the mounted shell count (`|1:2|`).
+
+**Rounded browser frame.** The browser's three columns are drawn as one rounded
+frame, not as three separate boxes: the columns are adjacent, so they must
+describe the borders they share. `ui/parent_block.rs` is the frame's left end
+(`Borders::TOP | LEFT | BOTTOM`) and uses `symbols::border::ROUNDED` — only its
+left corners are drawn, and those are the rounded ones. Every column to its
+right uses the same `Set { top_left: ┬, bottom_left: ┴, ..ROUNDED }`: its left
+border is the separator from the previous column, so it meets the continuous
+top and bottom border in `┬`/`┴` junctions (a rounded corner there would cut the
+line in two), while its right corners are rounded because the column closes the
+frame on that side. The child column and the file preview always do;
+`ui/current_block.rs` draws `Borders::ALL`, and with it the rounded right
+corners, only in the root directory, where there is no child column and the
+current column is the frame's right end. In a normal directory the current
+column has no right border at all: the child column's left border is the
+separator between them. Border presence never changes, so the inner areas and
+the list window sizes are the same as before.
 
 **`ui/child_block.rs`** — `render_file` draws the image preview or the text:
 `preview_lines` takes the lines which fit in the pane from the preview's row
@@ -857,7 +874,12 @@ state line.
 **`ui/cmdline_popup.rs`** — `CompletionPopup` and `render_completion` position
 and draw the completion candidate list above the command line. The position and
 width come from `utils::display_width`, so CJK candidates line up with the
-command line; the layout arithmetic saturates instead of overflowing.
+command line; the layout arithmetic saturates instead of overflowing. The popup
+is a floating window which shares an edge with nothing, so unlike the browser
+columns it uses `symbols::border::ROUNDED` on all four sides; the box width
+already includes the two border cells, so the rounded corners take no extra
+room. `Clear` erases the covered cells first, so the corners do not mix with
+the browser frame underneath.
 
 ### `src/utils/` — shared helpers
 

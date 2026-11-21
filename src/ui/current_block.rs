@@ -1,7 +1,7 @@
 // Current Block
 
 use ratatui::{
-    symbols::{border::{Set, PLAIN}, line},
+    symbols::{border::{self, Set}, line},
     widgets::{Block, Borders},
     layout::Rect,
     Frame
@@ -11,14 +11,18 @@ use crate::app::App;
 
 use super::{list::List, utils::{render_editing_list, render_list}};
 
-pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
-    let border_set = Set {
+/// The border set of the current column.
+fn current_border_set() -> Set<'static> {
+    Set {
         top_left: line::NORMAL.horizontal_down,
         bottom_left: line::NORMAL.horizontal_up,
-        ..PLAIN
-    };
+        ..border::ROUNDED
+    }
+}
+
+pub fn render_current(app: &mut App, frame: &mut Frame, area: Rect) {
     let current_block = Block::default()
-        .border_set(border_set)
+        .border_set(current_border_set())
         .borders(
             if app.root() {
                 Borders::ALL

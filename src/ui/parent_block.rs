@@ -2,7 +2,12 @@
 
 use std::path::PathBuf;
 
-use ratatui::{layout::Rect, widgets::{Block, Borders}, Frame};
+use ratatui::{
+    layout::Rect,
+    symbols::border,
+    widgets::{Block, Borders},
+    Frame
+};
 
 use crate::app::App;
 
@@ -10,6 +15,7 @@ use super::{list::List, utils::render_list};
 
 pub fn render_parent(app: &mut App, frame: &mut Frame, area: Rect) {
     let parent_block = Block::default()
+        .border_set(border::ROUNDED)
         .borders(Borders::TOP | Borders::LEFT | Borders::BOTTOM);
 
     let marked_files = if app.root() {

@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use ratatui::{
+    symbols::border,
     widgets::{Block, Borders, Clear, List, ListItem, ListState, StatefulWidget, Widget},
     style::Style,
     layout::Rect,
@@ -34,6 +35,7 @@ impl StatefulWidget for CompletionPopup<'_> {
         Clear.render(area, buf);
 
         let block = Block::default()
+            .border_set(border::ROUNDED)
             .borders(Borders::ALL);
 
         let completion_list = List::new(
