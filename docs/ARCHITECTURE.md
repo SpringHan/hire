@@ -331,7 +331,7 @@ the horizontal column offset, the search (`query`, the matched line indices,
 the current match) and the channel to the search worker.
 `preview_scroll_line` / `preview_scroll_page` move the row offset (a page is
 `get_window_height()`, and the clamp keeps the last line at the bottom of the
-pane); `preview_scroll_column` moves the column one at a time and stops when
+pane); `preview_scroll_column` moves the column in steps of five and stops when
 the end of the widest line (`Line::width`) reaches the right edge of the pane
 (`get_window_width()`), so a line which fits cannot be scrolled and the text is
 never shifted off an empty screen. Every jump to a match (`preview_jump_to`,
@@ -350,6 +350,9 @@ worker blocks on its channel between searches, like the file searcher.
 `match_ranges` computes the character ranges of every match in one line (case
 insensitive, mapped back from the lowercased text so a character which expands
 when lowercased still matches as a whole), which `ui/child_block.rs` reverses.
+`current_line` names the line of the match the search or `n`/`N` moved to; the
+renderer underlines the matches of that line, so the selected occurrence stands
+out from the other matches of the same query.
 
 **`app/macro_utils.rs`** — `Macro` keeps the recorded `KeyEvent` sequence, an
 optional list of `MacroTarget { dir, name }` (used to apply a macro to every
@@ -779,7 +782,7 @@ hidden flag and selection, never shells.
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
 | `ui/parent_block.rs` | Renders the parent-directory column. |
 | `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list). |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview; the text preview is drawn from its row/column offsets with the search matches in reverse video, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview; the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
@@ -801,9 +804,12 @@ shows the mounted shell count (`|1:2|`).
 **`ui/child_block.rs`** — `render_file` draws the image preview or the text:
 `preview_lines` takes the lines which fit in the pane from the preview's row
 offset (the text may have got shorter than the offset, then its last line is
-shown) and `reverse_matches` splits each line's spans at the search ranges, so
+shown) and `highlight_matches` splits each line's spans at the search ranges, so
 only the matched characters get `Modifier::REVERSED` and the syntax colours of
-the rest are kept. The lines are drawn with a `Paragraph` whose `scroll((0,
+the rest are kept; on the line `preview.current_line()` names — the match the
+search or `n`/`N` moved to — they get `Modifier::UNDERLINED` as well, which is
+what tells the selected occurrence apart from the other ones. The lines are
+drawn with a `Paragraph` whose `scroll((0,
 column))` is the preview's horizontal offset (`Wrap` is off, so it truncates
 and shifts instead of wrapping). `update_file_linenr` stores the pane height and
 width: the height is the page size of the list and the preview, the width bounds
@@ -1234,8 +1240,9 @@ the first match at or below the view,
 `n`/`N` walk the matches with wrap-around, an empty query clears it, and an
 answer of a replaced search never moves the view; the character ranges of the
 matches across spans, multi-byte text and a lowercasing expansion),
-`ui::child_block::test::test_reverse_matches_splits_the_spans` (only the matched
-characters are reversed, the rest of the line keeps its style),
+`ui::child_block::test::test_highlight_matches_splits_the_spans` (only the
+matched characters are reversed, the match of the current line is underlined
+too, the rest of the line keeps its style),
 `utils::test::test_search_indexes` (the shared case-insensitive substring and
 exact-name matching) and `test_preview_read_is_limited_but_keeps_utf8` (the byte
 limit, a character cut by it and invalid UTF-8 in the middle),

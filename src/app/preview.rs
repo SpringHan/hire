@@ -79,6 +79,14 @@ impl PreviewState {
         self.query.is_some()
     }
 
+    /// The line of the match `n`/`N` last moved to.
+    ///
+    /// The renderer underlines this match, so the occurrence the user selected
+    /// stands out from the other matches of the same query.
+    pub fn current_line(&self) -> Option<usize> {
+        self.current.and_then(|idx| self.matched_lines.get(idx).copied())
+    }
+
     /// The character ranges of every occurrence of the query in `line`.
     ///
     /// The ranges are what the renderer reverses. They are in characters, not
@@ -261,7 +269,7 @@ impl<'a> App<'a> {
         self.scroll_preview(if down { page } else { -page });
     }
 
-    /// Scroll the text preview by one column.
+    /// Scroll the text preview by five columns.
     ///
     /// The right end of the widest line stays at the right edge of the pane, so
     /// the preview never scrolls off the text into an empty screen.
@@ -539,8 +547,9 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The column offset moves over the widest line and stops at the right
-    /// edge of the pane; a line which fits cannot be scrolled.
+    /// The column offset moves over the widest line five columns at a time and
+    /// stops at the right edge of the pane; a line which fits cannot be
+    /// scrolled.
     #[test]
     fn test_preview_scrolls_columns() {
         let _guard = window_size(10, 10);
@@ -555,7 +564,7 @@ mod test {
         app.goto_dir(&dir, Some(false)).unwrap();
 
         app.preview_scroll_column(true);
-        assert_eq!(app.preview.column(), 1);
+        assert_eq!(app.preview.column(), 5);
 
         app.preview_scroll_column(false);
         assert_eq!(app.preview.column(), 0);
@@ -580,7 +589,7 @@ mod test {
         write_lines(&dir, &[String::from("0123456789ABCDEFGHIJ")]);
         app.set_file_content().unwrap();
         app.preview_scroll_column(true);
-        assert_eq!(app.preview.column(), 1);
+        assert_eq!(app.preview.column(), 5);
 
         // A search jump returns to the first column, so the match is not left
         // hidden behind a horizontal scroll.
@@ -614,6 +623,7 @@ mod test {
         search(&mut app, &rx, "needle");
         assert_eq!(app.preview.matched_lines, vec![3, 30]);
         assert_eq!(app.preview.current, Some(0));
+        assert_eq!(app.preview.current_line(), Some(3));
 
         // While the preview is text, `n`/`N` belong to its search.
         assert!(app.preview_search_active());
@@ -623,22 +633,26 @@ mod test {
 
         app.preview_move_candidate(true);
         assert_eq!(app.preview.current, Some(1));
+        assert_eq!(app.preview.current_line(), Some(30));
         assert_eq!(app.preview.offset(), 25);
 
         // `n` at the last match wraps around to the first one.
         app.preview_move_candidate(true);
         assert_eq!(app.preview.current, Some(0));
+        assert_eq!(app.preview.current_line(), Some(3));
         assert_eq!(app.preview.offset(), 0);
 
         // `N` at the first match wraps around to the last one.
         app.preview_move_candidate(false);
         assert_eq!(app.preview.current, Some(1));
+        assert_eq!(app.preview.current_line(), Some(30));
         assert_eq!(app.preview.offset(), 25);
 
         // A search without a match keeps the view where it is.
         search(&mut app, &rx, "nothing-matches");
         assert!(app.preview.matched_lines.is_empty());
         assert_eq!(app.preview.current, None);
+        assert_eq!(app.preview.current_line(), None);
         assert_eq!(app.preview.offset(), 25);
 
         // An empty query clears the search, so `n`/`N` leave the preview.

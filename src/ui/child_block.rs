@@ -142,7 +142,9 @@ pub fn update_file_linenr(area: Rect) {
 /// window over the text instead of rereading the file. The column offset is
 /// applied by the `Paragraph` the lines are rendered with. Every occurrence of
 /// the preview search query is drawn with `Modifier::REVERSED`, which keeps the
-/// match visible whatever the syntax highlighting painted there.
+/// match visible whatever the syntax highlighting painted there; the match the
+/// search or `n`/`N` moved to is underlined as well, so the selected occurrence
+/// stands out from the other matches.
 fn preview_lines<'a>(
     app: &'a App,
     height: u16
@@ -158,9 +160,18 @@ fn preview_lines<'a>(
     let start = app.preview.offset().min(total.saturating_sub(1));
     let end = start.saturating_add(height as usize).min(total);
 
+    let current = app.preview.current_line();
+
     Ok(content.lines[start..end]
         .iter()
-        .map(|line| reverse_matches(line, &app.preview.match_ranges(line)))
+        .enumerate()
+        .map(|(row, line)| {
+            highlight_matches(
+                line,
+                &app.preview.match_ranges(line),
+                current == Some(start + row)
+            )
+        })
         .collect())
 }
 
@@ -168,9 +179,13 @@ fn preview_lines<'a>(
 ///
 /// The spans are split at the boundaries of the ranges, so only the matched
 /// characters are reversed and the rest of the line keeps its syntax colours.
-fn reverse_matches<'a>(
+/// `current` is the line the search or `n`/`N` moved to: its matches are
+/// underlined as well, which is what tells the selected occurrence apart from
+/// the other ones.
+fn highlight_matches<'a>(
     line: &Line<'a>,
-    ranges: &[(usize, usize)]
+    ranges: &[(usize, usize)],
+    current: bool
 ) -> Line<'a>
 {
     if ranges.is_empty() {
@@ -182,44 +197,49 @@ fn reverse_matches<'a>(
 
     for span in &line.spans {
         let mut run = String::new();
-        let mut run_reversed = false;
+        let mut run_matched = false;
 
-        // The span's own style, reversed when the run it belongs to matched.
-        let styled = |content: String, reversed: bool| {
-            let style = if reversed {
-                span.style.add_modifier(Modifier::REVERSED)
-            } else {
-                span.style
-            };
+        // The span's own style, reversed (and underlined on the current line)
+        // when the run it belongs to matched.
+        let styled = |content: String, matched: bool| {
+            let mut style = span.style;
+
+            if matched {
+                style = style.add_modifier(Modifier::REVERSED);
+
+                if current {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+            }
 
             Span::styled(content, style)
         };
 
         for ch in span.content.chars() {
-            let reversed = ranges.iter().any(|(start, end)| {
+            let matched = ranges.iter().any(|(start, end)| {
                 char_idx >= *start && char_idx < *end
             });
 
-            // The reversed flag changed: the characters collected so far keep
+            // The matched flag changed: the characters collected so far keep
             // the style of their own range.
-            if !run.is_empty() && reversed != run_reversed {
-                spans.push(styled(std::mem::take(&mut run), run_reversed));
+            if !run.is_empty() && matched != run_matched {
+                spans.push(styled(std::mem::take(&mut run), run_matched));
             }
 
-            run_reversed = reversed;
+            run_matched = matched;
             run.push(ch);
             char_idx += 1;
         }
 
         if !run.is_empty() {
-            spans.push(styled(run, run_reversed));
+            spans.push(styled(run, run_matched));
         }
     }
 
-    let mut reversed = line.to_owned();
-    reversed.spans = spans;
+    let mut highlighted = line.to_owned();
+    highlighted.spans = spans;
 
-    reversed
+    highlighted
 }
 
 #[cfg(test)]
@@ -229,9 +249,10 @@ mod test {
     use super::*;
 
     /// Only the matched characters are reversed; the characters before and
-    /// after them keep their span's style.
+    /// after them keep their span's style. On the current match line they are
+    /// underlined too.
     #[test]
-    fn test_reverse_matches_splits_the_spans() {
+    fn test_highlight_matches_splits_the_spans() {
         let style = ratatui::style::Style::new().fg(Color::Red);
         let line = Line::from(vec![
             Span::styled("hello ", style),
@@ -239,30 +260,52 @@ mod test {
             Span::styled(" world", style),
         ]);
 
-        let reversed = reverse_matches(&line, &[(6, 12)]);
+        let highlighted = highlight_matches(&line, &[(6, 12)], false);
 
-        let content: String = reversed.spans
+        let content: String = highlighted.spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect();
         assert_eq!(content, "hello needle world");
 
-        let highlighted: Vec<&str> = reversed.spans
+        let reversed: Vec<&str> = highlighted.spans
             .iter()
             .filter(|span| {
                 span.style.add_modifier.contains(Modifier::REVERSED)
             })
             .map(|span| span.content.as_ref())
             .collect();
-        assert_eq!(highlighted, vec!["needle"]);
+        assert_eq!(reversed, vec!["needle"]);
+
+        // The matches of the other lines are only reversed.
+        assert!(
+            highlighted.spans.iter().all(|span| {
+                !span.style.add_modifier.contains(Modifier::UNDERLINED)
+            })
+        );
+
+        // The current match is underlined as well, so the selected occurrence
+        // stands out from the other matches.
+        let highlighted = highlight_matches(&line, &[(6, 12)], true);
+        let underlined: Vec<&str> = highlighted.spans
+            .iter()
+            .filter(|span| {
+                span.style.add_modifier.contains(Modifier::UNDERLINED)
+            })
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(underlined, vec!["needle"]);
 
         // Without a match the line is returned as it is.
-        assert_eq!(reverse_matches(&line, &[]).spans.len(), line.spans.len());
+        assert_eq!(
+            highlight_matches(&line, &[], true).spans.len(),
+            line.spans.len()
+        );
 
         // A match which covers the whole line reverses all of it.
-        let reversed = reverse_matches(&line, &[(0, 18)]);
+        let highlighted = highlight_matches(&line, &[(0, 18)], true);
         assert!(
-            reversed.spans.iter().all(|span| {
+            highlighted.spans.iter().all(|span| {
                 span.style.add_modifier.contains(Modifier::REVERSED)
             })
         );

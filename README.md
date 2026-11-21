@@ -221,9 +221,9 @@ scrolled horizontally and searched. The shipped keymaps bind:
 | `preview_search` | Search the preview (see below) | `?` | `?` |
 | `preview_scroll_page next` / `prev` | Page down / up | `>` / `<` | `>` / `<` |
 | `preview_scroll_line next` / `prev` | One line down / up | `J` / `K` | `E` / `U` |
-| `preview_scroll_column next` / `prev` | One column right / left | `)` / `(` | `I` / `N` |
+| `preview_scroll_column next` / `prev` | Five columns right / left | `)` / `(` | `I` / `N` |
 
-Horizontal scrolling moves the text one column at a time and stops when the end
+Horizontal scrolling moves the text five columns at a time and stops when the end
 of the longest line reaches the right edge, so a file whose lines fit the pane
 cannot be scrolled and the text is never shifted off into an empty screen. A
 jump to a search match (`?`, `n`/`N`) returns to the first column, so the match
@@ -233,9 +233,10 @@ Typing `?needle` searches the preview of the selected file on a background
 thread, scrolls to the first match at or below the current view and draws every
 match in reverse video. `move_candidate next` / `move_candidate prev`
 (`n`/`N` by default) then jump between the matches, wrapping around at both
-ends; while a preview search is active those keys belong to the preview, not to
-the file list. An empty `?` clears the search, its highlight, and gives `n`/`N`
-back to the file list.
+ends; the match the view last moved to is underlined as well, so it stands out
+from the other matches of the same query. While a preview search is active
+those keys belong to the preview, not to the file list. An empty `?` clears the
+search, its highlight, and gives `n`/`N` back to the file list.
 
 A file larger than 256 KiB is only previewed (and searchable) up to that limit,
 and a file which reaches it is shown without syntax colours.
@@ -425,7 +426,7 @@ keymap = [
 - Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
 - Search the file list: type `/` (`search`) followed by the text; `n`/`N` jump between the matches.
-- Search the text preview: type `?` (`preview_search`) followed by the text; the matches are drawn in reverse video and `n`/`N` jump between them (see "Text Preview").
+- Search the text preview: type `?` (`preview_search`) followed by the text; the matches are drawn in reverse video, the one `n`/`N` moved to is underlined, and `n`/`N` jump between them (see "Text Preview").
 - Complete the selected file name: `Tab` right after a space inserts the name of the item selected in the browser. In a `:!` command it is inserted quoted (`'a b.txt'`), so a space in it does not split it into several arguments; other commands take the name literally.
 
 ## TODO
