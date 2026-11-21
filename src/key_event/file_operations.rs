@@ -10,6 +10,7 @@ use super::cursor_movement;
 use super::{MenuPresentation, SwitchCase, SwitchCaseData};
 
 use crate::app::App;
+use crate::ui::key_hints;
 use crate::utils::{extension_start, CmdContent, CursorPos};
 use crate::error::{AppResult, AppError, ErrorType};
 
@@ -131,11 +132,17 @@ fn delete_switch(
 }
 
 fn generate_msg(app: &App, confirm: bool) -> CmdContent {
-    let mut msg = String::from("[D] delete files\n\n");
+    let mut text = Text::default();
+
+    text.push_line(key_hints(
+        "[D] delete files",
+        app.term_colors.marked_style
+    ));
+    text.push_line(Line::raw(""));
 
     if app.marked_files.is_empty() {
         if let Some(file) = app.get_file_saver() {
-            msg.push_str(&format!(
+            let mut line = format!(
                 "{}/{}",
                 if app.root() {
                     String::new()
@@ -145,21 +152,21 @@ fn generate_msg(app: &App, confirm: bool) -> CmdContent {
                         .to_string()
                 },
                 file.name
-            ));
+            );
 
             if file.is_dir {
-                msg.push('/');
+                line.push('/');
             }
 
-            msg.push('\n');
+            text.push_line(Line::raw(line));
         } else {
-            msg.push_str("No file to be deleted!");
+            text.push_line(Line::raw("No file to be deleted!"));
         }
     }
 
     for (path, files) in app.marked_files.iter() {
         for (file, is_dir) in files.files.iter() {
-            msg.push_str(&format!(
+            let mut line = format!(
                 "{}/{}",
                 if path.to_string_lossy() == "/" {
                     String::new()
@@ -167,20 +174,18 @@ fn generate_msg(app: &App, confirm: bool) -> CmdContent {
                     path.to_string_lossy().to_string()
                 },
                 file
-            ));
+            );
 
             if *is_dir {
-                msg.push('/');
+                line.push('/');
             }
 
-            msg.push('\n');
+            text.push_line(Line::raw(line));
         }
     }
 
-    let mut text = Text::raw(msg);
-
     if confirm {
-        text.push_line("");
+        text.push_line(Line::raw(""));
         text.push_line(Line::raw(
             "Are you sure to remove these files? (y to confirm)"
         ).red());

@@ -5,9 +5,12 @@ use std::io::ErrorKind;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use ratatui::text::{Line, Text};
+
 use super::{MenuPresentation, SwitchCase};
 use super::file_operations::delete_file;
 use crate::{rt_error, App};
+use crate::ui::key_hints;
 use crate::utils::{CmdContent, CursorPos, MarkedFiles};
 use crate::error::{
     NotFoundType,
@@ -324,13 +327,24 @@ where I: Iterator<Item = (PathBuf, MarkedFiles)>
 }
 
 fn generate_msg(app: &App) -> CmdContent {
-    let mut msg = String::from("[p] move to here  [s] make symbolic link  [c] copy to here
-[o] copy to here forcely  [O] move to here forcely  [x] clear selected files
-\nSelected files:\n");
+    let keys = app.term_colors.marked_style;
+    let mut text = Text::default();
+
+    text.push_line(key_hints(
+        "[p] move to here  [s] make symbolic link  [c] copy to here",
+        keys
+    ));
+    text.push_line(key_hints(
+        "[o] copy to here forcely  [O] move to here forcely  \
+         [x] clear selected files",
+        keys
+    ));
+    text.push_line(Line::raw(""));
+    text.push_line(Line::raw("Selected files:"));
 
     for (path, files) in app.marked_files.iter() {
         for (file, is_dir) in files.files.iter() {
-            msg.push_str(&format!(
+            let mut line = format!(
                 "{}/{}",
                 if path.to_string_lossy() == "/" {
                     String::new()
@@ -338,17 +352,17 @@ fn generate_msg(app: &App) -> CmdContent {
                     path.to_string_lossy().to_string()
                 },
                 file
-            ));
+            );
 
             if *is_dir {
-                msg.push('/');
+                line.push('/');
             }
 
-            msg.push('\n');
+            text.push_line(Line::raw(line));
         }
     }
 
-    CmdContent::String(msg)
+    CmdContent::Text(text)
 }
 
 /// Refresh the view after the paste menu and clear the marks unless they are

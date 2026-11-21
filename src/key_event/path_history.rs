@@ -9,6 +9,7 @@ use super::switch::{
 };
 use crate::error::{AppResult, ErrorType, NotFoundType};
 use crate::app::App;
+use crate::ui::key_hints;
 use crate::rt_error;
 
 /// The maximum number of paths that `App::path_history` can store.
@@ -178,7 +179,10 @@ fn jump_to_history_path(app: &mut App, idx: usize) -> AppResult<()> {
 /// The path history menu: a hint line and one entry per recorded path.
 fn generate_menu(app: &App, state: &PathHistoryState) -> MenuList {
     let mut menu = MenuList::new()
-        .header(Line::raw("[Esc] close the page  [01-30] jump to the path"))
+        .header(key_hints(
+            "[Esc] close the page  [01-30] jump to the path",
+            app.term_colors.marked_style
+        ))
         .header(Line::default());
 
     if app.path_history.is_empty() {

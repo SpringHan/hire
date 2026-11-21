@@ -13,6 +13,7 @@ use crate::{
     app::App,
     error::AppResult,
     key_event::{MenuList, MenuPresentation, SwitchCase, SwitchCaseData, TabId},
+    ui::key_hints,
     utils::ShellId,
 };
 
@@ -273,9 +274,10 @@ fn generate_menu(app: &App, state: &ShellMenuState) -> MenuList {
     // While a confirmation is open the key list is irrelevant: every key
     // either confirms (`y`) or cancels.
     if state.clear_pending.is_none() {
-        menu = menu.header(Line::raw(
+        menu = menu.header(key_hints(
             "[n] new shell  [x] kill shell  [D] clear shells of this tab  \
-             [0-9] attach shell  [Esc] close"
+             [0-9] attach shell  [Esc] close",
+            app.term_colors.marked_style
         ));
     }
 

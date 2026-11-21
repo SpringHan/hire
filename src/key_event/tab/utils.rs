@@ -13,6 +13,7 @@ use crate::{
     config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
     app::{path_is_hidden, App},
+    ui::key_hints,
     utils::CmdContent,
     option_get,
     rt_error,
@@ -643,15 +644,24 @@ fn switch_to(app: &mut App, idx: usize) -> AppResult<()> {
 /// The tab menu: key hints, the active mode and the tab (or stored group)
 /// entries.
 fn generate_menu(app: Option<&App>, data: &TabState) -> AppResult<MenuList> {
+    // The keys are drawn in the marked colour; without an app (the tab list is
+    // still being restored) the hints stay uncoloured.
+    let keys = app
+        .map(|app| app.term_colors.marked_style)
+        .unwrap_or_default();
+
     let mut menu = MenuList::new()
-        .header(Line::raw(
-            "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab"
+        .header(key_hints(
+            "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab",
+            keys
         ))
-        .header(Line::raw(
-            "[d] delete tab with number  [o] delete other tabs"
+        .header(key_hints(
+            "[d] delete tab with number  [o] delete other tabs",
+            keys
         ))
-        .header(Line::raw(
-            "[s] open tabs from storage  [S] store opening tabs"
+        .header(key_hints(
+            "[s] open tabs from storage  [S] store opening tabs",
+            keys
         ))
         .header(Line::default());
 

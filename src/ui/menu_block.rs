@@ -1,10 +1,4 @@
 // Menu overlay.
-//
-// A menu keeps the page it was opened from visible: instead of replacing the
-// browser it is drawn as a centered rounded box over the dimmed page, with its
-// title on the top border. A dialog shows free-form text; a picker shows a
-// list of entries with an aligned key column and a highlighted selection. The
-// bottom command line is left empty while a box menu is open.
 
 use ratatui::{
     buffer::Buffer,
@@ -73,6 +67,8 @@ fn menu_state(app: &App) -> Option<(String, MenuPresentation, Option<MenuList>)>
 
 /// Draw a free-form text menu.
 fn render_dialog(app: &mut App, frame: &mut Frame, area: Rect, title: &str) {
+    let border_style = app.term_colors.dir_style;
+
     let text = {
         let AppBlock::CommandLine(ref content, _) = app.selected_block else {
             return
@@ -103,7 +99,7 @@ fn render_dialog(app: &mut App, frame: &mut Frame, area: Rect, title: &str) {
     frame.render_widget(Clear, layout.rect);
     frame.render_widget(
         Paragraph::new(text)
-            .block(menu_block(title))
+            .block(menu_block(border_style, title))
             .scroll((row, column)),
         layout.rect
     );
@@ -118,12 +114,26 @@ fn render_picker(
     list: &MenuList
 ) {
     let key_width = list.key_width();
+    let border_style = app.term_colors.dir_style;
+    let key_style = app.term_colors.executable_style;
+    let selected = list.selected_row();
 
+    // The highlighted entry reverses its key only: the rest of the row stays
+    // readable (a tab with shells shows their count after the path).
     let rows = list.rows()
         .iter()
-        .map(|row| match row {
+        .enumerate()
+        .map(|(idx, row)| match row {
             MenuRow::Line(line) => line.clone(),
-            MenuRow::Entry(entry) => list.entry_line(entry, key_width),
+            MenuRow::Entry(entry) => {
+                let style = if Some(idx) == selected {
+                    key_style.add_modifier(Modifier::REVERSED)
+                } else {
+                    key_style
+                };
+
+                list.entry_line(entry, key_width, style)
+            },
         })
         .collect::<Vec<_>>();
 
@@ -145,7 +155,7 @@ fn render_picker(
     let (stored_row, stored_column) = app.command_scroll.unwrap_or((0, 0));
     let column = stored_column.min(limit(content_width, layout.inner_width));
 
-    let block = menu_block(title);
+    let block = menu_block(border_style, title);
     let inner = block.inner(layout.rect);
 
     // The hint lines first, the entries in the middle and the notices (an
@@ -191,10 +201,7 @@ fn render_picker(
             .collect::<Vec<_>>();
 
         frame.render_stateful_widget(
-            List::new(items)
-                .highlight_style(
-                    Style::default().add_modifier(Modifier::REVERSED)
-                ),
+            List::new(items),
             areas[1],
             &mut state
         );
@@ -217,13 +224,14 @@ fn render_picker(
     }
 }
 
-/// The box every menu is drawn in.
-fn menu_block(title: &str) -> Block<'static> {
+/// The box every menu is drawn in, its border and title in `style`.
+fn menu_block(style: Style, title: &str) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_set(border::ROUNDED)
+        .border_style(style)
         .padding(Padding::horizontal(PADDING))
-        .title_top(Line::from(format!(" {title} ")))
+        .title_top(Line::styled(format!(" {title} "), style))
 }
 
 /// The message of a dialog as an owned `Text`.
@@ -377,7 +385,7 @@ fn dim_area(buf: &mut Buffer, area: Rect) {
 mod test {
     use ratatui::{
         backend::TestBackend,
-        style::Modifier,
+        style::{Color, Modifier, Style},
         Terminal
     };
 
@@ -465,10 +473,10 @@ mod test {
         );
     }
 
-    /// A picker aligns the keys in their own column and reverses the whole
-    /// selected row.
+    /// A picker aligns the keys in their own column and reverses only the key
+    /// of the selected entry.
     #[test]
-    fn test_picker_aligns_keys_and_highlights_the_selection() {
+    fn test_picker_aligns_keys_and_highlights_the_selected_key() {
         let mut app = App::default();
         open_picker(
             &mut app,
@@ -481,7 +489,6 @@ mod test {
         );
 
         let area = Rect::new(0, 0, 40, 15);
-        let layout = frame_layout(11, 3, "Test", area).unwrap();
         let buffer = draw(&mut app, area);
 
         // `[ 1] first` / `[10] second`: the keys share one column.
@@ -497,19 +504,85 @@ mod test {
             .unwrap();
         assert_eq!(buffer[(key_x, second_row)].symbol(), "[");
 
-        // The selected row is reversed across the content; the other is not.
-        let inner_x = layout.rect.x + 1 + PADDING;
-        let inner_right = inner_x + layout.inner_width;
+        // Only the selected key is reversed; the rest of its row stays
+        // readable (a tab with shells prints their count after the path).
+        let text_x = key_x + "[ 1] ".len() as u16;
 
         assert!(
-            (inner_x..inner_right).all(|x| {
-                buffer[(x, second_row)].modifier.contains(Modifier::REVERSED)
-            })
+            buffer[(key_x, second_row)].modifier.contains(Modifier::REVERSED)
         );
         assert!(
-            (inner_x..inner_right).all(|x| {
-                !buffer[(x, first_row)].modifier.contains(Modifier::REVERSED)
-            })
+            !buffer[(text_x, second_row)].modifier.contains(Modifier::REVERSED)
+        );
+        assert!(
+            !buffer[(key_x, first_row)].modifier.contains(Modifier::REVERSED)
+        );
+    }
+
+    /// The border and the title take the directory colour, so the box stands
+    /// out from the dimmed page.
+    #[test]
+    fn test_menu_border_and_title_use_the_directory_style() {
+        let mut app = App::default();
+        app.term_colors.dir_style = Style::new().fg(Color::Blue);
+
+        open_dialog(
+            &mut app,
+            "Delete",
+            CmdContent::String(String::from("one"))
+        );
+
+        let area = Rect::new(0, 0, 40, 12);
+        let layout = frame_layout(3, 1, "Delete", area).unwrap();
+        let buffer = draw(&mut app, area);
+        let rect = layout.rect;
+
+        assert_eq!(buffer[(rect.x, rect.y)].fg, Color::Blue);
+        assert_eq!(buffer[(rect.x, rect.bottom() - 1)].fg, Color::Blue);
+
+        let title_x = (rect.left()..rect.right())
+            .find(|x| buffer[(*x, rect.y)].symbol() == "D")
+            .expect("the title is drawn");
+        assert_eq!(buffer[(title_x, rect.y)].fg, Color::Blue);
+    }
+
+    /// The key column uses the executable colour, and the selected key keeps
+    /// that colour reversed.
+    #[test]
+    fn test_picker_keys_use_the_executable_style() {
+        let mut app = App::default();
+        app.term_colors.executable_style = Style::new().fg(Color::Green);
+
+        open_picker(
+            &mut app,
+            "Test",
+            MenuList::new()
+                .entry("1", Line::raw("first"))
+                .entry("2", Line::raw("second"))
+                .select(Some(1))
+        );
+
+        let area = Rect::new(0, 0, 40, 12);
+        let buffer = draw(&mut app, area);
+
+        let first_row = (0..area.height)
+            .find(|y| row_text(&buffer, *y, 0, area.width).contains("[1] first"))
+            .unwrap();
+        let second_row = (0..area.height)
+            .find(|y| row_text(&buffer, *y, 0, area.width).contains("[2] second"))
+            .unwrap();
+
+        let key_x = (0..area.width)
+            .find(|x| buffer[(*x, first_row)].symbol() == "[")
+            .unwrap();
+
+        assert_eq!(buffer[(key_x, first_row)].fg, Color::Green);
+        assert_eq!(buffer[(key_x, second_row)].fg, Color::Green);
+        assert!(
+            buffer[(key_x, second_row)].modifier.contains(Modifier::REVERSED)
+        );
+        assert!(
+            !buffer[(key_x, first_row)].modifier.contains(Modifier::REVERSED)
         );
     }
 

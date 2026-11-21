@@ -11,6 +11,7 @@ use super::switch::{MenuList, MenuPresentation, SwitchCase, SwitchCaseData};
 use crate::app::App;
 use crate::config::{get_document, write_document};
 use crate::error::{AppError, AppResult, ErrorType, NotFoundType};
+use crate::ui::key_hints;
 
 pub fn goto_operation(app: &mut App) {
     SwitchCase::new(
@@ -93,7 +94,10 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
 /// bookmark.
 fn generate_menu(app: &App, status: char) -> MenuList {
     let mut menu = MenuList::new()
-        .header(Line::raw("[g] goto top  [+] add directory  [-] remove directory"))
+        .header(key_hints(
+            "[g] goto top  [+] add directory  [-] remove directory",
+            app.term_colors.marked_style
+        ))
         .header(Line::default());
 
     match status {

@@ -84,6 +84,36 @@ pub fn render_editing_list<'a>(
     (temp_items, sidebar_used)
 }
 
+/// Build a hint line, drawing every `[key]` token with `style`.
+pub fn key_hints(text: &str, style: Style) -> Line<'static> {
+    let mut line = Line::default();
+    let mut rest = text;
+
+    while let Some(start) = rest.find('[') {
+        let after = &rest[start + 1..];
+
+        let Some(end) = after.find(']') else {
+            break
+        };
+
+        if start > 0 {
+            line.push_span(Span::raw(rest[..start].to_owned()));
+        }
+
+        line.push_span(
+            Span::styled(rest[start..start + end + 2].to_owned(), style)
+        );
+
+        rest = &after[end + 1..];
+    }
+
+    if !rest.is_empty() {
+        line.push_span(Span::raw(rest.to_owned()));
+    }
+
+    line
+}
+
 /// Build the line of an editing name with the character under the cursor
 /// highlighted.
 ///
@@ -263,6 +293,43 @@ mod test {
             .filter(|span| span.style.bg == Some(Color::White))
             .map(|span| span.content.to_string())
             .collect()
+    }
+
+    /// Collect the text of the spans drawn with `style`.
+    fn styled_text(line: &Line, style: Style) -> Vec<String> {
+        line.spans
+            .iter()
+            .filter(|span| span.style == style)
+            .map(|span| span.content.to_string())
+            .collect()
+    }
+
+    fn line_text(line: &Line) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn test_key_hints_styles_only_the_bracketed_keys() {
+        let style = Style::new().fg(Color::Red);
+        let line = key_hints("[n] new tab  [Esc] close  [01-30] jump", style);
+
+        assert_eq!(
+            styled_text(&line, style),
+            vec!["[n]", "[Esc]", "[01-30]"]
+        );
+        assert_eq!(line_text(&line), "[n] new tab  [Esc] close  [01-30] jump");
+    }
+
+    #[test]
+    fn test_key_hints_keeps_an_unclosed_bracket_plain() {
+        let style = Style::new().fg(Color::Red);
+        let line = key_hints("[n new tab", style);
+
+        assert!(styled_text(&line, style).is_empty());
+        assert_eq!(line_text(&line), "[n new tab");
     }
 
     #[test]

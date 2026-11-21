@@ -7,6 +7,7 @@ use super::{handle_event, MenuPresentation, SwitchCase, SwitchCaseData};
 
 use crate::app::{App, MacroStatus, MacroTarget};
 use crate::error::{AppError, AppResult};
+use crate::ui::key_hints;
 use crate::utils::{Block, CmdContent};
 use crate::rt_error;
 
@@ -165,7 +166,13 @@ fn select_target(app: &mut App, target: &MacroTarget) -> AppResult<bool> {
 }
 
 fn generate_msg(app: &App) -> CmdContent {
-    let mut msg = Text::raw("[q] record macro  [e] execute macro");
+    let mut msg = Text::default();
+
+    msg.push_line(key_hints(
+        "[q] record macro  [e] execute macro",
+        app.term_colors.marked_style
+    ));
+    msg.push_line(Line::default());
 
     msg.push_line(Line::raw(
         if app.macro_attri.is_empty() {

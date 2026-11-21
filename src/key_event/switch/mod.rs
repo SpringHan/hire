@@ -182,11 +182,29 @@ impl MenuList {
     }
 
     /// The line an entry is drawn as before the horizontal scroll is applied.
-    pub fn entry_line(&self, entry: &MenuEntry, key_width: usize) -> Line<'static> {
+    ///
+    /// The `[key]` token is drawn in `key_style` (the palette's executable
+    /// style, or its reversed variant for the highlighted entry) and the space
+    /// after it stays plain, so a reversed key is a bracketed token instead of
+    /// a block which includes the padding.
+    pub fn entry_line(
+        &self,
+        entry: &MenuEntry,
+        key_width: usize,
+        key_style: Style
+    ) -> Line<'static>
+    {
         let mut line = entry.row.clone();
         line.spans.insert(
             0,
-            Span::raw(format!("[{:>width$}] ", entry.key, width = key_width))
+            Span::raw(" ")
+        );
+        line.spans.insert(
+            0,
+            Span::styled(
+                format!("[{:>width$}]", entry.key, width = key_width),
+                key_style
+            )
         );
         line
     }
@@ -202,8 +220,9 @@ impl MenuList {
     ///
     /// The command-line block holds this, so the menu still has a text body
     /// for the states which only look at the block (the quit guard, or an
-    /// error before a picker can show it).
-    fn to_text(&self) -> CmdContent {
+    /// error before a picker can show it). The keys keep `key_style`, so the
+    /// fallback reads like the picker does.
+    fn to_text(&self, key_style: Style) -> CmdContent {
         let mut text = Text::default();
 
         for line in &self.header {
@@ -216,7 +235,7 @@ impl MenuList {
             match row {
                 MenuRow::Line(line) => text.push_line(line.clone()),
                 MenuRow::Entry(entry) => {
-                    text.push_line(self.entry_line(entry, key_width));
+                    text.push_line(self.entry_line(entry, key_width, key_style));
                 },
             }
         }
@@ -261,7 +280,9 @@ impl SwitchCase {
 
         let (text, list) = match body.into() {
             MenuBody::Text(content) => (content, None),
-            MenuBody::List(list) => (list.to_text(), Some(list)),
+            MenuBody::List(list) => {
+                (list.to_text(app.term_colors.executable_style), Some(list))
+            },
         };
 
         let presentation = if list.is_some() {

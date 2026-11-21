@@ -515,7 +515,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
 | `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback; `attach_pinned` handles the pin; `open_shell` records the caller's `ShellOrigin`), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s t` shell menu, `C-s *` pin, `C-s b` attach the pin, `C-s [` scroll mode, the `y/N` answer to `shell_pending_browser`), exit cleanup, numbered selection, `leave_closed_shell` (where the view goes once a shell is gone), `App::forget_shell` (drop the pin/menu origin of a removed shell), `App::leave_shell_menu` (restore the shell the menu was opened from), `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` marks `returned_to_browser` on every running shell, re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
 | `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view), a picker: `generate_menu` lists the current tab's shells first and then the shells of the other tabs (`menu_entries`) under non-selectable section headings, and the shell number being typed highlights its entry; digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view), a picker: `generate_menu` lists the current tab's shells first and then the shells of the other tabs (`menu_entries`) under non-selectable section headings, and the shell number being typed reverses its entry's key; digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
@@ -634,7 +634,7 @@ recorded keys once — or once per target after selecting it —
 `path_history_operation` / `path_history_switch` show those paths numbered `01`
 to `30` and jump to the one whose number the user types. The menu is a picker:
 `generate_menu` puts one entry per path in the list, and the number being typed
-highlights its entry while it still names one.
+reverses its key while it still names one.
 
 **`key_event/paste_operation.rs`** — `paste_operation` / `paste_switch` present
 the paste menu (move, copy, force copy/move, symlink, clear marks);
@@ -771,8 +771,11 @@ a box), `Picker` (a `MenuList` of rows in a box, which `MenuBody::List` selects
 automatically) or `Inline` (the bottom command line only). A `MenuList` is
 built from builder calls — `header` lines, `line` rows which cannot be selected
 (section titles, continuation paths), `entry` rows with a key (`1`, `01`, `g`)
-and a `Line`, and `select(Some(entry))` for the highlighted row; `to_text`
-flattens it into the command-line block. `switch_match` invokes the handler with
+and a `Line`, and `select(Some(entry))` for the highlighted entry, whose key the
+picker reverses; `entry_line` prefixes an entry with its aligned `[key]` token
+in the given style (the palette's executable colour), and `to_text` flattens the
+list into the command-line block in the same style. `switch_match` invokes the
+handler with
 the pressed character and closes the menu when the handler returns `true`;
 `SwitchCase::title` is what the overlay draws on its border, and
 `append_notice` puts an error in a picker's footer. `traits.rs` lets arbitrary
@@ -784,7 +787,8 @@ tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
 `shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab menu as
 a picker: `generate_menu` builds the hint lines, the mode notices and one entry
 per tab (or per stored group in storage mode, whose other paths follow as
-non-selectable lines); the current tab is highlighted, and a tab number being
+non-selectable lines); the current tab's key is reversed (only the bracketed
+key, so the shell count after the path stays readable), and a tab number being
 typed takes the highlight over. `switch` handles create/next/prev/close/
 close-others and numeric selection (1-based; multi-digit when there are more
 than nine tabs). Every removal (`c`, `d` + number, `o`, and applying a stored
@@ -809,10 +813,10 @@ hidden flag and selection, never shells.
 | `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup as a rounded floating box. |
-| `ui/menu_block.rs` | Renders an open menu as a centered rounded box over the dimmed page it was opened from: a dialog draws its text, a picker draws the `MenuList`'s hint lines, a `ratatui` `List` of entries with an aligned key column and a reversed selection, and the notice lines. |
+| `ui/menu_block.rs` | Renders an open menu as a centered rounded box over the dimmed page it was opened from: a dialog draws its text, a picker draws the `MenuList`'s hint lines, a `ratatui` `List` of entries with an aligned key column in the executable colour whose selected key is reversed, and the notice lines; the border and the title use the directory colour. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
 | `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line (`[pinned]` marks the pinned shell); the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
-| `ui/utils.rs` | Builds list items and their styles from files / edit items. |
+| `ui/utils.rs` | Builds list items and their styles from files / edit items, and splits a key-hint string into styled spans. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
 or title + full-page editor), renders the title bar
@@ -850,15 +854,18 @@ visible on each side, sized to the content plus its title (`Line::width()` /
 `display_width`, so CJK text measures correctly) and clamped to the band; a
 band too small for even a minimal box is left untouched instead of dimmed
 without a menu. The `title` argument of `SwitchCase::new` is drawn on the top
-border (`╭ Delete ────╮`).
+border (`╭ Delete ────╮`), and the border and the title both use the palette's
+`dir_style`, so the box stands out from the dimmed page.
 
 A `Dialog` draws its message with a `Paragraph` scrolled by `command_scroll`. A
 `Picker` splits the box into the hint lines, the entries and the notices (an
 error appended by `SwitchCase::append_notice`): the entries are a real
-`ratatui` `List`, so the selected row is reversed and the list keeps it in
-view while it scrolls; the key of every entry is right-aligned in one column
-(`[ 1]`, `[12]`, `[g]`), and the non-selectable rows (section headings,
-continuation paths) are drawn between them. `Ctrl-p`/`Ctrl-n` page the box and
+`ratatui` `List`, which keeps the selected entry in view while it scrolls; the
+key of every entry is right-aligned in one column (`[ 1]`, `[12]`, `[g]`) and
+drawn in `executable_style`, and only the selected key is reversed, so the rest
+of the row (e.g. the shell count after a tab's path) stays readable. The
+non-selectable rows (section headings, continuation paths) are drawn between
+them. `Ctrl-p`/`Ctrl-n` page the box and
 `Ctrl-b`/`Ctrl-f` scroll it sideways: the stored column offset is applied to
 every line (including the hints) by trimming its first display columns, so a
 long path can be read without leaving the menu. The box size is only known at
@@ -908,7 +915,9 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 `render_editing_list` does the same for `EditItem`s, including the edit cursor
 (highlighted with the same byte-offset logic as the command line) and
 delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
-state line.
+state line; `key_hints` turns a hint string (`"[n] new tab  [Esc] close"`) into
+a `Line`, drawing every `[key]` token in the given style — the menus pass
+`marked_style` — and keeping an unclosed `[` plain text.
 
 **`ui/shell_block.rs`** — `render_shell(id, area, show_cursor)` resizes the
 parser and the PTY to the drawn area and copies every `vt100::Cell` into the
@@ -1258,8 +1267,10 @@ A menu is created with `SwitchCase::new(app, handler, presentation, title,
 body, data)`. It sets the command-line block to the body's text and stores the
 handler, the title and the presentation. `MenuPresentation` picks how the menu
 is shown: `Dialog` draws its text in a rounded box over the dimmed browser,
-`Picker` draws a `MenuList` in that box (hint lines, a `List` of keyed entries
-with the selected row reversed, and the notices), and `Inline` stays in the
+`Picker` draws a `MenuList` in that box (hint lines whose `[key]` tokens use
+`marked_style`, a `List` of keyed entries whose aligned keys use
+`executable_style` and whose selected key is reversed, and the notices), and
+`Inline` stays in the
 bottom command line and leaves the browser fully visible. A `MenuBody::List`
 always makes a picker. Subsequent characters are delivered to the handler until
 it returns `true`, at which point `quit_command_mode` restores the browser; an
@@ -1409,10 +1420,14 @@ cross-tab list/borrow, the `x` scope and the typed-shell highlight among
 non-selectable headings),
 `ui::shell_block::test::*` (the idle status line and the prefix hint),
 `ui::menu_block::test::*` (the centered rounded dialog with its title and the
-dimmed page around it, a picker's aligned key column and reversed selection,
-the scrolling/clamping of a list taller than the box and the selection being
+dimmed page around it, the border/title colour, a picker's aligned key column
+in the executable colour, the reversed selected key with the rest of its row
+left alone, the scrolling/clamping of a list taller than the box and the
+selection being
 scrolled back into view, an error notice below the entries, and a page too
-small for a box being left alone) and
+small for a box being left alone), `ui::utils::test::*` (the cursor rendering
+of edit names, `shorten_path`, and `key_hints` styling only the bracketed keys)
+and
 `key_event::tab::utils::test::*` (tab-removal confirmations, the tab picker's
 keys and current-tab highlight, and the stored-group rows).
 `key_event::simple_operations::test::*` covers the temp-file target

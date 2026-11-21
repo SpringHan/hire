@@ -27,12 +27,13 @@ use cmdline_popup::render_completion;
 use child_block::{render_child, render_file};
 
 pub use child_block::update_file_linenr;
+pub use utils::key_hints;
 
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     // A menu is an overlay over the page it was opened from: it keeps that
-    // page visible (dimmed) instead of replacing it. `Alt-Tab` only expands a
-    // typed command line, so an expanded block without a switch case is the
-    // full-page editor, not a menu.
+    // page visible (dimmed) instead of replacing it. `Alt-Ctrl-Tab` only
+    // expands a typed command line, so an expanded block without a switch case
+    // is the full-page editor, not a menu.
     let menu_open = app.command_expand && app.switch_case.is_some();
     let full_page = app.command_expand && !menu_open;
 
@@ -132,8 +133,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Expanded Commandline: the full-page editor (`Alt-Tab`). A menu is not an
-    // editor: it is drawn later, over the browser.
+    // Expanded Commandline: the full-page editor (`Alt-Ctrl-Tab`). A menu is
+    // not an editor: it is drawn later, over the browser.
     if full_page {
         let command_block = Block::default();
         if let cutils::Block::CommandLine(ref msg, cursor) = app.selected_block {
