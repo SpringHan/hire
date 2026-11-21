@@ -444,30 +444,34 @@ pub fn handle_event(
 
         KeyCode::Right => app.cursor_right(false),
 
-        KeyCode::Tab => {
-            if key.modifiers.contains(KeyModifiers::ALT | KeyModifiers::CONTROL) {
-                if let Block::CommandLine(_, _) = app.selected_block {
-                    // A menu picks its own presentation (the `expand`
-                    // argument of `SwitchCase::new`), so the chord only
-                    // toggles the full editor of a typed command.
-                    if app.switch_case.is_some() {
-                        return Ok(())
-                    }
-
-                    // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
-                    if app.command_expand {
-                        app.command_expand = false;
-                        app.command_scroll = None;
-                    } else {
-                        app.expand_init();
-                    }
-                }
-            } else if key.modifiers.is_empty() {
-                completion(app)?;
-            }
-        },
+        KeyCode::Tab => handle_tab(app, key.modifiers)?,
 
         _ => ()
+    }
+
+    Ok(())
+}
+
+/// Handle a `Tab` press: completion, or the full-page command-line editor.
+fn handle_tab(app: &mut App, modifiers: KeyModifiers) -> AppResult<()> {
+    if modifiers.contains(KeyModifiers::ALT) {
+        if let Block::CommandLine(_, _) = app.selected_block {
+            // A menu owns its presentation (`MenuPresentation`), so the chord
+            // only toggles the full editor of a typed command.
+            if app.switch_case.is_some() {
+                return Ok(())
+            }
+
+            // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+            if app.command_expand {
+                app.command_expand = false;
+                app.command_scroll = None;
+            } else {
+                app.expand_init();
+            }
+        }
+    } else if modifiers.is_empty() {
+        completion(app)?;
     }
 
     Ok(())
@@ -702,5 +706,64 @@ impl AppCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn app_with_command_line() -> App<'static> {
+        App {
+            selected_block: Block::CommandLine(
+                CmdContent::String(String::from(":reload")),
+                CursorPos::End
+            ),
+            ..Default::default()
+        }
+    }
+
+    /// The editor chord is `Alt-Ctrl-Tab`, but the terminal drops the Control
+    /// bit (Tab already is the `Ctrl-I` byte), so it arrives as Alt+Tab.
+    #[test]
+    fn test_alt_ctrl_tab_toggles_the_full_page_editor() {
+        let mut app = app_with_command_line();
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(app.command_expand);
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(!app.command_expand);
+
+        // A terminal which does report both modifiers still works.
+        handle_tab(&mut app, KeyModifiers::ALT | KeyModifiers::CONTROL)
+            .unwrap();
+        assert!(app.command_expand);
+    }
+
+    /// Ctrl-Tab is the plain Tab byte and stays the completion key; a menu
+    /// ignores the chord and keeps its own presentation.
+    #[test]
+    fn test_the_chord_needs_alt_and_ignores_a_menu() {
+        let mut app = app_with_command_line();
+
+        handle_tab(&mut app, KeyModifiers::CONTROL).unwrap();
+        assert!(!app.command_expand);
+
+        fn stub(_: &mut App, _: char, _: SwitchCaseData) -> AppResult<bool> {
+            Ok(true)
+        }
+
+        SwitchCase::new(
+            &mut app,
+            stub,
+            MenuPresentation::Inline,
+            "Tabs",
+            CmdContent::String(String::from("menu")),
+            SwitchCaseData::None
+        );
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(!app.command_expand);
     }
 }

@@ -534,7 +534,11 @@ early-returns an `anyhow`-backed error.
   cursor when nothing is expanded; `Ctrl-p`/`Ctrl-n` page the expanded view.
   Non-control characters go to the active `SwitchCase`, the command line, or
   the keymap. `Alt-Ctrl-Tab` toggles only a typed command line: a menu owns its
-  own presentation and ignores it.
+  own presentation and ignores it. The chord is matched as **Alt+Tab**: a
+  legacy terminal has no `Ctrl-Tab` encoding (Tab is already the `Ctrl-I`
+  byte), so `Alt-Ctrl-Tab` reaches hire as `ESC Tab` and crossterm reports it
+  with the Control bit lost; plain `Alt-Tab` never arrives because the window
+  manager consumes it.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
   into a concrete call into the operation modules. `AppCommand::PreviewSearch`
   opens the command line with `?` (like `Search` does with `/`),
