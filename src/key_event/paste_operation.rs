@@ -5,9 +5,8 @@ use std::io::ErrorKind;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::SwitchCase;
+use super::{MenuPresentation, SwitchCase};
 use super::file_operations::delete_file;
-
 use crate::{rt_error, App};
 use crate::utils::{CmdContent, CursorPos, MarkedFiles};
 use crate::error::{
@@ -34,7 +33,8 @@ pub fn paste_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         paste_switch,
-        true,
+        MenuPresentation::Dialog,
+        "Paste",
         generate_msg(app),
         super::SwitchCaseData::None
     );

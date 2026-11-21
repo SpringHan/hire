@@ -7,10 +7,11 @@ mod command_line;
 mod parent_block;
 mod current_block;
 mod cmdline_popup;
+mod menu_block;
 mod shell_block;
 
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     widgets::{Block, Paragraph},
     style::{Modifier, Stylize},
     text::{Line, Span},
@@ -28,9 +29,18 @@ use child_block::{render_child, render_file};
 pub use child_block::update_file_linenr;
 
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
+    // A menu is an overlay over the page it was opened from: it keeps that
+    // page visible (dimmed) instead of replacing it. `Alt-Tab` only expands a
+    // typed command line, so an expanded block without a switch case is the
+    // full-page editor, not a menu.
+    let menu_open = app.command_expand && app.switch_case.is_some();
+    let full_page = app.command_expand && !menu_open;
+
+    // The bottom band belongs to the command line; only the full-page editor
+    // takes it away.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(if !app.command_expand {
+        .constraints(if !full_page {
             vec![
                 Constraint::Percentage(4),
                 Constraint::Percentage(93),
@@ -89,21 +99,42 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .alignment(Alignment::Right)
         .block(item_info_block);
 
-    // Attached shell view
-    if app.selected_block.is_shell() {
+    // Attached shell view. The shell menu opened from a shell with `C-s t`
+    // keeps that shell's screen behind it (`shell_menu_origin`).
+    let menu_shell = if menu_open {
+        app.shell_menu_origin
+    } else {
+        None
+    };
+
+    let shell_background = app.selected_block.shell_id().or(menu_shell);
+
+    if let Some(id) = shell_background {
         frame.render_widget(computer_info, title_layout[0]);
         frame.render_widget(item_num_info, title_layout[1]);
 
-        // Mouse coordinates are translated against this rectangle.
-        app.shell_area = chunks[1];
-        shell_block::render_shell(app, frame, chunks[1])?;
+        if app.selected_block.is_shell() {
+            // Mouse coordinates are translated against this rectangle.
+            app.shell_area = chunks[1];
+        }
+
+        // The child's cursor is only drawn for the attached view, never over a
+        // menu box.
+        shell_block::render_shell(app, frame, chunks[1], id, !menu_open)?;
+
+        if menu_open {
+            menu_block::render_menu(app, frame, chunks[1]);
+            return Ok(())
+        }
+
         render_command_line(app, frame, chunks[2]);
 
         return Ok(());
     }
 
-    // Expanded Commandline
-    if app.command_expand {
+    // Expanded Commandline: the full-page editor (`Alt-Tab`). A menu is not an
+    // editor: it is drawn later, over the browser.
+    if full_page {
         let command_block = Block::default();
         if let cutils::Block::CommandLine(ref msg, cursor) = app.selected_block {
             let command_errors = get_command_line_style(
@@ -118,12 +149,21 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
             return Ok(())
         }
 
+        // The expanded state belongs to a command-line block; if it outlived
+        // one, drop it and let the next frame draw the restored browser
+        // instead of reading a band which is not there.
         app.quit_command_mode();
+
+        return Ok(())
     }
 
 
-    // File browser layout
-    let constraints = if let cutils::Block::Browser(true) = app.selected_block {
+    // File browser layout. The page behind a menu (or behind a typed command
+    // line) is the browser the user was in, and its layout follows the
+    // directory rather than the block which owns the input, so the root
+    // directory is recognized by the path.
+    let root = app.root();
+    let constraints = if root {
         vec![
             Constraint::Percentage(50),
             Constraint::Percentage(50)
@@ -155,31 +195,48 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     render_parent(app, frame, browser_layout[0]);
     
     // Child Block
-    match app.selected_block {
-        cutils::Block::Browser(true) => {
-            if app.file_content.is_some() {
-                render_file(frame, app, browser_layout[1])?;
-                render_command_line(app, frame, chunks[2]);
-                return Ok(())
-            }
-        },
-        _ => {
-            if app.file_content.is_some() {
-                render_file(frame, app, browser_layout[2])?;
-            } else {
-                render_child(app, frame, browser_layout[2]);
-            }
+    if root {
+        // The root directory has two columns: the preview, when there is one,
+        // is the second one and there is no current column below it.
+        if app.file_content.is_some() {
+            render_file(frame, app, browser_layout[1])?;
+
+            finish_browser(app, frame, chunks[1], chunks[2], menu_open);
+
+            return Ok(())
         }
+    } else if app.file_content.is_some() {
+        render_file(frame, app, browser_layout[2])?;
+    } else {
+        render_child(app, frame, browser_layout[2]);
     }
 
     // Current Block
     render_current(app, frame, browser_layout[1]);
 
-    // Command Block
-    render_command_line(app, frame, chunks[2]);
-    render_completion(app, frame, chunks[2]);
+    finish_browser(app, frame, chunks[1], chunks[2], menu_open);
 
     Ok(())
+}
+
+/// Finish the frame after the browser has been drawn: the menu overlay, or the
+/// bottom command line with its completion popup.
+///
+/// A menu leaves the bottom line empty, like the expanded page did before it.
+fn finish_browser(
+    app: &mut App,
+    frame: &mut Frame,
+    browser: Rect,
+    command_line: Rect,
+    menu_open: bool
+) {
+    if menu_open {
+        menu_block::render_menu(app, frame, browser);
+        return
+    }
+
+    render_command_line(app, frame, command_line);
+    render_completion(app, frame, command_line);
 }
 
 fn check_app_error(app: &mut App) {
@@ -192,6 +249,23 @@ fn check_app_error(app: &mut App) {
         // error in its status line instead.
         if app.selected_block.is_shell() {
             app.shell_notice = Some(err_msg);
+            app.app_error.clear();
+            return ()
+        }
+
+        // A picker shows the error below its entries. Its text body is only a
+        // fallback for the states which look at the block, so the message is
+        // not appended there as well.
+        let picker_notice = matches!(
+            app.selected_block,
+            SBlock::CommandLine(_, CursorPos::None)
+        ) && app
+            .switch_case
+            .as_mut()
+            .is_some_and(|case| case.append_notice(err_msg.clone()));
+
+        if picker_notice {
+            app.command_error = true;
             app.app_error.clear();
             return ()
         }
@@ -359,5 +433,76 @@ mod test {
         assert_eq!(title_bar_path(&app), format!("{plain}/"));
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A picker shows an error below its entries instead of appending it to
+    /// the command-line text, which the picker does not draw.
+    #[test]
+    fn test_error_of_a_picker_is_shown_in_its_footer() {
+        use crate::error::AppResult;
+        use crate::key_event::{
+            MenuList, MenuPresentation, SwitchCase, SwitchCaseData,
+        };
+
+        fn stub(_: &mut App, _: char, _: SwitchCaseData) -> AppResult<bool> {
+            Ok(true)
+        }
+
+        let mut app = App::default();
+        SwitchCase::new(
+            &mut app,
+            stub,
+            MenuPresentation::Picker,
+            "Test",
+            MenuList::new().entry("1", Line::raw("first")),
+            SwitchCaseData::None
+        );
+
+        app.app_error.add_error(anyhow::anyhow!("cannot attach"));
+        check_app_error(&mut app);
+
+        let case = app.switch_case.as_ref().expect("the menu stays open");
+        let footer = case.list().expect("a picker").footer_lines();
+        let text: String = footer
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(text.contains("cannot attach"), "{text}");
+        assert!(app.command_error);
+        assert!(app.app_error.is_empty());
+    }
+
+    /// A dialog still keeps its error in the text it draws itself.
+    #[test]
+    fn test_error_of_a_dialog_stays_in_its_text() {
+        use crate::error::AppResult;
+        use crate::key_event::{MenuPresentation, SwitchCase, SwitchCaseData};
+
+        fn stub(_: &mut App, _: char, _: SwitchCaseData) -> AppResult<bool> {
+            Ok(true)
+        }
+
+        let mut app = App::default();
+        SwitchCase::new(
+            &mut app,
+            stub,
+            MenuPresentation::Dialog,
+            "Test",
+            CmdContent::String(String::from("base")),
+            SwitchCaseData::None
+        );
+
+        app.app_error.add_error(anyhow::anyhow!("boom"));
+        check_app_error(&mut app);
+
+        let cutils::Block::CommandLine(CmdContent::String(text), _) = &app.selected_block else {
+            panic!("the dialog text is still in the block")
+        };
+
+        assert!(text.contains("boom"), "{text}");
+        assert!(app.command_error);
+        assert!(app.app_error.is_empty());
     }
 }

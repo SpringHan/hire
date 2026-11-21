@@ -56,6 +56,8 @@ Hire is an event-driven application built around one mutable state object, `App`
   - Block::Browser | Block::CommandLine | Block::Shell
 - `ui::ui` — Only read state of App and render ui
   - Render areas：parent / current / child / file / cmdline
+  - Menus: a centered box (`ui/menu_block`) over the dimmed page they were
+    opened from — a dialog of text, or a picker with a selectable list
   - Shell view: title / shell screen (`ui/shell_block`) / shell status line
 
 ### Data stream
@@ -100,11 +102,12 @@ Key architectural traits:
    characters to the active `SwitchCase` menu, to the command line, or through
    the keymap into an `AppCommand`, which is executed by `AppCommand::execute`.
 
-5. **Menus via `SwitchCase`.** Every "operation page" (paste, delete, tab,
+5. **Menus via `SwitchCase`.** Every operation menu (paste, delete, tab,
    goto, macro, shell, …) is a temporary modal implemented with `SwitchCase`: it
    replaces the command line with a help message and routes the next character
-   to a handler function pointer. Extra state is passed through
-   `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
+   to a handler function pointer. A menu is drawn as a dialog box, a picker
+   list, or a single bottom line (`MenuPresentation`); see §3. Extra state is
+   passed through `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
 
 6. **Asynchronous work is channel-based.** Incremental file search, the text
    preview's search and image decoding/resizing run on worker threads and
@@ -512,7 +515,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
 | `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback; `attach_pinned` handles the pin; `open_shell` records the caller's `ShellOrigin`), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s t` shell menu, `C-s *` pin, `C-s b` attach the pin, `C-s [` scroll mode, the `y/N` answer to `shell_pending_browser`), exit cleanup, numbered selection, `leave_closed_shell` (where the view goes once a shell is gone), `App::forget_shell` (drop the pin/menu origin of a removed shell), `App::leave_shell_menu` (restore the shell the menu was opened from), `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` marks `returned_to_browser` on every running shell, re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
 | `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view): lists the current tab's shells first and then the shells of the other tabs (`menu_entries`); digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view), a picker: `generate_menu` lists the current tab's shells first and then the shells of the other tabs (`menu_entries`) under non-selectable section headings, and the shell number being typed highlights its entry; digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
@@ -526,9 +529,12 @@ early-returns an `anyhow`-backed error.
 - `handle_event` dispatches everything to `key_event/shell/view.rs` while
   `selected_block` is `Block::Shell`. Otherwise it handles modifier chords
   (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`, `Ctrl-Backspace`, `Alt-f` / `Alt-b`),
-  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Tab`
-  expand). Non-control characters go to the active `SwitchCase`, the command
-  line, or the keymap.
+  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Ctrl-Tab`
+  expand). `Ctrl-b`/`Ctrl-f` scroll the expanded view sideways and only move the
+  cursor when nothing is expanded; `Ctrl-p`/`Ctrl-n` page the expanded view.
+  Non-control characters go to the active `SwitchCase`, the command line, or
+  the keymap. `Alt-Ctrl-Tab` toggles only a typed command line: a menu owns its
+  own presentation and ignores it.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
   into a concrete call into the operation modules. `AppCommand::PreviewSearch`
   opens the command line with `?` (like `Search` does with `/`),
@@ -607,24 +613,28 @@ uses; only the names of the `FileSaver`s are handed to it.
 **`key_event/goto_operation.rs`** — the bookmark menu. `goto_switch` handles
 jumping to a stored directory and entering `+`/`-` sub-modes to add/remove a
 bookmark by key; changes are persisted through `config` and read back by
-`read_config`.
+`read_config`. `generate_menu` builds the picker: a hint line, the mode notice
+(`Adding Directory!` / `Deleting Directory!`) and one entry per bookmark keyed
+by its shortcut.
 
 **`key_event/interaction.rs`** — launches external tools: `fzf_jump` (fuzzy
 find, then jump to the chosen file), `rg_jump` (run the bundled `hire-rg.sh`)
 and `vim_diff` (diff the selected and marked files).
 
-**`key_event/macro_page.rs`** — `macro_operation` opens the macro page,
+**`key_event/macro_page.rs`** — `macro_operation` opens the macro menu,
 `macro_switch` starts recording on `q` and requests execution on `e`
 (collecting marked files as targets when any exist), `execute_macro` replays the
 recorded keys once — or once per target after selecting it —
 `collect_marked_targets` / `select_target` implement that per-file loop, and
-`generate_msg` builds the page text.
+`generate_msg` builds the dialog text.
 
 **`key_event/path_history.rs`** — keeps the paths the user jumped from in
 `App::path_history` (at most 30, newest last, duplicates moved to the end).
 `goto_prev_path` jumps back to the last stored path and pushes the path it left;
 `path_history_operation` / `path_history_switch` show those paths numbered `01`
-to `30` and jump to the one whose number the user types.
+to `30` and jump to the one whose number the user types. The menu is a picker:
+`generate_menu` puts one entry per path in the list, and the number being typed
+highlights its entry while it still names one.
 
 **`key_event/paste_operation.rs`** — `paste_operation` / `paste_switch` present
 the paste menu (move, copy, force copy/move, symlink, clear marks);
@@ -728,12 +738,12 @@ coordinates from the outer terminal into the shell area. `sync_terminal_modes`
 is called every loop: it captures the mouse (SGR-encoded) only while the child
 wants it and only while the view is attached, and enables bracketed paste on
 the outer terminal when the child does; `disable_terminal_modes` restores both
-before hire exits. `menu.rs` is the `T` page listing the
-tab's shells, each labelled with the program running in it. The screen is
-rendered by `ui/shell_block.rs`.
+before hire exits. `menu.rs` is the picker (`T`, or `C-s t` from the shell)
+listing the tab's shells under their tab headings, each labelled with the
+program running in it. The screen is rendered by `ui/shell_block.rs`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
-file's full path in a read-only page), `output_path` (run the configured
+file's full path in a read-only dialog box), `output_path` (run the configured
 `gui_file_open_cmd` with the selected path or the current directory appended
 when it's set, otherwise write that path to the temp/output file; both honor
 `quit_after_output`; it hands the terminal to `execute_command` so the UI is
@@ -753,20 +763,34 @@ unprivileged one — there is no euid juggling in either process. Mounted shell
 sessions are **not** transferred (they live in the parent process); they keep
 running while the root instance is open and are still mounted when it returns.
 
-**`key_event/switch/`** — the generic menu framework. `SwitchCase::new` installs
-a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;
-`switch_match` invokes the handler with the pressed character and closes the
-page when the handler returns `true`. `traits.rs` lets arbitrary structs
-(`TabState`) travel through `SwitchCaseData::Struct` as `Box<dyn SwitchStruct>`.
+**`key_event/switch/`** — the generic menu framework. `SwitchCase::new(app,
+handler, presentation, title, body, data)` installs a function pointer plus
+`SwitchCaseData`, puts the menu text into the command-line block and remembers
+the title. `presentation` is a `MenuPresentation`: `Dialog` (free-form text in
+a box), `Picker` (a `MenuList` of rows in a box, which `MenuBody::List` selects
+automatically) or `Inline` (the bottom command line only). A `MenuList` is
+built from builder calls — `header` lines, `line` rows which cannot be selected
+(section titles, continuation paths), `entry` rows with a key (`1`, `01`, `g`)
+and a `Line`, and `select(Some(entry))` for the highlighted row; `to_text`
+flattens it into the command-line block. `switch_match` invokes the handler with
+the pressed character and closes the menu when the handler returns `true`;
+`SwitchCase::title` is what the overlay draws on its border, and
+`append_notice` puts an error in a picker's footer. `traits.rs` lets arbitrary
+structs (`TabState`) travel through `SwitchCaseData::Struct` as `Box<dyn
+SwitchStruct>`.
 
 **`key_event/tab/`** — multi-tab support. `TabList` stores one `Tab` per open
 tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
-`shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab page;
-`switch` handles create/next/prev/close/close-others and numeric selection
-(1-based; multi-digit when there are more than nine tabs). Every removal (`c`,
-`d` + number, `o`, and applying a stored group) checks the affected tabs first: a mounted shell turns
-the action into a `SwitchCase` confirmation (`TabAction` in `TabState`, drawn
-like the other y/N pages, `expand: false`), and only `y` runs it — any other key
+`shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab menu as
+a picker: `generate_menu` builds the hint lines, the mode notices and one entry
+per tab (or per stored group in storage mode, whose other paths follow as
+non-selectable lines); the current tab is highlighted, and a tab number being
+typed takes the highlight over. `switch` handles create/next/prev/close/
+close-others and numeric selection (1-based; multi-digit when there are more
+than nine tabs). Every removal (`c`, `d` + number, `o`, and applying a stored
+group) checks the affected tabs first: a mounted shell turns
+the action into a `SwitchCase` inline confirmation (`TabAction` in `TabState`,
+drawn in the bottom command line), and only `y` runs it — any other key
 returns to the tab menu. Confirmed removals call `App::close_tab_shells`, which
 detaches first when the attached shell belongs to a cleared tab.
 `save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage named tab
@@ -785,21 +809,63 @@ hidden flag and selection, never shells.
 | `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup as a rounded floating box. |
+| `ui/menu_block.rs` | Renders an open menu as a centered rounded box over the dimmed page it was opened from: a dialog draws its text, a picker draws the `MenuList`'s hint lines, a `ratatui` `List` of entries with an aligned key column and a reversed selection, and the notice lines. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
 | `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line (`[pinned]` marks the pinned shell); the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
 | `ui/utils.rs` | Builds list items and their styles from files / edit items. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
-or title + expanded command line), renders the title bar
+or title + full-page editor), renders the title bar
 (`user@host`, shortened path, selected file name) and the item statistics,
-calls `check_app_error` (turns `app.app_error` into a red command-line message),
+calls `check_app_error` (turns `app.app_error` into a red command-line message,
+a notice line in a picker's box, or the red text of a dialog),
 then lays out and draws the parent/current/child blocks, the command line and
 the completion popup. `title_bar_path` canonicalises the browser path to exactly
 one trailing separator, so a path which still ends with `/` does not render as
-`/home//name`. When `selected_block` is `Block::Shell`, it short-circuits
-to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
-shell screen and the bottom band is the shell status line. The title's tab badge
-shows the mounted shell count (`|1:2|`).
+`/home//name`. The bottom command-line band is only dropped for the full-page
+editor (`Alt-Ctrl-Tab`: `command_expand` without a `SwitchCase`, `full_page`); a
+menu keeps the three bands, draws the browser normally and puts its box over the
+middle band. `menu_open` (`command_expand` with a `SwitchCase`) tells the two
+apart. When `selected_block` is `Block::Shell`, it short-circuits to
+`ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
+shell screen and the bottom band is the shell status line. A menu opened from an
+attached shell (`C-s t`) has no `Block::Shell` any more, so the shell it was
+opened from is taken from `app.shell_menu_origin` and its screen stays behind
+the box. The title's tab badge shows the mounted shell count (`|1:2|`).
+
+The browser behind a menu (or behind a typed command line) is laid out by the
+directory rather than by the block which owns the input: `ui/mod.rs` checks
+`app.root()` instead of `Block::Browser(true)`, because a menu replaces
+`selected_block` with `CommandLine` and the layout (the root directory's two
+columns, the preview in the second one) must not change when a menu opens or a
+command is typed.
+
+**`ui/menu_block.rs`** — draws an open menu as an overlay instead of a page of
+its own. `ui/mod.rs` calls `render_menu` after the browser (or the shell screen
+behind a `C-s t` menu) has been drawn, so a menu keeps the file list visible
+underneath: every cell of the band gets `Modifier::DIM`, then the box is
+cleared and drawn, so the browser recedes while the menu stays at full
+contrast. The box is centered in the band with one row/column of the page left
+visible on each side, sized to the content plus its title (`Line::width()` /
+`display_width`, so CJK text measures correctly) and clamped to the band; a
+band too small for even a minimal box is left untouched instead of dimmed
+without a menu. The `title` argument of `SwitchCase::new` is drawn on the top
+border (`╭ Delete ────╮`).
+
+A `Dialog` draws its message with a `Paragraph` scrolled by `command_scroll`. A
+`Picker` splits the box into the hint lines, the entries and the notices (an
+error appended by `SwitchCase::append_notice`): the entries are a real
+`ratatui` `List`, so the selected row is reversed and the list keeps it in
+view while it scrolls; the key of every entry is right-aligned in one column
+(`[ 1]`, `[12]`, `[g]`), and the non-selectable rows (section headings,
+continuation paths) are drawn between them. `Ctrl-p`/`Ctrl-n` page the box and
+`Ctrl-b`/`Ctrl-f` scroll it sideways: the stored column offset is applied to
+every line (including the hints) by trimming its first display columns, so a
+long path can be read without leaving the menu. The box size is only known at
+render time, so `render_menu` clamps the stored offsets to the content too: a
+shorter menu (or a re-opened one) never stays scrolled past its end. `Inline`
+menus do not use this path; they answer in the bottom command line and keep the
+browser and the command line untouched.
 
 **Rounded browser frame.** The browser's three columns are drawn as one rounded
 frame, not as three separate boxes: the columns are adjacent, so they must
@@ -844,14 +910,17 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
 state line.
 
-**`ui/shell_block.rs`** — `render_shell` resizes the parser and the PTY to the
-drawn area and copies every `vt100::Cell` into the ratatui buffer (fg/bg
-colours, bold/italic/underline/inverse; wide-cell continuations are skipped).
+**`ui/shell_block.rs`** — `render_shell(id, area, show_cursor)` resizes the
+parser and the PTY to the drawn area and copies every `vt100::Cell` into the
+ratatui buffer (fg/bg colours, bold/italic/underline/inverse; wide-cell
+continuations are skipped).
 A blank cell is written as a real space: `vt100::Cell::contents()` is empty for
 cleared cells and an empty symbol would not erase the old character on the
 outer terminal. `screen.cell()` follows the scrollback offset set by
 `key_event/shell/scroll.rs`, so the same loop renders the history; the child's
-cursor is only placed with `Frame::set_cursor_position` while the offset is 0.
+cursor is only placed with `Frame::set_cursor_position` while the offset is 0,
+and only when `show_cursor` is true (`ui/mod.rs` passes `false` for the screen
+which is only the background of the shell menu).
 `shell_status_lines` builds the shell's left/right status text (the program
 running in the shell — `vim` while vim is open, the shell's own name at its
 prompt — its start directory, position, prefix hint, the scroll-mode hint
@@ -1185,11 +1254,18 @@ sudo_session (keybinding, e.g. `Z`)
 
 ### Menus (`SwitchCase`)
 
-A menu is created with `SwitchCase::new(app, handler, expand, message, data)`.
-It sets the command-line block to the (usually multi-line) help text and stores
-the handler. Subsequent characters are delivered to the handler until it returns
-`true`, at which point `quit_command_mode` restores the browser. Complex menu
-state (e.g. tab operations) is boxed in `SwitchCaseData::Struct`.
+A menu is created with `SwitchCase::new(app, handler, presentation, title,
+body, data)`. It sets the command-line block to the body's text and stores the
+handler, the title and the presentation. `MenuPresentation` picks how the menu
+is shown: `Dialog` draws its text in a rounded box over the dimmed browser,
+`Picker` draws a `MenuList` in that box (hint lines, a `List` of keyed entries
+with the selected row reversed, and the notices), and `Inline` stays in the
+bottom command line and leaves the browser fully visible. A `MenuBody::List`
+always makes a picker. Subsequent characters are delivered to the handler until
+it returns `true`, at which point `quit_command_mode` restores the browser; an
+error stays open, goes to the picker's footer (or the dialog's text) and is
+dismissed by the next key. Complex menu state (e.g. tab operations) is boxed in
+`SwitchCaseData::Struct`.
 
 ### Background work
 
@@ -1319,19 +1395,30 @@ leading-dot and multi-byte cases), `key_event::file_operations::test::*`
 `test_enter_insert_before_extension_of_marked_items` (the edit-mode
 `append_filename`: insert mode, one cursor per active item, the extension
 untouched),
-`key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`,
+`key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`
+and `test_menu_lists_the_bookmarks` (the bookmark picker's keyed entries),
 `key_event::tab::test::*` (a broken stored tab group is skipped, a missing
 section is accepted, `clear_storage`),
 `key_event::command_line::test_completion_suggests_builtin_commands` (`:reload`
 completes to `reload_config`), `key_event::command_line::test_delete_to_end`
 (`Ctrl-k` keeps what is before the cursor and resets the completion popup),
-`key_event::shell::menu::test::*` (the shell
-menu's `D` confirmation, the cross-tab list/borrow and the `x` scope),
-`ui::shell_block::test::*` (the idle status line and the prefix
-hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
+`key_event::path_history::test::*` (the path picker's `01`-numbered entries and
+the typed-number highlight, and an empty history being a hint),
+`key_event::shell::menu::test::*` (the shell menu's `D` confirmation, the
+cross-tab list/borrow, the `x` scope and the typed-shell highlight among
+non-selectable headings),
+`ui::shell_block::test::*` (the idle status line and the prefix hint),
+`ui::menu_block::test::*` (the centered rounded dialog with its title and the
+dimmed page around it, a picker's aligned key column and reversed selection,
+the scrolling/clamping of a list taller than the box and the selection being
+scrolled back into view, an error notice below the entries, and a page too
+small for a box being left alone) and
+`key_event::tab::utils::test::*` (tab-removal confirmations, the tab picker's
+keys and current-tab highlight, and the stored-group rows).
 `key_event::simple_operations::test::*` covers the temp-file target
 normalisation (`/home/` → `/home`) and `ui::test::*` the title's single
-trailing separator.
+trailing separator plus the error routing (a picker error goes to its footer,
+a dialog error stays in its own text).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

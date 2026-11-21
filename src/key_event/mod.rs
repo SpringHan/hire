@@ -51,7 +51,9 @@ pub use sudo_session::SessionTabs;
 pub use macro_page::execute_macro;
 pub use edit::{EditMode, EditItem};
 pub use simple_operations::output_path;
-pub use switch::{SwitchCase, SwitchCaseData};
+pub use switch::{
+    MenuList, MenuPresentation, MenuRow, SwitchCase, SwitchCaseData
+};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
 pub use shell::{
@@ -103,18 +105,40 @@ pub fn handle_event(
                     KeyModifiers::CONTROL => {
                         match c {
                             'g' => app.command_completion.hide(),
-                            'b' | 'a' => {
-                                if app.edit_mode.inserting() {
-                                    app.edit_mode.cursor_move(false, c == 'a')?;
+
+                            // `Ctrl-b`/`Ctrl-f` scroll the expanded view
+                            // sideways; in the command line (or edit mode)
+                            // they move the cursor instead. `Ctrl-a`/`Ctrl-e`
+                            // always move it to the beginning/end.
+                            'b' => {
+                                if app.command_expand {
+                                    app.expand_scroll(Direction::Left);
+                                } else if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(false, false)?;
                                 } else {
-                                    app.cursor_left(c == 'a');
+                                    app.cursor_left(false);
                                 }
                             },
-                            'f' | 'e' => {
-                                if app.edit_mode.inserting() {
-                                    app.edit_mode.cursor_move(true, c == 'e')?;
+                            'f' => {
+                                if app.command_expand {
+                                    app.expand_scroll(Direction::Right);
+                                } else if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(true, false)?;
                                 } else {
-                                    app.cursor_right(c == 'e');
+                                    app.cursor_right(false);
+                                }
+                            },
+                            'a' | 'e' => {
+                                let to_end = c == 'e';
+
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(to_end, true)?;
+                                } else {
+                                    if to_end {
+                                        app.cursor_right(true);
+                                    } else {
+                                        app.cursor_left(true);
+                                    }
                                 }
                             },
 
@@ -379,7 +403,8 @@ pub fn handle_event(
                 SwitchCase::new(
                     app,
                     edit::save_edit,
-                    false,
+                    MenuPresentation::Inline,
+                    "Edit",
                     edit::generate_msg(),
                     SwitchCaseData::None
                 );
@@ -415,41 +440,30 @@ pub fn handle_event(
             }
         },
 
-        KeyCode::Left => {
-            if app.command_expand && key.modifiers == KeyModifiers::ALT {
-                app.expand_scroll(Direction::Left);
-                return Ok(())
-            }
-            app.cursor_left(false)
-        },
+        KeyCode::Left => app.cursor_left(false),
 
-        KeyCode::Right => {
-            if app.command_expand && key.modifiers == KeyModifiers::ALT {
-                app.expand_scroll(Direction::Right);
-                return Ok(())
-            }
-            app.cursor_right(false)
-        },
+        KeyCode::Right => app.cursor_right(false),
 
         KeyCode::Tab => {
-            match key.modifiers {
-                KeyModifiers::ALT => {
-                    if let Block::CommandLine(_, _) = app.selected_block {
-                        // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
-                        if app.command_expand {
-                            app.command_expand = false;
-                            app.command_scroll = None;
-                        } else {
-                            app.expand_init();
-                        }
+            if key.modifiers.contains(KeyModifiers::ALT | KeyModifiers::CONTROL) {
+                if let Block::CommandLine(_, _) = app.selected_block {
+                    // A menu picks its own presentation (the `expand`
+                    // argument of `SwitchCase::new`), so the chord only
+                    // toggles the full editor of a typed command.
+                    if app.switch_case.is_some() {
+                        return Ok(())
                     }
-                },
 
-                KeyModifiers::NONE => {
-                    completion(app)?;
-                },
-
-                _ => ()
+                    // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+                    if app.command_expand {
+                        app.command_expand = false;
+                        app.command_scroll = None;
+                    } else {
+                        app.expand_init();
+                    }
+                }
+            } else if key.modifiers.is_empty() {
+                completion(app)?;
             }
         },
 

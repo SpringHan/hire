@@ -3,7 +3,7 @@
 use ratatui::text::{Line, Text};
 use ratatui::DefaultTerminal;
 
-use super::{handle_event, SwitchCase, SwitchCaseData};
+use super::{handle_event, MenuPresentation, SwitchCase, SwitchCaseData};
 
 use crate::app::{App, MacroStatus, MacroTarget};
 use crate::error::{AppError, AppResult};
@@ -22,7 +22,8 @@ pub fn macro_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         macro_switch,
-        true,
+        MenuPresentation::Dialog,
+        "Macro",
         generate_msg(app),
         SwitchCaseData::None
     );

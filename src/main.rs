@@ -313,7 +313,7 @@ fn check_quit_condition(app: &mut App) -> QuitCheckRes {
     }
 
     use ratatui::style::Stylize;
-    use crate::key_event::{SwitchCase, SwitchCaseData};
+    use crate::key_event::{MenuPresentation, SwitchCase, SwitchCaseData};
 
     let mounted = app.shell_sessions.alive_count();
 
@@ -333,7 +333,8 @@ fn check_quit_condition(app: &mut App) -> QuitCheckRes {
         SwitchCase::new(
             app,
             really_quit,
-            false,
+            MenuPresentation::Inline,
+            "Quit",
             crate::utils::CmdContent::Text(Text::raw(message).red()),
             SwitchCaseData::None
         );

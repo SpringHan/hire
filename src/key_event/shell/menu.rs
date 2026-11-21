@@ -5,15 +5,15 @@
 // follows the `SwitchCase` convention used by the tab menu.
 
 use ratatui::{
-    style::{Modifier, Stylize},
-    text::{Line, Span, Text},
+    style::Stylize,
+    text::{Line, Span},
 };
 
 use crate::{
     app::App,
     error::AppResult,
-    key_event::{SwitchCase, SwitchCaseData, TabId},
-    utils::{CmdContent, ShellId},
+    key_event::{MenuList, MenuPresentation, SwitchCase, SwitchCaseData, TabId},
+    utils::ShellId,
 };
 
 use super::view::{attach, open_shell};
@@ -57,8 +57,9 @@ pub fn shell_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         shell_switch,
-        true,
-        generate_msg(app, &state),
+        MenuPresentation::Picker,
+        "Shells",
+        generate_menu(app, &state),
         SwitchCaseData::Struct(Box::new(state)),
     );
 
@@ -189,13 +190,14 @@ fn menu_origin(app: &App) -> ShellOrigin {
 }
 
 fn reopen(app: &mut App, state: ShellMenuState) {
-    let msg = generate_msg(app, &state);
+    let menu = generate_menu(app, &state);
 
     SwitchCase::new(
         app,
         shell_switch,
-        true,
-        msg,
+        MenuPresentation::Picker,
+        "Shells",
+        menu,
         SwitchCaseData::Struct(Box::new(state)),
     );
 }
@@ -263,17 +265,19 @@ fn selected_index(
     None
 }
 
-fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
-    // While a confirmation is open the key list is irrelevant: every key either
-    // confirms (`y`) or cancels.
-    let mut text = if state.clear_pending.is_some() {
-        Text::default()
-    } else {
-        Text::raw(
+/// The shell menu: the hint line, the active mode and one entry per shell,
+/// grouped by tab.
+fn generate_menu(app: &App, state: &ShellMenuState) -> MenuList {
+    let mut menu = MenuList::new();
+
+    // While a confirmation is open the key list is irrelevant: every key
+    // either confirms (`y`) or cancels.
+    if state.clear_pending.is_none() {
+        menu = menu.header(Line::raw(
             "[n] new shell  [x] kill shell  [D] clear shells of this tab  \
-             [0-9] attach shell  [Esc] close\n",
-        )
-    };
+             [0-9] attach shell  [Esc] close"
+        ));
+    }
 
     if let Some(tab_id) = state.clear_pending {
         let count = app
@@ -292,27 +296,27 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
             .map(|idx| idx + 1)
             .unwrap_or(0);
 
-        text.push_line(
+        menu = menu.header(
             Line::raw(format!(
                 "Kill all {count} shell(s) of tab {tab_number}? (y/N)"
             ))
-            .red(),
+            .red()
         );
     }
 
     if state.deleting {
-        text.push_line(
-            Line::raw("Delete mode: type the shell number of this tab!").red(),
+        menu = menu.header(
+            Line::raw("Delete mode: type the shell number of this tab!").red()
         );
     }
 
     if !state.selecting.is_empty() {
-        text.push_line(
-            Line::raw(format!("Selecting shell: {}_", state.selecting)).yellow(),
+        menu = menu.header(
+            Line::raw(format!("Selecting shell: {}_", state.selecting)).yellow()
         );
     }
 
-    text.push_line("");
+    menu = menu.header(Line::default());
 
     let current = app.tab_list.current_tab().id;
     let current_index = app.tab_list.current();
@@ -330,15 +334,17 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
     let mut number = 0;
 
     for (tab_idx, tab, is_current) in sections {
-        if is_current {
-            text.push_line(Line::raw(format!("This tab (tab {})", tab_idx + 1)).bold());
+        let title = if is_current {
+            format!("This tab (tab {})", tab_idx + 1)
         } else {
-            text.push_line(Line::raw(format!("Tab {}", tab_idx + 1)).bold());
-        }
+            format!("Tab {}", tab_idx + 1)
+        };
+
+        menu = menu.line(Line::raw(title).bold());
 
         if tab.shells.is_empty() {
-            text.push_line(Line::raw("  (no shell)"));
-            text.push_line(Line::default());
+            menu = menu.line(Line::raw("  (no shell)"));
+            menu = menu.line(Line::default());
             continue
         }
 
@@ -362,35 +368,34 @@ fn generate_msg(app: &App, state: &ShellMenuState) -> CmdContent {
                 " "
             };
 
-            let mut line = Line::default();
-            line.push_span(
-                Span::raw(format!("  [{}] ", number))
-                    .add_modifier(Modifier::BOLD),
-            );
-            line.push_span(Span::raw(format!("{marker} {title}  {cwd}")));
+            let mut row = Line::default();
+            row.push_span(Span::raw(format!("{marker} {title}  {cwd}")));
 
             // `C-s b` and the browser's `attach_pinned` always attach this one,
             // so the list has to show which shell that is.
             if app.pinned_shell == Some(*id) {
-                line.push_span(
-                    Span::raw("  [pinned]")
-                        .yellow()
-                        .add_modifier(Modifier::BOLD),
-                );
+                row.push_span(Span::raw("  [pinned]").yellow().bold());
             }
 
             if !alive {
-                line.push_span(Span::raw("  (exited)").red());
+                row.push_span(Span::raw("  (exited)").red());
             }
 
-            text.push_line(line);
+            menu = menu.entry(number.to_string(), row);
             number += 1;
         }
 
-        text.push_line(Line::default());
+        menu = menu.line(Line::default());
     }
 
-    CmdContent::Text(text)
+    // The number being typed highlights the shell it names.
+    let selected = state
+        .selecting
+        .parse::<usize>()
+        .ok()
+        .filter(|number| *number < menu.entry_count());
+
+    menu.select(selected)
 }
 
 #[cfg(test)]
@@ -399,7 +404,7 @@ mod test {
 
     use crate::{
         key_event::{shell::GraphicsSupport, switch::switch_match},
-        utils::Block,
+        utils::{Block, CmdContent},
     };
 
     use super::*;
@@ -656,5 +661,36 @@ mod test {
         assert!(app.switch_case.is_some());
         assert!(!menu_text(&app).contains("Kill all"));
         assert!(app.tab_list.current_tab().shells.is_empty());
+    }
+
+    /// The typed shell number highlights the shell it names; the tab headings
+    /// stay non-selectable rows.
+    #[test]
+    fn test_menu_highlights_the_typed_shell() {
+        if !Path::new("/bin/sh").exists() {
+            return
+        }
+
+        let mut app = App::default();
+        mount_shell(&mut app);
+        mount_shell(&mut app);
+
+        let mut state = ShellMenuState::default();
+        state.selecting = String::from("1");
+
+        let menu = generate_menu(&app, &state);
+
+        assert_eq!(menu.entry_count(), 2);
+
+        // The selected entry is the second shell row; the section heading
+        // before the entries is not selectable, so the row index is not the
+        // entry index.
+        let entry_rows = menu.rows().iter().enumerate()
+            .filter(|(_, row)| matches!(row, crate::key_event::MenuRow::Entry(_)))
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+
+        assert_eq!(menu.selected_row(), entry_rows.get(1).copied());
+        assert!(entry_rows[0] > 0, "a heading precedes the entries");
     }
 }

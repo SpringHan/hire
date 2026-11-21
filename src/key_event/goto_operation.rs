@@ -3,13 +3,12 @@
 use std::path::PathBuf;
 
 use toml_edit::{value, DocumentMut};
-use ratatui::{style::Stylize, text::{Line, Text}};
+use ratatui::{style::Stylize, text::Line};
 
 use super::Goto;
-use super::{SwitchCase, SwitchCaseData};
+use super::switch::{MenuList, MenuPresentation, SwitchCase, SwitchCaseData};
 
 use crate::app::App;
-use crate::utils::CmdContent;
 use crate::config::{get_document, write_document};
 use crate::error::{AppError, AppResult, ErrorType, NotFoundType};
 
@@ -17,8 +16,9 @@ pub fn goto_operation(app: &mut App) {
     SwitchCase::new(
         app,
         goto_switch,
-        true,
-        generate_msg(app, '\0'),
+        MenuPresentation::Picker,
+        "Goto",
+        generate_menu(app, '\0'),
         SwitchCaseData::Char('\0')
     );
 }
@@ -40,8 +40,9 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
             SwitchCase::new(
                 app,
                 goto_switch,
-                true,
-                generate_msg(app, '+'),
+                MenuPresentation::Picker,
+                "Add Bookmark",
+                generate_menu(app, '+'),
                 SwitchCaseData::Char('+')
             );
 
@@ -51,8 +52,9 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
             SwitchCase::new(
                 app,
                 goto_switch,
-                true,
-                generate_msg(app, '-'),
+                MenuPresentation::Picker,
+                "Remove Bookmark",
+                generate_menu(app, '-'),
                 SwitchCaseData::Char('-')
             );
 
@@ -87,28 +89,31 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
     Ok(true)
 }
 
-fn generate_msg(app: &App, status: char) -> CmdContent {
-    let mut msg = Text::raw("[g] goto top  [+] add directory  [-] remove directory");
-    msg.push_line("");
+/// The bookmark menu: the hint line, the mode notice and one entry per
+/// bookmark.
+fn generate_menu(app: &App, status: char) -> MenuList {
+    let mut menu = MenuList::new()
+        .header(Line::raw("[g] goto top  [+] add directory  [-] remove directory"))
+        .header(Line::default());
 
     match status {
         '+' => {
-            msg.push_line(Line::raw("Adding Directory!").red());
-            msg.push_line("");
+            menu = menu.header(Line::raw("Adding Directory!").red());
+            menu = menu.header(Line::default());
         },
         '-' => {
-            msg.push_line(Line::raw("Deleting Directory!\n").red());
-            msg.push_line("");
+            menu = menu.header(Line::raw("Deleting Directory!").red());
+            menu = menu.header(Line::default());
         },
 
         _ => ()
     }
 
     for (key, path) in app.target_dir.iter() {
-        msg.push_line(format!("[{}] {}\n", key, path));
+        menu = menu.entry(key.to_string(), Line::raw(path.clone()));
     }
 
-    CmdContent::Text(msg)
+    menu
 }
 
 fn add_target_dir(app: &mut App, key: char, path: PathBuf) -> AppResult<()> {
@@ -225,5 +230,24 @@ mod goto_test {
     fn test_truncate() {
         let a = "\n".to_owned();
         assert_eq!("", a.trim());
+    }
+
+    /// The bookmark menu lists every bookmark with the key which activates it.
+    #[test]
+    fn test_menu_lists_the_bookmarks() {
+        let mut app = App::default();
+        app.target_dir.insert('h', String::from("/home"));
+        app.target_dir.insert('G', String::from("/home/user/Github"));
+
+        let menu = generate_menu(&app, '\0');
+
+        let keys = menu.rows().iter().filter_map(|row| match row {
+            crate::key_event::MenuRow::Entry(entry) => Some(entry.key.as_str()),
+            crate::key_event::MenuRow::Line(_) => None,
+        }).collect::<Vec<_>>();
+
+        assert_eq!(menu.entry_count(), 2);
+        assert!(keys.contains(&"h"), "{keys:?}");
+        assert!(keys.contains(&"G"), "{keys:?}");
     }
 }

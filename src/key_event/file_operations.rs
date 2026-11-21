@@ -7,7 +7,7 @@ use ratatui::{style::Stylize, text::{Line, Text}};
 
 use super::Goto;
 use super::cursor_movement;
-use super::{SwitchCase, SwitchCaseData};
+use super::{MenuPresentation, SwitchCase, SwitchCaseData};
 
 use crate::app::App;
 use crate::utils::{extension_start, CmdContent, CursorPos};
@@ -47,7 +47,8 @@ pub fn delete_operation(app: &mut App) {
     SwitchCase::new(
         app,
         delete_switch,
-        true,
+        MenuPresentation::Dialog,
+        "Delete",
         generate_msg(app, false),
         SwitchCaseData::None
     );
@@ -67,7 +68,8 @@ fn delete_switch(
                 SwitchCase::new(
                     app,
                     delete_switch,
-                    true,
+                    MenuPresentation::Dialog,
+                    "Delete",
                     generate_msg(app, true),
                     SwitchCaseData::Bool(true)
                 );

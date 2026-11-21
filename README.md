@@ -411,8 +411,8 @@ keymap = [
 ## Keybindings for command line
 
 - Open the command line (prefilled with `:`): `:` (`enter_command_line`)
-- Cursor move left: `C-b`
-- Cursor move right: `C-f`
+- Cursor move left: `C-b` (in the expanded view: scroll the content left)
+- Cursor move right: `C-f` (in the expanded view: scroll the content right)
 - Cursor move to beginning: `C-a`
 - Cursor move to end: `C-e`
 - Delete word: `Alt-Backspace` (Also in edit mode)
@@ -422,8 +422,8 @@ keymap = [
 - Cursor move to the start of the previous word: `Alt-b` (Also in edit mode)
 - Delete the character after the cursor: `C-d` (Also in edit mode)
 - Delete everything after the cursor: `C-k`
-- Expand command line: `Alt-Tab`
-- Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
+- Expand command line: `Alt-Ctrl-Tab`
+- Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view or a menu box, and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
 - Search the file list: type `/` (`search`) followed by the text; `n`/`N` jump between the matches.
 - Search the text preview: type `?` (`preview_search`) followed by the text; the matches are drawn in reverse video, the one `n`/`N` moved to is underlined, and `n`/`N` jump between them (see "Text Preview").
