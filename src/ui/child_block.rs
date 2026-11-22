@@ -90,6 +90,11 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
     }
 
     let inner = block.inner(layout);
+
+    // A window read for another pane size (or an offset it does not cover) is
+    // reloaded before it is drawn, so a resize keeps the page full.
+    app.ensure_preview_window(inner.height);
+
     let column = u16::try_from(app.preview.column()).unwrap_or(u16::MAX);
 
     // `Paragraph` is what shifts the lines horizontally; the vertical window is
@@ -138,8 +143,9 @@ pub fn update_file_linenr(area: Rect) {
 
 /// The lines of the text preview which fit in `height` rows.
 ///
-/// The preview starts at its scroll offset, so paging and searching move the
-/// window over the text instead of rereading the file. The column offset is
+/// The preview holds a window of the file, so the rendered lines start at
+/// `offset - window_start` inside it; paging and searching move that offset,
+/// which reloads the window only when the page leaves it. The column offset is
 /// applied by the `Paragraph` the lines are rendered with. Every occurrence of
 /// the preview search query is drawn with `Modifier::REVERSED`, which keeps the
 /// match visible whatever the syntax highlighting painted there; the match the
@@ -155,9 +161,11 @@ fn preview_lines<'a>(
     };
 
     let total = content.lines.len();
-    // The text may have got shorter than the offset (a new file, a resize):
-    // show its last line instead of nothing at all.
-    let start = app.preview.offset().min(total.saturating_sub(1));
+    let window_start = app.preview.window_start();
+    // The window may hold fewer lines than the offset expects (a file which
+    // shrank while it was open): clamp to what it has instead of slicing past
+    // the end.
+    let start = app.preview.offset().saturating_sub(window_start).min(total);
     let end = start.saturating_add(height as usize).min(total);
 
     let current = app.preview.current_line();
@@ -169,7 +177,7 @@ fn preview_lines<'a>(
             highlight_matches(
                 line,
                 &app.preview.match_ranges(line),
-                current == Some(start + row)
+                current == Some(window_start + start + row)
             )
         })
         .collect())

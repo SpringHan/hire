@@ -213,8 +213,9 @@ background.
 
 ### Text Preview
 
-The text preview holds the whole file up to 256 KiB and can be scrolled, paged,
-scrolled horizontally and searched. The shipped keymaps bind:
+The text preview reads only a window of lines (one page above the view, two
+below), so a file far larger than the terminal can be paged through; the
+shipped keymaps bind:
 
 | Command | Action | `default.toml` | `colemak.toml` |
 | --- | --- | --- | --- |
@@ -223,23 +224,27 @@ scrolled horizontally and searched. The shipped keymaps bind:
 | `preview_scroll_line next` / `prev` | One line down / up | `J` / `K` | `E` / `U` |
 | `preview_scroll_column next` / `prev` | Five columns right / left | `)` / `(` | `I` / `N` |
 
-Horizontal scrolling moves the text five columns at a time and stops when the end
-of the longest line reaches the right edge, so a file whose lines fit the pane
-cannot be scrolled and the text is never shifted off into an empty screen. A
-jump to a search match (`?`, `n`/`N`) returns to the first column, so the match
-at the beginning of a line is never hidden by a previous horizontal scroll.
+Horizontal scrolling moves the text five columns at a time and stops when the
+end of the longest visible line reaches the right edge, so a line which fits the
+pane cannot be scrolled and the text is never shifted off into an empty screen.
+A jump to a search match (`?`, `n`/`N`) returns to the first column, so the
+match at the beginning of a line is never hidden by a previous horizontal
+scroll.
 
-Typing `?needle` searches the preview of the selected file on a background
-thread, scrolls to the first match at or below the current view and draws every
-match in reverse video. `move_candidate next` / `move_candidate prev`
+Typing `?needle` searches the whole selected file on a background thread (it
+reads the file in batches, so it does not load it), scrolls to the
+first match at or below the current view and draws every match in reverse
+video. `move_candidate next` / `move_candidate prev`
 (`n`/`N` by default) then jump between the matches, wrapping around at both
 ends; the match the view last moved to is underlined as well, so it stands out
 from the other matches of the same query. While a preview search is active
 those keys belong to the preview, not to the file list. An empty `?` clears the
 search, its highlight, and gives `n`/`N` back to the file list.
 
-A file larger than 256 KiB is only previewed (and searchable) up to that limit,
-and a file which reaches it is shown without syntax colours.
+Only the window on screen is syntax highlighted, with the lines just above it as
+parser context, and a terminal resize reloads the window around the same line.
+A line longer than 16 KiB is cut at the limit (horizontal scrolling stops there),
+and a search keeps at most the first 100000 matching lines.
 
 ### Output File
 

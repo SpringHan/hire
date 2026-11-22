@@ -27,8 +27,7 @@ use crate::key_event::{
     SwitchCase, TabId,
 };
 use crate::utils::{
-    read_text_prefix,
-    plain_text,
+    read_probe,
     file_type_label,
     MarkedFiles,
     FileContent,
@@ -786,10 +785,6 @@ impl<'a> App<'a> {
             let selected_file = selected_item.to_owned();
             let file_path = self.current_path()
                 .join(&selected_file.name);
-            let mut content = Text::default();
-            // The text to hand to the highlighting thread, when the file is
-            // text which could have a language.
-            let mut highlight = None;
 
             // To avoid the wrong display of file content caused by
             // image decoding delay.
@@ -812,60 +807,59 @@ impl<'a> App<'a> {
             match fs::File::open(file_path.to_owned()) {
                 Err(e) => {
                     match e.kind() {
-                        ErrorKind::NotFound => (),
+                        ErrorKind::NotFound => {
+                            self.file_content =
+                                FileContent::Text(Text::default());
+                        },
                         ErrorKind::PermissionDenied => {
-                            content = Text::raw("Permission Denied");
+                            self.file_content = FileContent::Text(Text::raw(
+                                "Permission Denied"
+                            ));
                         },
                         _ => return Err(e.into())
                     }
                 },
                 Ok(ref mut file) => {
                     if selected_file.is_file {
-                        // The plain text is shown at once; the coloured
-                        // version arrives from the highlighting thread (only
-                        // text content ever reaches it).
-                        let text = read_text_prefix(file).and_then(
-                            |file_content| {
-                                let text = plain_text(&file_content)?;
-
-                                Ok((text, file_content))
+                        // Only a probe is read to decide whether this is text;
+                        // the first window of lines is what the preview draws.
+                        if read_probe(file).is_ok() {
+                            if self.start_preview(file_path.clone()).is_ok() {
+                                return Ok(())
                             }
-                        );
 
-                        match text {
-                            Ok((text, file_content)) => {
-                                content = text;
-                                highlight = Some(file_content);
-                            },
-                            Err(_) => {
-                                // Try to display image file
-                                if self.image_preview.with_image_feat() {
-                                    // The preview thread runs asynchronously:
-                                    // blank the pane so the previous file's
-                                    // preview cannot be taken for this one
-                                    // meanwhile.
-                                    self.file_content =
-                                        FileContent::Text(Text::default());
-                                    self.image_preview.send_path(file_path)?;
-                                    self.image_preview.useless = false;
-
-                                    return Ok(())
-                                }
-
-                                content = Text::raw(file_type_label(&file_path));
-                            },
+                            // The read failed after the probe (the file is
+                            // gone, or it shrank): fall back to its type.
+                            self.preview.reset();
+                            self.file_content = FileContent::Text(Text::raw(
+                                file_type_label(&file_path)
+                            ));
+                            return Ok(())
                         }
+
+                        // Try to display image file
+                        if self.image_preview.with_image_feat() {
+                            // The preview thread runs asynchronously:
+                            // blank the pane so the previous file's
+                            // preview cannot be taken for this one
+                            // meanwhile.
+                            self.file_content =
+                                FileContent::Text(Text::default());
+                            self.image_preview.send_path(file_path)?;
+                            self.image_preview.useless = false;
+
+                            return Ok(())
+                        }
+
+                        self.file_content = FileContent::Text(Text::raw(
+                            file_type_label(&file_path)
+                        ));
                     } else {
-                        content = Text::raw("Non Normal File");
+                        self.file_content =
+                            FileContent::Text(Text::raw("Non Normal File"));
                     }
                 },
             };
-
-            if let Some(file_content) = highlight {
-                self.highlight.request(file_path, file_content);
-            }
-
-            self.file_content = FileContent::Text(content);
         }
 
         Ok(())
@@ -876,16 +870,24 @@ impl<'a> App<'a> {
     /// The thread runs asynchronously, so the selection may have moved on: a
     /// late answer for another file must never replace the current preview,
     /// which is the same rule `apply_preview` follows for images. An answer
-    /// with no text means there was nothing to highlight (no language, too
-    /// large, a parser error), and the plain preview stays.
+    /// with no text means there was nothing to highlight (no language, a
+    /// parser error), and the plain preview stays. An answer for a window the
+    /// preview has already scrolled away from is dropped too.
     pub fn apply_highlight(&mut self) {
-        if let Some((path, text)) = self.highlight.take() {
-            self.apply_highlight_for(path, text);
+        if let Some((path, generation, text)) = self.highlight.take() {
+            self.apply_highlight_for(path, generation, text);
         }
     }
 
-    fn apply_highlight_for(&mut self, path: PathBuf, text: Option<Text<'static>>) {
-        if self.selected_file_path().as_deref() != Some(path.as_path()) {
+    fn apply_highlight_for(
+        &mut self,
+        path: PathBuf,
+        generation: u64,
+        text: Option<Text<'static>>
+    ) {
+        // An answer for another file, or for a window the preview has moved
+        // on from (a scroll, a resize), must not repaint the current one.
+        if !self.preview.is_current_window(&path, generation) {
             return
         }
 
@@ -1307,13 +1309,24 @@ mod test {
         // `a.rs` is selected; this answer belongs to `b.txt`.
         app.apply_highlight_for(
             app.current_path().join("b.txt"),
+            app.preview.window_generation(),
             Some(Text::raw("highlighted"))
         );
         assert!(app.file_content == FileContent::Text(Text::raw("before")));
 
-        // The answer for the selected file is applied.
+        // An answer for an older window of the selected file is dropped too:
+        // the user scrolled or resized meanwhile.
         app.apply_highlight_for(
             app.current_path().join("a.rs"),
+            app.preview.window_generation().wrapping_sub(1),
+            Some(Text::raw("older window"))
+        );
+        assert!(app.file_content == FileContent::Text(Text::raw("before")));
+
+        // The answer for the current window of the selected file is applied.
+        app.apply_highlight_for(
+            app.current_path().join("a.rs"),
+            app.preview.window_generation(),
             Some(Text::raw("highlighted"))
         );
         assert!(app.file_content == FileContent::Text(Text::raw("highlighted")));

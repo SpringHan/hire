@@ -177,8 +177,7 @@ Responsibilities:
   one is pending.
   The first frame sets the window height (`ui::update_file_linenr`) before
   `init_all_files()`, because the window height is the page size of the file
-  list and the text preview (the preview itself reads by bytes, see
-  `utils::read_text_prefix`).
+  list and the size of the text preview's window (see `utils/preview.rs`).
 - `shell_at_startup` — the startup shell: `--working-directory` (`-w`) jumps to
   the stored working directory first, `--shell` (`-S`) stays in the directory
   hire starts in (`--start-from` is applied before this), and either flag then
@@ -199,9 +198,9 @@ Responsibilities:
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
 | `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles; `from_ls_colors` falls back to `app/default_ls_colors.txt` when the variable is missing or blank. |
 | `app/image_preview.rs` | `ImagePreview`, `Preview`: terminal image support detection, preview (decode / `xdg-mime` type) and resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
-| `app/highlight.rs` | `HighlightPreview`: the worker thread which syntax highlights the text preview, and the channels to it; `start` / `request` / `pending` / `take`. |
+| `app/highlight.rs` | `HighlightPreview`: the worker thread which syntax highlights the window of the text preview, and the channels to it; `start` / `request` / `pending` / `take`. |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
-| `app/preview.rs` | `PreviewState`: the text preview's row/column scroll offsets and search (query, matched lines, current match, search worker channel), `PreviewMatches`; the `App` methods which scroll, search, apply an answer and move between matches. |
+| `app/preview.rs` | `PreviewState`: the text preview's loaded window (start line/byte, line byte offsets, EOF), row/column scroll offsets and search (query, matches with line and byte, current match, worker channel and cancel ticket), `PreviewMatch` / `PreviewMatches`; the `App` methods which load a window, scroll, resize, search, apply an answer and move between matches. |
 
 **`app/mod.rs`** is the heart of the data model:
 
@@ -250,17 +249,19 @@ Responsibilities:
   thread decides between an image and the file's `xdg-mime` type, so a
   directory's listing can never be covered by a late result and the previous
   file's preview can never be taken for the next one's.
-  The text branch is split in two stages: `set_file_content` reads the file's
-  prefix (`utils::read_text_prefix`, at most `MAX_PREVIEW_BYTES` = 256 KiB),
-  shows it as plain text at once (`utils::plain_text`) and hands the text to
-  `HighlightPreview::request`, which highlights it on a worker thread (see
-  `app/highlight.rs`); `apply_highlight` swaps the coloured version in when it
-  arrives, and drops it if its path is no longer the selected one. The whole
-  prefix is kept (not just the visible window), so `app/preview.rs` can page,
-  scroll and search it. A file which cannot be read as UTF-8 is the error that
-  sends `set_file_content` to the image or MIME-type preview, so the highlighter
-  never sees non-text content, and a file syntect has no language for is
-  answered with "nothing to highlight" and keeps its plain preview.
+  The text branch is split in two stages: `set_file_content` reads only a probe
+  (`utils::read_probe`, at most `PREVIEW_PROBE_BYTES` = 64 KiB) to decide whether
+  the file is text, then `start_preview` loads the first window of lines
+  (`app::preview`, four pages), shows it as plain text at once (`utils::plain_text`)
+  and hands it to `HighlightPreview::request`, which highlights that window on a
+  worker thread (see `app/highlight.rs`); `apply_highlight` swaps the coloured
+  window in when it arrives, and drops it if its path or window generation is no
+  longer the one on screen. Windows are reloaded as the view scrolls or the
+  terminal is resized, so the whole file is never held. A file which is not
+  UTF-8 in the probe is the error that sends `set_file_content` to the image or
+  MIME-type preview, so the highlighter never sees non-text content, and a file
+  syntect has no language for is answered with "nothing to highlight" and keeps
+  its plain preview.
   `set_file_content` and `apply_preview` reset `preview` (`reset_preview` drops
   both the content and its scroll/search state), so a new file or a directory
   never inherits the previous preview's offset or search.
@@ -317,41 +318,69 @@ diff skips the rest of the screen (only part of the image is drawn and the
 following cells/layout are not updated).
 
 **`app/highlight.rs`** — `HighlightPreview` owns the worker which syntax
-highlights the text preview. The preview is read on the UI thread (a prefix of
-at most 256 KiB is cheap to read), but syntect parses every line of it again for
-every cursor movement, so the parse runs here instead. The UI thread draws the
-plain text at once, `request`s the highlight, and `apply_highlight` replaces it when
-the answer arrives — but only while the answer's path is still the selected
-file, the same guard `apply_preview` uses for images. The worker is one thread
-blocked on a channel between previews (an idle hire spends nothing on it). It
-keeps only the newest request, and the UI thread only the newest answer, so
-neither side can pile up work or text: a cursor moving through a directory
-highlights the file it lands on, not every file it passed. `pending` tells the
-main loop a request is in flight, which is when it polls at 16 ms instead of
-200 ms so the colours appear as soon as they are ready; an answer of `None`
-(there is no language to highlight) ends that wait too.
+highlights the text preview. Only the loaded window is sent, plus up to
+`CONTEXT_LINES` = 32 lines the worker reads before it as syntect context (a
+block comment or a string can start above the window); the context is dropped
+from the answer, so only the window is painted. The UI thread draws the plain
+window at once, `request`s the highlight, and `apply_highlight` replaces it when
+the answer arrives — but only while the answer's path and window generation are
+still the ones on screen, the same guard `apply_preview` uses for images. The
+worker is one thread blocked on a channel between windows (an idle hire spends
+nothing on it). It keeps only the newest request, and the UI thread only the
+newest answer, so neither side can pile up work or text: a cursor moving through
+a directory highlights the file it lands on, not every file it passed, and a
+scroll leaves only the newest window waiting. `pending` tells the main loop a
+request is in flight, which is when it polls at 16 ms instead of 200 ms so the
+colours appear as soon as they are ready; an answer of `None` (there is no
+language to highlight) ends that wait too.
 
-**`app/preview.rs`** — `PreviewState` keeps the text preview's scroll offset,
-the horizontal column offset, the search (`query`, the matched line indices,
-the current match) and the channel to the search worker.
+**`app/preview.rs`** — `PreviewState` keeps the text preview's loaded window,
+its row/column scroll offsets, the search (`query`, the matches, the current
+one), the path the preview belongs to, the channel to the search worker and a
+`ticket` which cancels a running scan.
+
+The preview holds a window of the file, not the file: `window_start` and
+`window_start_byte` locate its first line, `window_starts` holds the byte offset
+of every loaded line, `window_end_byte` is where the line after the window
+starts, and `window_eof` says whether the window reached the end. A window is
+four pages (`utils::read_window_skipping`); after a scroll the view sits one
+page into it, so a page down and a page of line scrolling stay inside the
+window and do not reload. `offset` is still the absolute index of the first
+visible line, so the rest of the app and the tests keep the same line numbers.
+`show_preview_line` moves `offset`; while the page stays inside the window it
+only changes the offset (no I/O), otherwise it reloads around the target: a line
+inside the window is free, a line above it needs a backward read
+(`utils::read_prev_window`), and a line below it is reached by skipping the lines
+between (`read_window_skipping`). `ensure_preview_window` runs from the renderer
+with the pane height: a terminal which grew needs a taller window, a narrower
+one needs the column clamped again, and a window which does not cover the page
+is reloaded around `offset` before it is drawn. On the last page it pulls the
+offset to `total - page`, so a taller pane does not leave blank rows below the
+end; a page which runs past EOF is accepted once the window reaches EOF.
+`preview_jump_to` first checks `preview_window_covers`: when the centred page is
+already loaded, it only moves `offset` (and returns to the first column), so
+`n`/`N` and search jumps inside the window do not reload and cannot flash.
 `preview_scroll_line` / `preview_scroll_page` move the row offset (a page is
-`get_window_height()`, and the clamp keeps the last line at the bottom of the
-pane); `preview_scroll_column` moves the column in steps of five and stops when
-the end of the widest line (`Line::width`) reaches the right edge of the pane
-(`get_window_width()`), so a line which fits cannot be scrolled and the text is
-never shifted off an empty screen. Every jump to a match (`preview_jump_to`,
-used by the search and by `n`/`N`) also returns to the first column, so a
-horizontal scroll cannot hide the match at the beginning of the line.
-`preview_search` sends the lines to the worker
-(an empty query clears the search), `apply_preview_search` jumps to the first
-match at or after the offset — or back to the first one — and ignores an answer
-whose generation is not the current one, so a late answer can neither move
-another file's view nor that of a newer search. `preview_move_candidate` walks
-the matches and wraps around at both ends; `preview_search_active` is true while
-a query is set and the preview is text, which is what makes `n`/`N` navigate the
-preview instead of the file list (a preview search which found nothing still
-owns the keys). The matching rule is the shared `utils::search_indexes`, and the
-worker blocks on its channel between searches, like the file searcher.
+`get_window_height()`); `preview_scroll_column` moves the column in steps of
+five and stops when the end of the widest *visible* line (`Line::width`) reaches
+the right edge of the pane (`get_window_width()`), so a line which fits cannot
+be scrolled and the text is never shifted off an empty screen. The widest line
+is measured on the page only, because the rest of the file is not loaded. Every
+jump to a match (`preview_jump_to`, used by the search and by `n`/`N`) also
+returns to the first column.
+`preview_search` sends the query and the path to the worker: the worker scans
+the file itself in batches of `SEARCH_BATCH_LINES` = 256 lines, records the line
+index and byte offset of up to `MAX_SEARCH_MATCHES` = 100000 matches, and checks
+the `ticket` between batches so a new search stops the old scan. The UI never
+sends the text, so a huge file is searched without loading it.
+`apply_preview_search` jumps to the first match at or after the offset — or back
+to the first one — by the match's byte offset, which keeps the jump independent
+of the lines before it, and ignores an answer whose generation is not the
+current one. `preview_move_candidate` walks the matches and wraps around at both
+ends; `preview_search_active` is true while a query is set and the preview is
+text, which is what makes `n`/`N` navigate the preview instead of the file list
+(a preview search which found nothing still owns the keys). The matching rule is
+the shared `utils::search_indexes`.
 `match_ranges` computes the character ranges of every match in one line (case
 insensitive, mapped back from the lowercased text so a character which expands
 when lowercased still matches as a whole), which `ui/child_block.rs` reverses.
@@ -678,7 +707,7 @@ event; the dispositions which were in place before are restored when the guard
 is dropped. `fetch_output` uses the same guard, so `Ctrl-C` cancels `fzf` or the
 search script instead of ending hire.
 
-`open_file_in_shell` picks the program with the same `read_to_text` test the
+`open_file_in_shell` picks the program with the same `is_text_file` probe the
 preview uses: text files go to `file_read_program`, everything else to
 `xdg-open`. `fetch_output` captures stdout;
 `execute_command` appends the target path and clears the screen once the
@@ -816,7 +845,7 @@ hidden flag and selection, never shells.
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
 | `ui/parent_block.rs` | Renders the parent-directory column, the left end of the browser's rounded frame. |
 | `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list); it closes the rounded frame on the right in the root directory. |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from the loaded window at its row/column offsets, reloads the window when the pane no longer fits it, draws the search matches in reverse video with the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
 | `ui/cmdline_popup.rs` | Renders the completion candidate popup as a rounded floating box. |
 | `ui/menu_block.rs` | Renders an open menu as a centered rounded box over the dimmed page it was opened from: a dialog draws its text, a picker draws the `MenuList`'s hint lines, a `ratatui` `List` of entries with an aligned key column in the executable colour whose selected key is reversed, and the notice lines; the border and the title use the directory colour. |
@@ -898,9 +927,11 @@ separator between them. Border presence never changes, so the inner areas and
 the list window sizes are the same as before.
 
 **`ui/child_block.rs`** — `render_file` draws the image preview or the text:
-`preview_lines` takes the lines which fit in the pane from the preview's row
-offset (the text may have got shorter than the offset, then its last line is
-shown) and `highlight_matches` splits each line's spans at the search ranges, so
+before the text is drawn, `ensure_preview_window(inner.height)` reloads the
+window when the pane grew or the view left it; `preview_lines` then takes the
+lines which fit in the pane from `offset - window_start` (`offset` is absolute,
+the loaded window may start above it) and `highlight_matches` splits each line's
+spans at the search ranges, so
 only the matched characters get `Modifier::REVERSED` and the syntax colours of
 the rest are kept; on the line `preview.current_line()` names — the match the
 search or `n`/`N` moved to — they get `Modifier::UNDERLINED` as well, which is
@@ -969,7 +1000,8 @@ the browser frame underneath.
 
 | File | Purpose |
 | --- | --- |
-| `utils/mod.rs` | CLI `Args`, `Direction`, text helpers, window-height global. |
+| `utils/mod.rs` | CLI `Args`, `Direction`, text helpers, `is_text_file`, window-size globals. |
+| `utils/preview.rs` | Reading the text preview a window at a time: `read_probe`, `read_window` / `read_window_skipping`, `read_prev_window`, `PreviewWindow` and the preview byte limits. |
 | `utils/syntax.rs` | Syntax highlighting of the text preview (`syntect`). |
 | `utils/syntaxes/` | `.sublime-syntax` definitions the bundled syntect set lacks (TOML, INI), compiled into the binary. |
 | `utils/types.rs` | Core shared enums/structs used across modules. |
@@ -984,16 +1016,11 @@ the browser frame underneath.
   `hire <CARGO_PKG_VERSION>` for it and returns before the config and the
   terminal are set up.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
-- `str_split`, `read_to_text` (read the preview prefix, strip `\r`, expand
-  tabs, parse ANSI), `delete_word` (character-based, so multi-byte content is
-  never split; its separators are the ASCII punctuation characters, `_`
-  included). `read_to_text` is built from the two helpers the preview calls
-  directly: `read_text_prefix` (reads at most `MAX_PREVIEW_BYTES` = 256 KiB and
-  rejects a prefix which is not UTF-8 — the failure which means "not text"; a
-  character the limit cuts in half is dropped instead of rejecting the file;
-  buffered, because `File` is not and an unbuffered `bytes()` costs one
-  `read(2)` per byte) and `plain_text` (ANSI parsing plus tab expansion). The
-  whole prefix is kept because the text preview pages, scrolls and searches it.
+- `str_split`, `plain_text` (ANSI parsing plus tab expansion) and `delete_word`
+  (character-based, so multi-byte content is never split; its separators are the
+  ASCII punctuation characters, `_` included).
+- `is_text_file` — whether `read_probe` accepts `path`; `open_file_in_shell`
+  uses it to send text to the editor and everything else to the desktop handler.
 - `search_indexes` — the indices of the names which contain a query
   (case-insensitively), or of the first name which equals it. It is shared by
   the file search (`FileSaver` names) and the text preview's search (`Text`
@@ -1021,6 +1048,26 @@ the browser frame underneath.
   `WINDOW_WIDTH` (`update_window_width`, `get_window_width`) bounds the text
   preview's horizontal scroll.
 
+**`utils/preview.rs`** — reading the text preview a window at a time:
+
+- `read_probe` reads at most `PREVIEW_PROBE_BYTES` = 64 KiB and rejects bytes
+  which are not UTF-8 after the read (a character the limit cuts in half is
+  dropped). The preview and `is_text_file` use it to decide whether a file is
+  text, so a preview never reads the whole file just to classify it.
+- `read_window` / `read_window_skipping` seek to a byte offset and read up to
+  `count` lines, each at most `MAX_PREVIEW_LINE_BYTES` = 16 KiB. A longer line
+  is cut and the rest of it is skipped, so the lines after a minified line stay
+  reachable; the skip variant reads and drops the lines between the byte offset
+  and the window. `PreviewWindow` carries the lines, their byte offsets, the
+  absolute line index, the end byte and whether EOF was reached.
+- `read_prev_window` reads the lines above a byte offset: it reads at most
+  `MAX_BACK_BYTES` = 4 MiB backwards in 64 KiB blocks, drops the partial line
+  where a block starts, and returns the last `count` complete lines. That is
+  what scrolling upwards and the search's centring need.
+- `read_line` (private) is the shared reader: it consumes a line with
+  `fill_buf`/`consume`, decodes invalid bytes lossily (the probe already decided
+  the file is text) and strips `\r\n`.
+
 **`utils/syntax.rs`**
 
 `highlight_text(content, path)` is the whole highlighting step: it takes the
@@ -1038,11 +1085,9 @@ The steps:
   and underline. The theme background is not used — the preview is drawn on the
   terminal's own background, not in an editor window. Tabs are expanded inside
   each span and the line break is left to the `Line`, as in the plain preview.
-  Content which reaches `MAX_HIGHLIGHT_BYTES` (256 KiB, the same limit as
-  `MAX_PREVIEW_BYTES`) is not highlighted: a file that large is shown plain,
-  because syntect would parse every byte of it (a minified JSON, a base64 blob)
-  although the terminal shows only the first columns of a line, and the
-  highlight runs again for every cursor movement.
+  The content is the loaded window plus the worker's context lines, so syntect
+  parses what the pane shows, not the file; there is no byte limit any more (the
+  window bounds the work).
 
 `SYNTAX_SET` and `THEME` are `lazy_static`s: loading them takes milliseconds,
 which is why the first highlight — not just every later one — happens off the
@@ -1350,28 +1395,34 @@ its type instead of failing with `ENXIO`),
 `app::test::test_file_content_is_syntax_highlighted` (a `.rs` preview is plain
 at first, coloured once the worker answered; a `.txt` one keeps a single default
 style), `app::test::test_stale_highlight_is_dropped` (an answer for another file
-never repaints the preview), `app::preview::test::*` (one line, one page, one
-column and the end of the text are reachable and clamped, a directory is not
-scrollable and has nothing to search; the search is case-insensitive, jumps to
-the first match at or below the view,
-`n`/`N` walk the matches with wrap-around, an empty query clears it, and an
-answer of a replaced search never moves the view; the character ranges of the
-matches across spans, multi-byte text and a lowercasing expansion),
+never repaints the preview; an answer for an older window is dropped too),
+`app::preview::test::*` (a 500-line file is held as one 40-line window, three
+page downs stay inside it without a reload, a page can be scrolled far past it,
+a taller terminal reloads it around the same offset, one line, one page, one column and the end of the text are reachable and
+clamped, a directory is not scrollable and has nothing to search; the search is
+case-insensitive, jumps to the first match at or below the view and to a match
+outside the loaded window by its byte, `n`/`N` walk the matches with wrap-around,
+an empty query clears it, `n`/`N` between matches of the loaded window keep the
+window, an answer of a replaced search never moves the view, and a jump near the
+end survives a resize; the character ranges of the matches
+across spans, multi-byte text and a lowercasing expansion),
 `ui::child_block::test::test_highlight_matches_splits_the_spans` (only the
 matched characters are reversed, the match of the current line is underlined
 too, the rest of the line keeps its style),
 `utils::test::test_search_indexes` (the shared case-insensitive substring and
-exact-name matching) and `test_preview_read_is_limited_but_keeps_utf8` (the byte
-limit, a character cut by it and invalid UTF-8 in the middle),
+exact-name matching), `utils::preview::test::*` (a forward window, a skipped
+window, a backward window with mixed line lengths, CRLF and an empty file, a
+line cut at `MAX_PREVIEW_LINE_BYTES` while the line after it is still reached,
+and the probe rejecting binary data while keeping a character cut by its limit),
 `utils::test::test_version_flag` (`-v` and `--version` set the flag, it is off
 by default and `-V` is not bound),
-`app::highlight::test::*` (the worker answers with
-the path of the file, answers `None` when there is nothing to highlight — so the
-UI stops waiting — and ignores requests when it was not started) and
+`app::highlight::test::*` (the worker answers with the path and the window
+generation, answers `None` when there is nothing to highlight — so the UI stops
+waiting — and ignores requests when it was not started) and
 `utils::syntax::test::*` (a source file highlighted, tabs expanded, plain text
 and unknown files left as before — the latter still parsing ANSI colours, a
-binary file rejected so the preview shows its MIME type, a line too long to be
-worth highlighting left plain, the `$COLORFGBG` background guess, the two
+binary file rejected so the preview shows its MIME type, the `$COLORFGBG`
+background guess, the two
 bundled themes, and the configuration formats: a `.toml`/`.lock`/`.conf`/`.ini`
 preview is coloured and every extension the extra definitions claim resolves to
 a syntax),

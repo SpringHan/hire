@@ -60,11 +60,12 @@ lazy_static! {
 /// Highlight `content`, the preview of the file at `path`.
 ///
 /// `None` when there is nothing to highlight: no set knows a language for the
-/// file (a `.txt` file included), the content is too large to be worth it, or
-/// the parser fails. The caller keeps the unhighlighted text it is showing.
+/// file (a `.txt` file included), or the parser fails. The caller keeps the
+/// unhighlighted text it is showing.
 ///
 /// This runs on the highlighting thread (`app/highlight.rs`), never on the UI
-/// thread: syntect parses every line of the preview for every cursor movement.
+/// thread: syntect parses the window of lines it is given (plus the context the
+/// worker adds), so the cost follows the pane, not the file.
 pub fn highlight_text(content: &str, path: &Path) -> Option<Text<'static>> {
     let (set, syntax) = syntax_for(path)?;
 
@@ -98,30 +99,16 @@ fn syntax_for(
     Some((set, syntax))
 }
 
-/// How much of a preview is still worth highlighting.
-///
-/// It is the same limit as `utils::MAX_PREVIEW_BYTES`, so the preview never
-/// holds more text than this; a file which fills the preview is shown
-/// unhighlighted, because syntect would parse every byte of it (a minified
-/// JSON, a base64 blob) although the terminal can only show the first columns
-/// of a line, and the highlight runs again for every cursor movement.
-const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
-
 /// Highlight `content` with `syntax`, which belongs to `set`.
 ///
-/// `None` when the content is too large to be worth highlighting, or when
-/// syntect fails on a line (a syntax definition with a broken regular
-/// expression); the caller then shows the unhighlighted text instead.
+/// `None` when syntect fails on a line (a syntax definition with a broken
+/// regular expression); the caller then shows the unhighlighted text instead.
 fn highlighted_text(
     content: &str,
     set: &SyntaxSet,
     syntax: &SyntaxReference,
 ) -> Option<Text<'static>>
 {
-    if content.len() >= MAX_HIGHLIGHT_BYTES {
-        return None
-    }
-
     let mut highlighter = HighlightLines::new(syntax, &THEME);
     let mut text = Text::default();
 
@@ -210,7 +197,7 @@ mod test {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::utils::{plain_text, read_text_prefix};
+    use crate::utils::{plain_text, read_probe};
 
     fn temp_dir(tag: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -239,8 +226,8 @@ mod test {
     /// What the preview shows for `path`: the plain text, then the highlighted
     /// text when there is a language to highlight.
     fn preview(path: &Path, content: &[u8]) -> Text<'static> {
-        let file = write_file(path, content);
-        let content = read_text_prefix(&file).unwrap();
+        write_file(path, content);
+        let content = String::from_utf8_lossy(content);
 
         match highlight_text(&content, path) {
             Some(text) => text,
@@ -341,24 +328,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A file whose lines are far too long for the screen is not handed to
-    /// syntect: it would parse every byte of a line the terminal only shows the
-    /// first columns of, on every cursor movement.
-    #[test]
-    fn test_huge_line_is_not_highlighted() {
-        let dir = temp_dir("huge");
-        let path = dir.join("minified.json");
-
-        let line = "let x = 1; ".repeat(300 * 1024 / 11 + 1);
-        let text = preview(&path, line.as_bytes());
-
-        let styles = styles(&text);
-        assert!(styles.iter().all(|style| *style == styles[0]));
-        assert!(styles[0].fg.is_none(), "{:?}", styles[0]);
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
     /// A file without an extension or a known one is not highlighted either,
     /// so the fallback does not lose the ANSI colours a log may contain.
     #[test]
@@ -386,7 +355,7 @@ mod test {
 
         let file = write_file(&path, &[0xff, 0xfe, 0x00, 0x01]);
 
-        assert!(read_text_prefix(&file).is_err());
+        assert!(read_probe(&file).is_err());
 
         fs::remove_dir_all(&dir).unwrap();
     }

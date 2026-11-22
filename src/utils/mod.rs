@@ -1,12 +1,12 @@
 // Utils for crate.
 
+mod preview;
 mod syntax;
 mod types;
 
 use std::{
     borrow::Cow,
     fs::File,
-    io::{BufReader, Read},
     path::Path,
     process::Command,
     sync::atomic::{AtomicU16, Ordering}
@@ -20,6 +20,7 @@ use lazy_static::lazy_static;
 
 pub use types::*;
 pub use syntax::*;
+pub use preview::*;
 
 lazy_static! {
     /// The height of file list & content preview windows.
@@ -117,76 +118,6 @@ pub fn str_split(_string: String) -> Vec<String> {
     str_vec
 }
 
-/// Read the preview prefix of `file`, and pass the content as a `Text`
-/// structure to `text_ref`.
-/// In the meanwhile, the newline character of Windows will be removed
-/// and the '\t' will be replaced with 4 spaces.
-pub fn read_to_text(
-    text_ref: &mut Text<'static>,
-    file: &File,
-) -> anyhow::Result<()>
-{
-    *text_ref = plain_text(&read_text_prefix(file)?)?;
-
-    Ok(())
-}
-
-/// The number of bytes the text preview reads from a file.
-///
-/// The preview holds the whole file up to this limit, so the text can be paged
-/// and searched; a larger file is only previewed up to the limit (there is no
-/// way to scroll past it). It is the same limit as
-/// `utils::syntax::MAX_HIGHLIGHT_BYTES`, which shows a file that fills it
-/// unhighlighted.
-pub const MAX_PREVIEW_BYTES: usize = 256 * 1024;
-
-/// Read up to [`MAX_PREVIEW_BYTES`] bytes of `file` as UTF-8.
-///
-/// The newline character of Windows is removed, so a CRLF file renders like an
-/// LF one. A file which is not valid UTF-8 within the bytes read is an error:
-/// the preview takes that as "not text" and shows an image or the MIME type
-/// instead.
-///
-/// The preview holds this whole prefix (not just the visible window) because
-/// the text can be paged and searched; the read is limited by bytes, so a file
-/// whose first 256 KiB is text still arrives in one piece. A multi-byte
-/// character which the limit cuts in half is dropped instead of making the
-/// whole file look like binary data.
-///
-/// The preview reads the file on the UI thread, then hands the content to the
-/// highlighting thread; see `app/highlight.rs`. The read is buffered because
-/// `File` itself is not: unbuffered, `bytes()` costs one `read(2)` system call
-/// per byte.
-pub fn read_text_prefix(file: &File) -> anyhow::Result<String> {
-    let mut read = 0;
-    let mut bytes: Vec<u8> = Vec::new();
-
-    for _b in BufReader::new(file).bytes().take(MAX_PREVIEW_BYTES) {
-        read += 1;
-
-        let byte = _b?;
-        if byte != 13 {
-            bytes.push(byte);
-        }
-    }
-
-    // The limit may have cut the last character in half; that is an artifact of
-    // the read, not a sign that the file is not text.
-    let at_limit = read == MAX_PREVIEW_BYTES;
-
-    match String::from_utf8(bytes) {
-        Ok(text) => Ok(text),
-        Err(err) if at_limit && err.utf8_error().error_len().is_none() => {
-            let valid = err.utf8_error().valid_up_to();
-            let bytes = err.into_bytes();
-
-            Ok(String::from_utf8(bytes[..valid].to_vec())
-                .expect("the bytes before the cut are valid UTF-8"))
-        },
-        Err(err) => Err(err.into()),
-    }
-}
-
 /// Turn `content` into `Text`, keeping the ANSI colours a file may contain and
 /// replacing every '\t' with 4 spaces (a tab is a control character in a
 /// `Span`).
@@ -204,8 +135,8 @@ pub fn plain_text(content: &str) -> anyhow::Result<Text<'static>> {
 
 /// Whether `path` is shown as text by the preview.
 ///
-/// The preview reads a file with `read_to_text`; what fails there is not text
-/// for it either (it shows an image or the file's MIME type). The same test
+/// Only the probe prefix is read; what is not UTF-8 there is not text for the
+/// preview either (it shows an image or the file's MIME type). The same test
 /// decides which program opens the file: an editor for text, the desktop
 /// handler for everything else.
 pub fn is_text_file(path: &Path) -> bool {
@@ -213,7 +144,7 @@ pub fn is_text_file(path: &Path) -> bool {
         return false
     };
 
-    read_to_text(&mut Text::default(), &file).is_ok()
+    read_probe(&file).is_ok()
 }
 
 /// The MIME type `xdg-mime` reports for `path`, e.g. `application/pdf`.
@@ -1020,7 +951,7 @@ mod test {
         std::fs::write(&empty, "").unwrap();
         assert!(is_text_file(&empty));
 
-        // Invalid UTF-8 is what `read_to_text` rejects.
+        // Invalid UTF-8 is what `read_probe` rejects.
         let binary = dir.join("binary.bin");
         std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x01]).unwrap();
         assert!(!is_text_file(&binary));
@@ -1132,45 +1063,6 @@ mod test {
             search_indexes("beta.txt", names.iter().copied(), true),
             vec![1]
         );
-    }
-
-    /// The preview reads the whole file up to [`MAX_PREVIEW_BYTES`], so it can
-    /// be paged and searched, and a character the limit cuts in half does not
-    /// turn the file into "not text".
-    #[test]
-    fn test_preview_read_is_limited_but_keeps_utf8() {
-        let dir = temp_dir("preview-read");
-
-        // `take()` stops in the middle of the three-byte `中`.
-        let path = dir.join("cut.txt");
-        let mut content = "a".repeat(MAX_PREVIEW_BYTES - 1).into_bytes();
-        content.extend_from_slice("中".as_bytes());
-        std::fs::write(&path, &content).unwrap();
-
-        let file = std::fs::File::open(&path).unwrap();
-        let text = read_text_prefix(&file).unwrap();
-        assert_eq!(text.len(), MAX_PREVIEW_BYTES - 1);
-
-        // The same incomplete character at the end of a shorter file is a
-        // decoding error, not the limit's doing.
-        let path = dir.join("broken.txt");
-        let mut content = b"abc".to_vec();
-        content.push("中".as_bytes()[0]);
-        std::fs::write(&path, &content).unwrap();
-        let file = std::fs::File::open(&path).unwrap();
-        assert!(read_text_prefix(&file).is_err());
-
-        // Invalid UTF-8 in the middle is an error: a binary file is previewed
-        // by its type, not as the text before its first binary byte.
-        let path = dir.join("binary.dat");
-        let mut content = b"text\n".to_vec();
-        content.push(0xff);
-        content.extend_from_slice(b"more");
-        std::fs::write(&path, &content).unwrap();
-        let file = std::fs::File::open(&path).unwrap();
-        assert!(read_text_prefix(&file).is_err());
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

@@ -1,37 +1,50 @@
 // Syntax highlighting of the file preview, off the UI thread.
 
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
+use std::{
+    fs::File,
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender},
+    thread,
+};
 
 use ratatui::text::Text;
 
-use crate::utils::highlight_text;
+use crate::utils::{highlight_text, read_prev_window};
+
+/// How many lines before the window are highlighted as context.
+///
+/// Syntect keeps its parser state from line to line (a block comment or a
+/// string can span many lines). The lines before the window seed that state;
+/// they are thrown away afterwards, so only the window is painted.
+const CONTEXT_LINES: usize = 32;
 
 /// A request for the highlighting thread.
 ///
-/// It carries the preview's text, so the thread may sit on one request while
-/// the cursor has moved on: only the newest one is worth keeping.
+/// It carries a window of the preview, so the thread may sit on one request
+/// while the user has scrolled on: only the newest window is worth keeping.
 struct Job {
     path: PathBuf,
+    start_line: usize,
+    start_byte: u64,
     content: String,
+    generation: u64,
 }
 
-/// What the thread produced for one file.
+/// What the thread produced for one window.
 ///
-/// `None` means the file has nothing to highlight: syntect knows no language
-/// for it, its content is too large, or the parser failed.
-pub type HighlightDone = (PathBuf, Option<Text<'static>>);
+/// The generation is the preview's window generation at the time of the
+/// request; `None` means the window has nothing to highlight (syntect knows no
+/// language for it, or the parser failed).
+pub type HighlightDone = (PathBuf, u64, Option<Text<'static>>);
 
-/// The thread which highlights the preview's text.
+/// The thread which highlights the preview's window.
 ///
-/// The preview is read on the UI thread (a prefix of at most 256 KiB is cheap
-/// to read), but turning its lines into coloured spans is not: syntect parses
-/// every line of the preview again for every cursor movement. One worker does
-/// it in the background, so the UI thread draws the unhighlighted text at once
-/// and replaces it when the answer arrives.
+/// Only the lines the terminal can show (plus a margin and a context prefix) are
+/// read and highlighted, so the cost is bounded by the pane, not by the file.
+/// One worker does it in the background, so the UI thread draws the
+/// unhighlighted text at once and replaces it when the answer arrives.
 ///
-/// Between previews the worker blocks on its channel, so an idle hire spends
+/// Between windows the worker blocks on its channel, so an idle hire spends
 /// nothing on it. Requests and answers are not piled up either: the worker
 /// keeps only the newest request (browsing a directory must not queue one
 /// highlight per file) and the UI thread keeps only the newest answer.
@@ -40,10 +53,11 @@ pub struct HighlightPreview {
     requests: Option<Sender<Job>>,
     answers: Option<Receiver<HighlightDone>>,
 
-    /// The path of the last request, until its answer is taken. While it is
+    /// The window of the last request, until its answer is taken. While it is
     /// set, the UI polls sooner so the colours are painted as soon as they are
-    /// ready.
-    requested: Option<PathBuf>,
+    /// ready. The generation tells an answer for an older window from the one
+    /// the UI is waiting for.
+    requested: Option<(PathBuf, u64)>,
 }
 
 impl HighlightPreview {
@@ -54,17 +68,17 @@ impl HighlightPreview {
 
         thread::spawn(move || {
             while let Ok(mut job) = request_rx.recv() {
-                // A request the cursor has already left is skipped: only the
+                // A window the user has already left is skipped: only the
                 // newest one can still be shown.
                 while let Ok(newer) = request_rx.try_recv() {
                     job = newer;
                 }
 
-                let text = highlight_text(&job.content, &job.path);
+                let text = highlight_job(&job);
 
                 // Sending fails once the App is gone, which is how the thread
                 // ends when hire quits.
-                if answer_tx.send((job.path, text)).is_err() {
+                if answer_tx.send((job.path, job.generation, text)).is_err() {
                     break
                 }
             }
@@ -74,22 +88,32 @@ impl HighlightPreview {
         self.answers = Some(answer_rx);
     }
 
-    /// Ask for the preview `content` of `path` to be highlighted.
+    /// Ask for the preview window `content` of `path` to be highlighted.
     ///
-    /// A request the thread has not started yet is replaced, since the cursor
-    /// has moved on and its text would never be shown.
-    pub fn request(&mut self, path: PathBuf, content: String) {
+    /// `start_line` and `start_byte` locate the window in the file, so the
+    /// worker can read the lines before it as syntect context.
+    pub fn request(
+        &mut self,
+        path: PathBuf,
+        start_line: usize,
+        start_byte: u64,
+        content: String,
+        generation: u64,
+    ) {
         let Some(requests) = self.requests.as_ref() else {
             return
         };
 
         let job = Job {
             path: path.clone(),
-            content
+            start_line,
+            start_byte,
+            content,
+            generation,
         };
 
         if requests.send(job).is_ok() {
-            self.requested = Some(path);
+            self.requested = Some((path, generation));
         }
     }
 
@@ -116,16 +140,51 @@ impl HighlightPreview {
             }
         }
 
-        // An answer for a file the cursor already left does not end the wait
-        // for the current one.
-        if newest.as_ref().is_some_and(|(path, _)| {
-            Some(path) == self.requested.as_ref()
+        // An answer for another file, or for a window the UI has already
+        // scrolled away from, does not end the wait for the current one.
+        if newest.as_ref().is_some_and(|(path, generation, _)| {
+            self.requested
+                .as_ref()
+                .is_some_and(|(requested, expected)| {
+                    requested == path && expected == generation
+                })
         }) {
             self.requested = None;
         }
 
         newest
     }
+}
+
+/// Highlight the window of `job`, with the lines before it as context.
+fn highlight_job(job: &Job) -> Option<Text<'static>> {
+    let mut content = String::new();
+    let mut context_lines = 0;
+
+    if let Ok(file) = File::open(&job.path) &&
+        let Ok(prev) = read_prev_window(
+            &file,
+            job.start_byte,
+            job.start_line,
+            CONTEXT_LINES
+        )
+    {
+        context_lines = prev.lines.len();
+
+        for line in &prev.lines {
+            content.push_str(line);
+            content.push('\n');
+        }
+    }
+
+    content.push_str(&job.content);
+
+    let mut text = highlight_text(&content, &job.path)?;
+
+    // Only the window itself is painted; the context was there for the parser.
+    text.lines.drain(..context_lines.min(text.lines.len()));
+
+    Some(text)
 }
 
 #[cfg(test)]
@@ -150,8 +209,8 @@ mod test {
     }
 
     /// The thread highlights the text it was given and reports it back with the
-    /// path of the file, which is what tells the UI whether the answer still
-    /// belongs to the selected file.
+    /// path and the window generation, which is what tells the UI whether the
+    /// answer still belongs to the current window.
     #[test]
     fn test_highlight_is_answered_with_its_path() {
         let mut preview = HighlightPreview::default();
@@ -159,12 +218,16 @@ mod test {
 
         preview.request(
             PathBuf::from("/tmp/hire-highlight-test.rs"),
-            String::from("fn main() {}\n")
+            0,
+            0,
+            String::from("fn main() {}\n"),
+            7
         );
 
-        let (path, text) = wait(&mut preview).unwrap();
+        let (path, generation, text) = wait(&mut preview).unwrap();
 
         assert_eq!(path, PathBuf::from("/tmp/hire-highlight-test.rs"));
+        assert_eq!(generation, 7);
 
         let text = text.unwrap();
         let styles: Vec<_> = text.lines
@@ -184,10 +247,13 @@ mod test {
 
         preview.request(
             PathBuf::from("/tmp/hire-highlight-test.txt"),
-            String::from("plain\n")
+            0,
+            0,
+            String::from("plain\n"),
+            1
         );
 
-        let (_, text) = wait(&mut preview).unwrap();
+        let (_, _, text) = wait(&mut preview).unwrap();
 
         assert!(text.is_none());
         assert!(!preview.pending());
@@ -199,7 +265,13 @@ mod test {
     fn test_a_stopped_worker_ignores_requests() {
         let mut preview = HighlightPreview::default();
 
-        preview.request(PathBuf::from("a.rs"), String::from("fn main() {}\n"));
+        preview.request(
+            PathBuf::from("a.rs"),
+            0,
+            0,
+            String::from("fn main() {}\n"),
+            1
+        );
 
         assert!(!preview.pending());
         assert!(preview.take().is_none());

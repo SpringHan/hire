@@ -1,7 +1,13 @@
-// Text preview: scrolling and searching.
+// Text preview: windowed file reading, scrolling and searching.
 
 use std::{
-    sync::mpsc::{self, Receiver, Sender},
+    fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
     thread,
 };
 
@@ -10,47 +16,115 @@ use ratatui::text::Line;
 use crate::{
     error::AppResult,
     rt_error,
-    utils::{get_window_height, get_window_width, search_indexes, FileContent},
+    utils::{
+        get_window_height,
+        get_window_width,
+        plain_text,
+        read_prev_window,
+        read_window_skipping,
+        search_indexes,
+        FileContent,
+        PreviewWindow,
+        read_window,
+    },
 };
 
 use super::App;
+
+/// How many matches a preview search keeps.
+///
+/// A file whose every line matches would otherwise grow the result without a
+/// bound; the first matches are the ones the user walks through anyway.
+const MAX_SEARCH_MATCHES: usize = 100_000;
+
+/// How many lines the search reads from the file at a time.
+const SEARCH_BATCH_LINES: usize = 256;
+
+/// How many pages the preview keeps loaded.
+///
+/// One page above the view and two below it after a scroll: a page down (or a
+/// page of line scrolling) stays inside the window, so it does not reload and
+/// flash.
+const PREVIEW_WINDOW_PAGES: usize = 4;
+
+/// Which page of the window the view starts on after a scroll.
+const PREVIEW_WINDOW_ABOVE_PAGES: usize = 1;
+
+/// One line of the preview which contains a search match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreviewMatch {
+    /// The absolute index of the line.
+    pub line: usize,
+
+    /// The byte offset the line starts at.
+    pub byte: u64,
+}
 
 /// A finished preview search.
 pub struct PreviewMatches {
     /// The search this answer belongs to.
     pub generation: u64,
 
-    /// The indices of the lines which contain a match, in ascending order.
-    pub lines: Vec<usize>,
+    /// The matches, in ascending line order.
+    pub matches: Vec<PreviewMatch>,
 }
 
 /// A request to the preview search thread.
 struct PreviewSearchRequest {
     generation: u64,
+
+    /// The value of [`PreviewState::ticket`] this search belongs to.
+    ticket: u64,
+
     query: String,
-    lines: Vec<String>,
+
+    path: PathBuf,
 }
 
 /// Scrolling and search state of the text preview.
 ///
-/// The preview shows every line `utils::read_text_prefix` read (the whole file
-/// up to `MAX_PREVIEW_BYTES`); this state decides which part of them is on
-/// screen and which lines match the search.
+/// The preview holds only a window of the file (the visible page plus a
+/// margin), so opening or scrolling a huge file costs what the terminal shows,
+/// not the size of the file. This state decides which part of the window is on
+/// screen and where the next window starts.
 #[derive(Default)]
 pub struct PreviewState {
-    /// The index of the first line shown in the preview.
+    /// The absolute index of the first line shown in the preview.
     offset: usize,
 
     /// The first terminal column shown of every preview line.
     column: usize,
 
+    /// The absolute line index of the first line of the loaded window.
+    window_start: usize,
+
+    /// The byte offset `window_start` starts at.
+    window_start_byte: u64,
+
+    /// The byte offset every loaded line starts at.
+    window_starts: Vec<u64>,
+
+    /// The byte offset just after the last loaded line.
+    window_end_byte: u64,
+
+    /// Whether the loaded window reaches the end of the file.
+    window_eof: bool,
+
+    /// Bumped when a window is installed, so a highlight answer for an older
+    /// window is never painted over the current one.
+    window_generation: u64,
+
+    /// The file the preview belongs to; `None` when there is no text preview
+    /// (an image, a directory listing, a message).
+    path: Option<PathBuf>,
+
     /// The query of the active search.
     query: Option<String>,
 
     /// The lines which contain a match, in ascending order.
-    matched_lines: Vec<usize>,
+    matches: Vec<PreviewMatch>,
 
-    /// The index in `matched_lines` the view last jumped to.
+    /// The index in `matches` the view last jumped to.
     current: Option<usize>,
 
     /// The search the next answer must belong to. Every new search (and every
@@ -61,6 +135,10 @@ pub struct PreviewState {
     /// The channel to the search thread. `None` when the thread was not
     /// started: the preview still scrolls, the search is just unavailable.
     sender: Option<Sender<PreviewSearchRequest>>,
+
+    /// The value the running search was started with. A new search bumps it,
+    /// which tells the worker to stop scanning the old file.
+    ticket: Arc<AtomicU64>,
 }
 
 impl PreviewState {
@@ -79,12 +157,30 @@ impl PreviewState {
         self.query.is_some()
     }
 
+    /// The absolute line index of the first line of the loaded window.
+    pub fn window_start(&self) -> usize {
+        self.window_start
+    }
+
+    /// The generation of the loaded window; a highlight answer carries it.
+    #[cfg(test)]
+    pub fn window_generation(&self) -> u64 {
+        self.window_generation
+    }
+
+    /// Whether `path` and `generation` describe the window on screen.
+    pub fn is_current_window(&self, path: &std::path::Path, generation: u64) -> bool {
+        self.path.as_deref() == Some(path) && generation == self.window_generation
+    }
+
     /// The line of the match `n`/`N` last moved to.
     ///
     /// The renderer underlines this match, so the occurrence the user selected
     /// stands out from the other matches of the same query.
     pub fn current_line(&self) -> Option<usize> {
-        self.current.and_then(|idx| self.matched_lines.get(idx).copied())
+        self.current
+            .and_then(|idx| self.matches.get(idx))
+            .map(|found| found.line)
     }
 
     /// The character ranges of every occurrence of the query in `line`.
@@ -109,6 +205,12 @@ impl PreviewState {
     pub fn reset(&mut self) {
         self.offset = 0;
         self.column = 0;
+        self.window_start = 0;
+        self.window_start_byte = 0;
+        self.window_starts.clear();
+        self.window_end_byte = 0;
+        self.window_eof = false;
+        self.path = None;
         self.clear_search();
     }
 
@@ -116,18 +218,40 @@ impl PreviewState {
     pub fn clear_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.query = None;
-        self.matched_lines.clear();
+        self.matches.clear();
         self.current = None;
+        self.ticket.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Start a new search; the answer of every older one becomes stale.
     fn begin_search(&mut self, query: String) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         self.query = Some(query);
-        self.matched_lines.clear();
+        self.matches.clear();
         self.current = None;
 
         self.generation
+    }
+
+    /// Make `window` the loaded window, and return the generation a highlight
+    /// of it must carry.
+    fn install_window(
+        &mut self,
+        window: &PreviewWindow,
+        start_byte: u64,
+    ) -> u64 {
+        self.window_start = window.start_line;
+        self.window_start_byte = window.starts
+            .first()
+            .copied()
+            .unwrap_or(start_byte);
+        self.window_starts.clone_from(&window.starts);
+        self.window_end_byte = window.end_byte;
+        self.window_eof = window.eof;
+
+        self.window_generation = self.window_generation.wrapping_add(1);
+
+        self.window_generation
     }
 
     fn set_offset(&mut self, offset: usize) {
@@ -143,25 +267,17 @@ impl<'a> App<'a> {
     /// Start the thread which searches the preview, and return the channel its
     /// answers arrive on.
     ///
-    /// The worker is the same shape as the file searcher's: it blocks on its
-    /// channel between searches, so an idle hire spends nothing on it, and the
-    /// matching rule is the shared `utils::search_indexes`.
+    /// The worker scans the file itself, a batch of lines at a time, so a huge
+    /// file never has to be loaded to be searched. It blocks on its channel
+    /// between searches, so an idle hire spends nothing on it.
     pub fn init_preview_search_channel(&mut self) -> Receiver<PreviewMatches> {
         let (update_tx, update_rx) = mpsc::channel::<PreviewMatches>();
         let (calc_tx, calc_rx) = mpsc::channel::<PreviewSearchRequest>();
+        let ticket = self.preview.ticket.clone();
 
         thread::spawn(move || {
             while let Ok(request) = calc_rx.recv() {
-                let lines = search_indexes(
-                    &request.query,
-                    request.lines.iter().map(|line| line.as_str()),
-                    false
-                );
-
-                let matches = PreviewMatches {
-                    generation: request.generation,
-                    lines,
-                };
+                let matches = search_preview_file(&request, &ticket);
 
                 if update_tx.send(matches).is_err() {
                     break
@@ -174,6 +290,12 @@ impl<'a> App<'a> {
         update_rx
     }
 
+    /// Start the text preview of `path` with its first window.
+    pub fn start_preview(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        self.preview.path = Some(path);
+        self.load_preview_window(0, 0)
+    }
+
     /// Drop the preview and the scroll/search state which belongs to it.
     pub fn reset_preview(&mut self) {
         self.file_content.reset();
@@ -182,8 +304,8 @@ impl<'a> App<'a> {
 
     /// Search `query` in the text preview.
     ///
-    /// The lines are handed to the search thread, so the UI never waits for a
-    /// long file; `apply_preview_search` moves the view when the answer
+    /// The worker scans the file in the background, so the UI never waits for
+    /// a long file; `apply_preview_search` moves the view when the answer
     /// arrives. An empty query clears the previous search (and its highlight).
     pub fn preview_search(&mut self, query: String) -> AppResult<()> {
         if query.is_empty() {
@@ -195,30 +317,24 @@ impl<'a> App<'a> {
             rt_error!("The preview search thread is not running")
         };
 
-        let FileContent::Text(ref content) = self.file_content else {
+        let Some(path) = self.preview.path.clone() else {
             rt_error!("There is no text preview to search in")
         };
-
-        let lines: Vec<String> = content.lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect()
-            })
-            .collect();
 
         // Like a `/` search, the command is kept in the history.
         self.command_history.push(format!("?{query}"));
 
         let generation = self.preview.begin_search(query.clone());
+        let ticket = self.preview.ticket
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
 
         if sender
             .send(PreviewSearchRequest {
                 generation,
+                ticket,
                 query,
-                lines,
+                path,
             })
             .is_err()
         {
@@ -237,9 +353,9 @@ impl<'a> App<'a> {
             return
         }
 
-        self.preview.matched_lines = matches.lines;
+        self.preview.matches = matches.matches;
 
-        if self.preview.matched_lines.is_empty() {
+        if self.preview.matches.is_empty() {
             self.preview.current = None;
             return
         }
@@ -247,14 +363,17 @@ impl<'a> App<'a> {
         // Start from what is on screen, so scrolling down and searching again
         // finds the next match instead of jumping back to the top.
         let from = self.preview.offset;
-        let idx = self.preview.matched_lines
+        let idx = self.preview.matches
             .iter()
-            .position(|line| *line >= from)
+            .position(|found| found.line >= from)
             .unwrap_or(0);
 
         self.preview.current = Some(idx);
-        let line = self.preview.matched_lines[idx];
-        self.preview_jump_to(line);
+        let target = self.preview.matches[idx];
+
+        if let Err(err) = self.preview_jump_to(target) {
+            self.app_error.add_error(err);
+        }
     }
 
     /// Scroll the text preview by one line.
@@ -264,17 +383,17 @@ impl<'a> App<'a> {
 
     /// Scroll the text preview by one window height.
     pub fn preview_scroll_page(&mut self, down: bool) {
-        let page = (get_window_height() as usize).max(1) as isize;
+        let page = preview_page() as isize;
 
         self.scroll_preview(if down { page } else { -page });
     }
 
     /// Scroll the text preview by five columns.
     ///
-    /// The right end of the widest line stays at the right edge of the pane, so
-    /// the preview never scrolls off the text into an empty screen.
+    /// The right end of the widest visible line stays at the right edge of the
+    /// pane, so the preview never scrolls off the text into an empty screen.
     pub fn preview_scroll_column(&mut self, right: bool) {
-        let Some(longest) = preview_line_width(self) else {
+        let Some(longest) = preview_visible_width(self) else {
             return
         };
 
@@ -291,7 +410,7 @@ impl<'a> App<'a> {
     ///
     /// The matches wrap around, so `n` at the last one continues at the first.
     pub fn preview_move_candidate(&mut self, next: bool) {
-        let count = self.preview.matched_lines.len();
+        let count = self.preview.matches.len();
         if count == 0 {
             return
         }
@@ -304,8 +423,11 @@ impl<'a> App<'a> {
         };
 
         self.preview.current = Some(target);
-        let line = self.preview.matched_lines[target];
-        self.preview_jump_to(line);
+        let found = self.preview.matches[target];
+
+        if let Err(err) = self.preview_jump_to(found) {
+            self.app_error.add_error(err);
+        }
     }
 
     /// Whether `n`/`N` navigate the preview instead of the file list.
@@ -319,66 +441,353 @@ impl<'a> App<'a> {
             matches!(self.file_content, FileContent::Text(_))
     }
 
-    /// Scroll the text preview by `delta` lines, clamped to what it holds.
-    fn scroll_preview(&mut self, delta: isize) {
-        let Some(total) = preview_line_count(self) else {
-            return
-        };
-
-        let offset = self.preview.offset.saturating_add_signed(delta);
-
-        self.preview.set_offset(offset.min(preview_max_offset(total)));
-    }
-
-    /// Put `line` in the middle of the preview when possible.
+    /// Make sure the loaded window covers what the terminal shows.
     ///
-    /// The jump also returns to the first column: a horizontal scroll which
-    /// was left in place would hide the match at the beginning of the line.
-    fn preview_jump_to(&mut self, line: usize) {
-        let Some(total) = preview_line_count(self) else {
+    /// The terminal can be resized while the preview is open: a taller pane
+    /// needs more lines than the window was read with, and a narrower one needs
+    /// the horizontal scroll clamped again. The window is reloaded around the
+    /// current offset when it no longer covers the page.
+    pub fn ensure_preview_window(&mut self, height: u16) {
+        if self.preview.path.is_none() ||
+            !matches!(self.file_content, FileContent::Text(_))
+        {
+            return
+        }
+
+        let page = (height as usize).max(1);
+
+        // The last page is clamped like a scroll is: a taller terminal on the
+        // last page pulls the view up instead of leaving blank rows below the
+        // end of the file.
+        let mut target = self.preview.offset;
+
+        if self.preview.window_eof {
+            let total = self.preview.window_start +
+                self.preview_window_len();
+
+            target = if total < page { 0 } else { target.min(total - page) };
+        }
+
+        if (target != self.preview.offset ||
+            !self.preview_window_covers(target, page)) &&
+            let Err(err) = self.show_preview_line(target)
+        {
+            self.app_error.add_error(err);
+        }
+
+        self.clamp_preview_column();
+    }
+
+    /// Whether the loaded window shows a whole page from `target`.
+    fn preview_window_covers(&self, target: usize, page: usize) -> bool {
+        let start = self.preview.window_start;
+        let len = self.preview_window_len();
+
+        if target < start {
+            return false
+        }
+
+        if len == 0 {
+            return true
+        }
+
+        if target + page <= start + len {
+            return true
+        }
+
+        // The page runs past the end of the file: the last page is short, and
+        // there is nothing more to read.
+        self.preview.window_eof
+    }
+
+    /// Keep the column offset inside the widest line of the visible page.
+    fn clamp_preview_column(&mut self) {
+        let Some(longest) = preview_visible_width(self) else {
             return
         };
 
-        let page = (get_window_height() as usize).max(1);
-        let offset = line.saturating_sub(page / 2);
+        let max = preview_max_column(longest);
 
-        self.preview.set_offset(offset.min(preview_max_offset(total)));
+        if self.preview.column > max {
+            self.preview.set_column(max);
+        }
+    }
+
+    /// Scroll the text preview by `delta` lines.
+    fn scroll_preview(&mut self, delta: isize) {
+        if self.preview.path.is_none() ||
+            !matches!(self.file_content, FileContent::Text(_))
+        {
+            return
+        }
+
+        let target = self.preview.offset.saturating_add_signed(delta);
+
+        if let Err(err) = self.show_preview_line(target) {
+            self.app_error.add_error(err);
+        }
+    }
+
+    /// Put `target` at the top of the preview, loading a window around it.
+    fn show_preview_line(&mut self, mut target: usize) -> anyhow::Result<()> {
+        let page = preview_page();
+
+        if self.preview_window_len() == 0 {
+            self.preview.set_offset(0);
+            return Ok(())
+        }
+
+        for _ in 0..3 {
+            if self.preview.window_eof {
+                let total = self.preview.window_start +
+                    self.preview_window_len();
+
+                target = if total < page { 0 } else { target.min(total - page) };
+            }
+
+            if self.preview_window_covers(target, page) {
+                self.preview.set_offset(target);
+                return Ok(())
+            }
+
+            let above = page * PREVIEW_WINDOW_ABOVE_PAGES;
+            let ds = target.saturating_sub(above);
+            let (line, byte, skip) = self.window_start_for(ds)?;
+            self.load_preview_window_skipping(line, byte, skip)?;
+
+            if self.preview_window_len() == 0 {
+                self.preview.set_offset(0);
+                return Ok(())
+            }
+        }
+
+        // A window which cannot hold a full page (the end of a short file)
+        // shows from its first line.
+        let start = self.preview.window_start;
+        let page = preview_page();
+
+        if !self.preview_window_covers(self.preview.offset, page) {
+            self.preview.set_offset(start);
+        }
+
+        Ok(())
+    }
+
+    /// The start (line, byte and lines to skip) of the window which contains
+    /// `line`.
+    ///
+    /// Lines inside the loaded window are free; earlier ones need a backward
+    /// read; a line past the window is reached by skipping the lines between
+    /// it and the window's end.
+    fn window_start_for(&mut self, line: usize) -> anyhow::Result<(usize, u64, usize)> {
+        let start = self.preview.window_start;
+        let end = start + self.preview_window_len();
+
+        if line >= start && line < end {
+            return Ok((line, self.preview.window_starts[line - start], 0))
+        }
+
+        if line == end {
+            return Ok((line, self.preview.window_end_byte, 0))
+        }
+
+        if line > end {
+            return Ok((line, self.preview.window_end_byte, line - end))
+        }
+
+        // The line is above the window: read backwards to find its byte.
+        let Some(path) = self.preview.path.clone() else {
+            return Ok((line, 0, 0))
+        };
+
+        let file = fs::File::open(&path)?;
+        let prev = read_prev_window(
+            &file,
+            self.preview.window_start_byte,
+            start,
+            start - line + 1
+        )?;
+
+        if prev.start_line <= line && line - prev.start_line < prev.starts.len()
+        {
+            Ok((line, prev.starts[line - prev.start_line], 0))
+        } else {
+            let start_line = prev.start_line;
+            let byte = prev.starts
+                .first()
+                .copied()
+                .unwrap_or(self.preview.window_start_byte);
+
+            Ok((start_line, byte, 0))
+        }
+    }
+
+    /// Jump to `target`, which must be visible after the jump.
+    ///
+    /// The match is centred when the file allows it: the window starts half a
+    /// page before it, which needs a backward read from the match's byte.
+    fn preview_jump_to(&mut self, target: PreviewMatch) -> anyhow::Result<()> {
+        let page = preview_page();
+        let offset = target.line.saturating_sub(page / 2);
+
+        // The target page is already loaded: moving the offset is enough, and
+        // the coloured text (and the window) stay as they are, so the jump
+        // does not flash.
+        if self.preview_window_covers(offset, page) {
+            self.preview.set_offset(offset);
+            self.preview.set_column(0);
+
+            return Ok(())
+        }
+
+        let (start_line, start_byte) = if offset == 0 {
+            (0, 0)
+        } else if offset == target.line {
+            (target.line, target.byte)
+        } else {
+            let Some(path) = self.preview.path.clone() else {
+                return Ok(())
+            };
+
+            let file = fs::File::open(&path)?;
+            let prev = read_prev_window(
+                &file,
+                target.byte,
+                target.line,
+                target.line - offset
+            )?;
+
+            if prev.start_line <= offset &&
+                offset - prev.start_line < prev.starts.len()
+            {
+                (offset, prev.starts[offset - prev.start_line])
+            } else {
+                let start_line = prev.start_line;
+                let byte = prev.starts.first().copied().unwrap_or(0);
+
+                (start_line, byte)
+            }
+        };
+
+        self.load_preview_window(start_line, start_byte)?;
+
+        let mut offset = offset;
+
+        if self.preview.window_eof {
+            let total = self.preview.window_start +
+                self.preview_window_len();
+
+            offset = if total < page { 0 } else { offset.min(total - page) };
+        }
+
+        if offset < self.preview.window_start {
+            offset = self.preview.window_start;
+        }
+
+        self.preview.set_offset(offset);
         self.preview.set_column(0);
+
+        Ok(())
+    }
+
+    /// Load the window which starts at `start_line`.
+    fn load_preview_window(
+        &mut self,
+        start_line: usize,
+        start_byte: u64,
+    ) -> anyhow::Result<()> {
+        self.load_preview_window_skipping(start_line, start_byte, 0)
+    }
+
+    /// Load a window which starts `skip` lines after `start_byte`.
+    fn load_preview_window_skipping(
+        &mut self,
+        start_line: usize,
+        start_byte: u64,
+        skip: usize,
+    ) -> anyhow::Result<()> {
+        let Some(path) = self.preview.path.clone() else {
+            return Ok(())
+        };
+
+        let file = fs::File::open(&path)?;
+        let window = read_window_skipping(
+            &file,
+            start_byte,
+            start_line,
+            skip,
+            preview_window_capacity()
+        )?;
+
+        let content = window.lines.join("\n");
+        let text = plain_text(&content)?;
+        // The window may start a few lines after `start_byte` (a page far
+        // below the loaded one); its context must be read from its own start.
+        let window_byte = window.starts
+            .first()
+            .copied()
+            .unwrap_or(start_byte);
+
+        let generation = self.preview.install_window(&window, start_byte);
+        self.file_content = FileContent::Text(text);
+        self.highlight.request(
+            path,
+            window.start_line,
+            window_byte,
+            content,
+            generation
+        );
+
+        Ok(())
+    }
+
+    /// The number of lines in the loaded window.
+    fn preview_window_len(&self) -> usize {
+        match &self.file_content {
+            FileContent::Text(text) => text.lines.len(),
+            _ => 0,
+        }
     }
 }
 
-/// The number of lines the text preview holds, when it shows text.
-fn preview_line_count(app: &App) -> Option<usize> {
-    match &app.file_content {
-        FileContent::Text(text) => Some(text.lines.len()),
-        _ => None,
-    }
+/// One window height, but never zero (it is the scroll distance of a page).
+fn preview_page() -> usize {
+    (get_window_height() as usize).max(1)
 }
 
-/// The largest offset the text preview can be scrolled to.
+/// How many lines a loaded window holds.
+fn preview_window_capacity() -> usize {
+    preview_page() * PREVIEW_WINDOW_PAGES
+}
+
+/// The width of the widest line of the visible page.
 ///
-/// The last line stays at the bottom of the pane, so the view does not scroll
-/// past the end of the file leaving an empty screen.
-fn preview_max_offset(total: usize) -> usize {
-    let page = (get_window_height() as usize).max(1);
-
-    total.saturating_sub(page).min(total.saturating_sub(1))
-}
-
-/// The width of the widest line of the text preview, in terminal columns.
-fn preview_line_width(app: &App) -> Option<usize> {
+/// Only the page is measured: the widest line of the whole file is not known
+/// any more, because the rest of it is not loaded.
+fn preview_visible_width(app: &App) -> Option<usize> {
     let FileContent::Text(ref text) = app.file_content else {
         return None
     };
 
-    Some(text.lines.iter().map(|line| line.width()).max().unwrap_or(0))
+    let start = app.preview.offset.saturating_sub(app.preview.window_start);
+    let page = preview_page();
+
+    Some(
+        text.lines
+            .iter()
+            .skip(start)
+            .take(page)
+            .map(|line| line.width())
+            .max()
+            .unwrap_or(0)
+    )
 }
 
 /// The largest column the text preview can be scrolled to.
 ///
-/// The end of the widest line stays at the right edge of the pane. A line which
-/// fits the pane cannot be scrolled at all; the shift is also kept in `u16`,
-/// which is what the renderer's scroll offset uses.
+/// The end of the widest visible line stays at the right edge of the pane. A
+/// line which fits the pane cannot be scrolled at all; the shift is also kept
+/// in `u16`, which is what the renderer's scroll offset uses.
 fn preview_max_column(longest: usize) -> usize {
     let width = (get_window_width() as usize).max(1);
 
@@ -425,6 +834,78 @@ fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
     }
 
     ranges
+}
+
+/// Scan `path` for `query`, a batch of lines at a time.
+///
+/// The worker reads the file itself, so the UI thread never holds more than a
+/// window. A new search bumps the ticket, which stops this scan at the next
+/// batch instead of finishing a file the user already left.
+fn search_preview_file(
+    request: &PreviewSearchRequest,
+    ticket: &AtomicU64,
+) -> PreviewMatches {
+    let mut matches: Vec<PreviewMatch> = Vec::new();
+    let mut line = 0;
+    let mut byte = 0;
+
+    if let Ok(file) = fs::File::open(&request.path) {
+        loop {
+            if ticket.load(Ordering::Relaxed) != request.ticket {
+                break
+            }
+
+            let window = match read_window(
+                &file,
+                byte,
+                line,
+                SEARCH_BATCH_LINES
+            ) {
+                Ok(window) => window,
+                Err(_) => break,
+            };
+
+            if window.lines.is_empty() {
+                break
+            }
+
+            let mut full = false;
+
+            for (idx, text) in window.lines.iter().enumerate() {
+                if search_indexes(
+                    &request.query,
+                    std::iter::once(text.as_str()),
+                    false
+                ).is_empty() {
+                    continue
+                }
+
+                if matches.len() >= MAX_SEARCH_MATCHES {
+                    full = true;
+                    break
+                }
+
+                matches.push(PreviewMatch {
+                    line: window.start_line + idx,
+                    byte: window.starts[idx],
+                });
+            }
+
+            let next_line = window.start_line + window.lines.len();
+
+            if full || window.eof || next_line == line {
+                break
+            }
+
+            line = next_line;
+            byte = window.end_byte;
+        }
+    }
+
+    PreviewMatches {
+        generation: request.generation,
+        matches,
+    }
 }
 
 #[cfg(test)]
@@ -502,8 +983,174 @@ mod test {
         app.apply_preview_search(answer);
     }
 
-    /// The preview shows the whole read file, so a line, a page and the end of
-    /// the text are reachable and clamped.
+    fn matched_lines(app: &App) -> Vec<usize> {
+        app.preview.matches.iter().map(|found| found.line).collect()
+    }
+
+    /// The line `row` of the visible page.
+    fn visible_line(app: &App, row: usize) -> String {
+        let FileContent::Text(ref text) = app.file_content else {
+            return String::new()
+        };
+
+        let start = app.preview.offset - app.preview.window_start;
+
+        text.lines[start + row]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    /// The preview holds only a window of the file, not the whole file.
+    #[test]
+    fn test_preview_loads_a_window() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("window");
+        write_lines(&dir, &numbered_lines(500));
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        // Four pages are read: one above the view and two below it.
+        assert_eq!(app.preview_window_len(), 40);
+        assert!(!app.preview.window_eof);
+        assert!(app.preview_window_covers(0, 10));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A page of scrolling fits in the loaded window: it does not reload (and
+    /// therefore does not flash) every time.
+    #[test]
+    fn test_preview_page_down_stays_in_the_window() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("page-window");
+        write_lines(&dir, &numbered_lines(500));
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        let generation = app.preview.window_generation();
+
+        for _ in 0..3 {
+            app.preview_scroll_page(true);
+        }
+
+        assert_eq!(app.preview.offset(), 30);
+        assert_eq!(app.preview.window_generation(), generation);
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A page can be scrolled far past the loaded window; the window is
+    /// reloaded around the new position.
+    #[test]
+    fn test_preview_scrolls_past_the_window() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("far");
+        write_lines(&dir, &numbered_lines(500));
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        for _ in 0..30 {
+            app.preview_scroll_page(true);
+        }
+
+        assert_eq!(app.preview.offset(), 300);
+        assert_eq!(visible_line(&app, 0), "line 300");
+
+        app.preview_scroll_page(true);
+        assert_eq!(app.preview.offset(), 310);
+        assert_eq!(visible_line(&app, 0), "line 310");
+
+        // And back up.
+        for _ in 0..31 {
+            app.preview_scroll_page(false);
+        }
+        assert_eq!(app.preview.offset(), 0);
+        assert_eq!(visible_line(&app, 0), "line 0");
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A taller terminal needs a taller window; the window is reloaded without
+    /// moving the view.
+    #[test]
+    fn test_preview_window_follows_the_terminal_size() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("resize");
+        write_lines(&dir, &numbered_lines(200));
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        app.preview_scroll_page(true);
+        app.preview_scroll_page(true);
+        assert_eq!(app.preview.offset(), 20);
+
+        let before = app.preview_window_len();
+
+        // The terminal grew while the preview was open.
+        update_window_height(40);
+        app.ensure_preview_window(40);
+
+        assert!(app.preview_window_len() > before);
+        assert_eq!(app.preview.offset(), 20);
+        assert_eq!(visible_line(&app, 0), "line 20");
+
+        // A shorter terminal needs no reload and keeps the view.
+        update_window_height(10);
+        app.ensure_preview_window(10);
+        assert_eq!(app.preview.offset(), 20);
+        assert_eq!(visible_line(&app, 0), "line 20");
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A terminal which grows while the last page is on screen pulls the view
+    /// up: the last lines are shown from the top of the taller pane, not with
+    /// blank rows below the end of the file.
+    #[test]
+    fn test_preview_growth_at_the_end_pulls_the_view_up() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("resize-end");
+        write_lines(&dir, &numbered_lines(50));
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        for _ in 0..10 {
+            app.preview_scroll_page(true);
+        }
+        assert_eq!(app.preview.offset(), 40);
+
+        update_window_height(60);
+        app.ensure_preview_window(60);
+
+        assert_eq!(app.preview.offset(), 0);
+        assert_eq!(visible_line(&app, 0), "line 0");
+        assert_eq!(app.preview_window_len(), 50);
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The preview scrolls a line and a page, stays inside its clamps and has
+    /// nothing to scroll when it is not text.
     #[test]
     fn test_preview_scrolls_line_and_page() {
         let _guard = window_size(10, 80);
@@ -547,9 +1194,9 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The column offset moves over the widest line five columns at a time and
-    /// stops at the right edge of the pane; a line which fits cannot be
-    /// scrolled.
+    /// The column offset moves over the widest visible line five columns at a
+    /// time and stops at the right edge of the pane; a line which fits cannot
+    /// be scrolled.
     #[test]
     fn test_preview_scrolls_columns() {
         let _guard = window_size(10, 10);
@@ -595,7 +1242,7 @@ mod test {
         // hidden behind a horizontal scroll.
         let rx = app.init_preview_search_channel();
         search(&mut app, &rx, "ABCD");
-        assert_eq!(app.preview.matched_lines, vec![0]);
+        assert_eq!(matched_lines(&app), vec![0]);
         assert_eq!(app.preview.column(), 0);
 
         update_window_height(0);
@@ -621,7 +1268,7 @@ mod test {
 
         // The search is case-insensitive and keeps every matching line.
         search(&mut app, &rx, "needle");
-        assert_eq!(app.preview.matched_lines, vec![3, 30]);
+        assert_eq!(matched_lines(&app), vec![3, 30]);
         assert_eq!(app.preview.current, Some(0));
         assert_eq!(app.preview.current_line(), Some(3));
 
@@ -650,7 +1297,7 @@ mod test {
 
         // A search without a match keeps the view where it is.
         search(&mut app, &rx, "nothing-matches");
-        assert!(app.preview.matched_lines.is_empty());
+        assert!(app.preview.matches.is_empty());
         assert_eq!(app.preview.current, None);
         assert_eq!(app.preview.current_line(), None);
         assert_eq!(app.preview.offset(), 25);
@@ -659,7 +1306,7 @@ mod test {
         app.preview_search(String::new()).unwrap();
         assert!(!app.preview.is_searching());
         assert!(!app.preview_search_active());
-        assert!(app.preview.matched_lines.is_empty());
+        assert!(app.preview.matches.is_empty());
 
         // A preview which is not text (an image, a directory listing) keeps
         // `n`/`N` for the file list even when a query is still set.
@@ -667,6 +1314,69 @@ mod test {
         app.preview.query = Some(String::from("needle"));
         app.file_content = FileContent::None;
         assert!(!app.preview_search_active());
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `n`/`N` between matches which are already in the loaded window only
+    /// move the offset: the window (and its coloured text) is kept, so the jump
+    /// does not flash.
+    #[test]
+    fn test_preview_move_candidate_inside_the_window_keeps_it() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("move-window");
+        let mut lines = numbered_lines(1000);
+        lines[400] = String::from("needle first");
+        lines[420] = String::from("needle second");
+        write_lines(&dir, &lines);
+
+        let mut app = App::default();
+        let rx = app.init_preview_search_channel();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        search(&mut app, &rx, "needle");
+        assert_eq!(matched_lines(&app), vec![400, 420]);
+        assert_eq!(app.preview.offset(), 395);
+
+        let generation = app.preview.window_generation();
+
+        app.preview_move_candidate(true);
+        assert_eq!(app.preview.offset(), 415);
+        assert_eq!(app.preview.window_generation(), generation);
+
+        // And back, still inside the same window.
+        app.preview_move_candidate(false);
+        assert_eq!(app.preview.offset(), 395);
+        assert_eq!(app.preview.window_generation(), generation);
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A match outside the loaded window is reached by the byte offset the
+    /// scan recorded, without reading the lines before it.
+    #[test]
+    fn test_preview_search_jumps_out_of_the_window() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("search-jump");
+        let mut lines = numbered_lines(1000);
+        lines[900] = String::from("needle here");
+        write_lines(&dir, &lines);
+
+        let mut app = App::default();
+        let rx = app.init_preview_search_channel();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        search(&mut app, &rx, "needle");
+        assert_eq!(matched_lines(&app), vec![900]);
+        assert_eq!(app.preview.current, Some(0));
+        assert_eq!(app.preview.offset(), 895);
+        assert_eq!(visible_line(&app, 5), "needle here");
 
         update_window_height(0);
         update_window_width(0);
@@ -713,7 +1423,7 @@ mod test {
         app.preview.reset();
         app.apply_preview_search(stale);
 
-        assert!(app.preview.matched_lines.is_empty());
+        assert!(app.preview.matches.is_empty());
         assert_eq!(app.preview.current, None);
 
         fs::remove_dir_all(&dir).unwrap();
@@ -751,5 +1461,39 @@ mod test {
         assert_eq!(match_ranges("İx", &format!("{lowered}x")), vec![(0, 2)]);
         assert_eq!(match_ranges("aaa", "aa"), vec![(0, 2)]);
         assert!(match_ranges("abc", "").is_empty());
+    }
+
+    /// A jump close to the end of the file keeps its view: the last page is
+    /// short, and a resize (which calls `ensure_preview_window`) must not pull
+    /// the view back to the start of the window.
+    #[test]
+    fn test_preview_jump_near_the_end_survives_a_resize() {
+        let _guard = window_size(34, 120);
+
+        let dir = temp_dir("jump-end");
+        let mut lines: Vec<String> = (0..200)
+            .map(|idx| format!("{idx:03} {}", "x".repeat(60)))
+            .collect();
+        lines[120] = format!("120 needle first {}", "x".repeat(60));
+        lines[170] = format!("170 needle second {}", "x".repeat(60));
+        write_lines(&dir, &lines);
+
+        let mut app = App::default();
+        let rx = app.init_preview_search_channel();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        search(&mut app, &rx, "needle");
+        app.preview_move_candidate(true);
+        assert_eq!(app.preview.offset(), 170 - 17);
+        assert_eq!(visible_line(&app, 0).split(' ').next().unwrap(), "153");
+
+        // The resize needs one more line than the window was read with.
+        update_window_height(35);
+        app.ensure_preview_window(35);
+        assert_eq!(app.preview.offset(), 153);
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
