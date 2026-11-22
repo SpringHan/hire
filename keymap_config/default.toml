@@ -38,6 +38,15 @@ keymap = [
     { key = "n", run = "move_candidate next" },  # Move to next search match
     { key = "N", run = "move_candidate prev" },  # Move to previous search match
 
+    # Text preview
+    { key = "?", run = "preview_search"           },  # Search in the text preview with `?`
+    { key = ">", run = "preview_scroll_page next" },  # Page the text preview down
+    { key = "<", run = "preview_scroll_page prev" },  # Page the text preview up
+    { key = "J", run = "preview_scroll_line next" },  # Scroll the text preview down one line
+    { key = "K", run = "preview_scroll_line prev" },  # Scroll the text preview up one line
+    { key = ")", run = "preview_scroll_column next" },  # Scroll the text preview right one column
+    { key = "(", run = "preview_scroll_column prev" },  # Scroll the text preview left one column
+
     # Mark
     { key = "m", run = "mark all"    },  # Mark/unmark all files
     { key = " ", run = "mark single" },  # Mark/unmark single file
@@ -67,7 +76,7 @@ keymap = [
     # Others
     { key = "R",  run = "refresh"           },  # Refresh file list
     { key = "r",  run = "reload_config"     },  # Re-read the config files
-    { key = "j",  run = "fzf_jump"          },  # Fuzzy find and jump to file
+    { key = "F",  run = "fzf_jump"          },  # Fuzzy find and jump to file
     { key = "D",  run = "vim_diff"          },  # Exec 'vim-diff' to marked & selected files
     { key = "f",  run = "rg_search"         },  # Jump to target file with 'rg'
     { key = "P",  run = "full_path"         },  # Print full path of current file

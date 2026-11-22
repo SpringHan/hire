@@ -17,6 +17,10 @@ spirit of `ranger`. It is a single-binary, keyboard-driven TUI application.
   `thiserror` + `anyhow` (errors), `chrono` (timestamps), `file-size`,
   `copy_dir`, `is_executable`, `image`, `ansi-to-tui`, `lazy_static`, `libc`
   (euid check, `tcgetpgrp` for the foreground program of a shell).
+- **Syntax highlighting:** `syntect` 5 for the text preview, built with
+  `regex-fancy` (a pure-Rust regex engine, so no C library is compiled),
+  `yaml-load` (to read the two extra syntax definitions in `utils/syntaxes/`),
+  and the bundled syntax definitions and themes; see `utils/syntax.rs`.
 
 ---
 
@@ -33,10 +37,11 @@ Hire is an event-driven application built around one mutable state object, `App`
       shells' terminal queries and forward their kitty images to the terminal
    c. clear the terminal if a shell was attached/detached (or an image was
       forwarded: the placeholder cells must be painted after it)
-   d. ui::ui(frame, &mut app)
-   e. poll/read events (16 ms while a shell is attached, 200 ms otherwise)
+   d. apply a finished syntax highlight, then ui::ui(frame, &mut app)
+   e. poll/read events (16 ms while a shell is attached or a syntax highlight
+      is pending, 200 ms otherwise)
    f. handle_event / handle_view_mouse / handle_view_paste
-   g. drain search / image channels
+   g. drain the file search, preview search and image channels
 
 ### Modules
 
@@ -51,6 +56,8 @@ Hire is an event-driven application built around one mutable state object, `App`
   - Block::Browser | Block::CommandLine | Block::Shell
 - `ui::ui` — Only read state of App and render ui
   - Render areas：parent / current / child / file / cmdline
+  - Menus: a centered box (`ui/menu_block`) over the dimmed page they were
+    opened from — a dialog of text, or a picker with a selectable list
   - Shell view: title / shell screen (`ui/shell_block`) / shell status line
 
 ### Data stream
@@ -68,15 +75,16 @@ Key architectural traits:
 1. **One central state struct.** `App<'a>` (in `app/mod.rs`) owns everything:
    the current path, the three file lists, selection indices, the active block,
    configuration, tabs, macro state, etc. There is no global state except the
-   window height atomic (`utils::WINDOW_HEIGHT`).
+   rendered pane size atoms (`utils::WINDOW_HEIGHT` and `utils::WINDOW_WIDTH`).
 
 2. **Behaviour is attached to `App` from many modules.** The project uses
    "`impl App` block per module" throughout: navigation lives in
    `key_event/cursor_movement`, command-line editing in
-   `key_event/command_line.rs`, search in `key_event/file_search.rs`, shell
-   helpers in `key_event/shell`, command parsing in `command/cmd_utils.rs`, and
-   the core file model in `app/mod.rs`. `app/mod.rs` is the hub that other
-   modules extend.
+   `key_event/command_line.rs`, search in `key_event/file_search.rs`, the text
+   preview's scroll/search in `app/preview.rs`, shell helpers in
+   `key_event/shell`, command parsing in `command/cmd_utils.rs`, and the core
+   file model in `app/mod.rs`. `app/mod.rs` is the hub that other modules
+   extend.
 
 3. **Three block modes.** `utils::Block` is `Browser(bool)` (the file
    browser; the bool means "current directory is `/`"),
@@ -94,15 +102,18 @@ Key architectural traits:
    characters to the active `SwitchCase` menu, to the command line, or through
    the keymap into an `AppCommand`, which is executed by `AppCommand::execute`.
 
-5. **Menus via `SwitchCase`.** Every "operation page" (paste, delete, tab,
+5. **Menus via `SwitchCase`.** Every operation menu (paste, delete, tab,
    goto, macro, shell, …) is a temporary modal implemented with `SwitchCase`: it
    replaces the command line with a help message and routes the next character
-   to a handler function pointer. Extra state is passed through
-   `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
+   to a handler function pointer. A menu is drawn as a dialog box, a picker
+   list, or a single bottom line (`MenuPresentation`); see §3. Extra state is
+   passed through `SwitchCaseData` (`None` / `Char` / `Bool` / `Struct`).
 
-6. **Asynchronous work is channel-based.** Incremental file search and image
-   decoding/resizing run on worker threads and communicate with the main loop
-   through `std::sync::mpsc` channels.
+6. **Asynchronous work is channel-based.** Incremental file search, the text
+   preview's search and image decoding/resizing run on worker threads and
+   communicate with the main loop through `std::sync::mpsc` channels. The
+   preview search answers carry a generation number, so an answer for a search
+   (or a file) which was replaced meanwhile is dropped.
 
 7. **Shell sessions are PTY-backed.** Each mounted shell owns a PTY, a reader
    thread and a `vt100` screen. The reader thread parses the PTY output into the
@@ -140,6 +151,7 @@ hire/
     ├── key_event/        # input handling and every interactive operation
     ├── ui/               # ratatui widgets, layout and rendering
     └── utils/            # shared low-level types and helpers
+        └── syntaxes/     # extra .sublime-syntax definitions (TOML, INI)
 ```
 
 ---
@@ -149,15 +161,22 @@ hire/
 ### `src/main.rs` — entry point
 
 Declares all top-level modules, parses CLI arguments (`utils::Args`), builds the
-default `App`, initializes config, starts the image/search background channels,
-enters the ratatui alternate screen, and runs the main loop.
+default `App`, initializes config, starts the image and search background
+channels (file search and text-preview search), enters the ratatui alternate
+screen, and runs the main loop.
 
 Responsibilities:
 
 - `main()` — the event loop: run pending macro, reap shells, answer/forward the
   shells' graphics (`App::handle_shell_graphics`), draw UI, poll/read key
-  events, handle the `q` quit shortcut, dispatch keys, drain the search and
-  image channels.
+  events, handle the `q` quit shortcut, dispatch keys, drain the file search,
+  preview search and image channels. Before each frame it applies a finished
+  syntax highlight (`App::apply_highlight`) and shortens the poll timeout while
+  one is pending.
+  The first frame sets the window height (`ui::update_file_linenr`) before
+  `init_all_files()`, because the window height is the page size of the file
+  list and the text preview (the preview itself reads by bytes, see
+  `utils::read_text_prefix`).
 - `shell_at_startup` — the startup shell: `--working-directory` (`-w`) jumps to
   the stored working directory first, `--shell` (`-S`) stays in the directory
   hire starts in (`--start-from` is applied before this), and either flag then
@@ -178,7 +197,9 @@ Responsibilities:
 | `app/filesaver.rs` | The `FileSaver` per-entry metadata struct and its rendering helpers; `sort()`. |
 | `app/color.rs` | `TermColors`: maps `LS_COLORS` entries to ratatui styles; `from_ls_colors` falls back to `app/default_ls_colors.txt` when the variable is missing or blank. |
 | `app/image_preview.rs` | `ImagePreview`, `Preview`: terminal image support detection, preview (decode / `xdg-mime` type) and resize worker threads, channels, `get_image_info`; `protocol_type` / `font_size` expose the detected protocol and cell size (the shell graphics support is derived from them). |
+| `app/highlight.rs` | `HighlightPreview`: the worker thread which syntax highlights the text preview, and the channels to it; `start` / `request` / `pending` / `take`. |
 | `app/macro_utils.rs` | Macro state: `MacroStatus`, `MacroTarget`, `Macro`. |
+| `app/preview.rs` | `PreviewState`: the text preview's row/column scroll offsets and search (query, matched lines, current match, search worker channel), `PreviewMatches`; the `App` methods which scroll, search, apply an answer and move between matches. |
 
 **`app/mod.rs`** is the heart of the data model:
 
@@ -188,8 +209,9 @@ Responsibilities:
   command-line/command-history state; completion state; the file searcher;
   macro attributes; `TermColors`; bookmarks (`target_dir`); path history
   (`path_history`); working directory (`working_directory`); tabs; image
-  preview; edit mode; keymap; loaded config; error queue; output settings;
-  host/user names.
+  preview (`image_preview`); syntax highlighting (`highlight`); the text
+  preview's scroll/search state (`preview`); edit mode; keymap; loaded config;
+  error queue; output settings; host/user names.
 - Shell-session state: `shell_sessions` (`ShellSessions`), `shell_prefix`
   (`ShellPrefix`), `shell_prefix_active`, `shell_scroll_mode` (the viewport is
   scrolled back, so the scroll bindings own the keys and the mouse),
@@ -226,6 +248,20 @@ Responsibilities:
   thread decides between an image and the file's `xdg-mime` type, so a
   directory's listing can never be covered by a late result and the previous
   file's preview can never be taken for the next one's.
+  The text branch is split in two stages: `set_file_content` reads the file's
+  prefix (`utils::read_text_prefix`, at most `MAX_PREVIEW_BYTES` = 256 KiB),
+  shows it as plain text at once (`utils::plain_text`) and hands the text to
+  `HighlightPreview::request`, which highlights it on a worker thread (see
+  `app/highlight.rs`); `apply_highlight` swaps the coloured version in when it
+  arrives, and drops it if its path is no longer the selected one. The whole
+  prefix is kept (not just the visible window), so `app/preview.rs` can page,
+  scroll and search it. A file which cannot be read as UTF-8 is the error that
+  sends `set_file_content` to the image or MIME-type preview, so the highlighter
+  never sees non-text content, and a file syntect has no language for is
+  answered with "nothing to highlight" and keeps its plain preview.
+  `set_file_content` and `apply_preview` reset `preview` (`reset_preview` drops
+  both the content and its scroll/search state), so a new file or a directory
+  never inherits the previous preview's offset or search.
 - Marked files: `append_marked_file(s)`, `marked_file_contains`,
   `marked_file_contains_path`, `remove_marked_file`, `clear_path_marked_files`.
 - Free helpers: `path_is_hidden`, `filesave_closure`, `list_state_select`,
@@ -278,6 +314,49 @@ sixel row symbol embeds the whole image row, so without the forced width the
 diff skips the rest of the screen (only part of the image is drawn and the
 following cells/layout are not updated).
 
+**`app/highlight.rs`** — `HighlightPreview` owns the worker which syntax
+highlights the text preview. The preview is read on the UI thread (a prefix of
+at most 256 KiB is cheap to read), but syntect parses every line of it again for
+every cursor movement, so the parse runs here instead. The UI thread draws the
+plain text at once, `request`s the highlight, and `apply_highlight` replaces it when
+the answer arrives — but only while the answer's path is still the selected
+file, the same guard `apply_preview` uses for images. The worker is one thread
+blocked on a channel between previews (an idle hire spends nothing on it). It
+keeps only the newest request, and the UI thread only the newest answer, so
+neither side can pile up work or text: a cursor moving through a directory
+highlights the file it lands on, not every file it passed. `pending` tells the
+main loop a request is in flight, which is when it polls at 16 ms instead of
+200 ms so the colours appear as soon as they are ready; an answer of `None`
+(there is no language to highlight) ends that wait too.
+
+**`app/preview.rs`** — `PreviewState` keeps the text preview's scroll offset,
+the horizontal column offset, the search (`query`, the matched line indices,
+the current match) and the channel to the search worker.
+`preview_scroll_line` / `preview_scroll_page` move the row offset (a page is
+`get_window_height()`, and the clamp keeps the last line at the bottom of the
+pane); `preview_scroll_column` moves the column in steps of five and stops when
+the end of the widest line (`Line::width`) reaches the right edge of the pane
+(`get_window_width()`), so a line which fits cannot be scrolled and the text is
+never shifted off an empty screen. Every jump to a match (`preview_jump_to`,
+used by the search and by `n`/`N`) also returns to the first column, so a
+horizontal scroll cannot hide the match at the beginning of the line.
+`preview_search` sends the lines to the worker
+(an empty query clears the search), `apply_preview_search` jumps to the first
+match at or after the offset — or back to the first one — and ignores an answer
+whose generation is not the current one, so a late answer can neither move
+another file's view nor that of a newer search. `preview_move_candidate` walks
+the matches and wraps around at both ends; `preview_search_active` is true while
+a query is set and the preview is text, which is what makes `n`/`N` navigate the
+preview instead of the file list (a preview search which found nothing still
+owns the keys). The matching rule is the shared `utils::search_indexes`, and the
+worker blocks on its channel between searches, like the file searcher.
+`match_ranges` computes the character ranges of every match in one line (case
+insensitive, mapped back from the lowercased text so a character which expands
+when lowercased still matches as a whole), which `ui/child_block.rs` reverses.
+`current_line` names the line of the match the search or `n`/`N` moved to; the
+renderer underlines the matches of that line, so the selected occurrence stands
+out from the other matches of the same query.
+
 **`app/macro_utils.rs`** — `Macro` keeps the recorded `KeyEvent` sequence, an
 optional list of `MacroTarget { dir, name }` (used to apply a macro to every
 marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
@@ -287,14 +366,19 @@ marked file) and the current `MacroStatus` (`Recording`, `Executing`, `None`).
 | File | Purpose |
 | --- | --- |
 | `command/mod.rs` | Wires the submodules and re-exports `cmds::*` and `AppCommand`. |
-| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`, and `EditAppendFsName` for the edit mode's `a`) and `AppCommand::from_str` (keymap string → command). |
+| `command/types.rs` | `AppCommand` enum (including `AttachPinned` for the browser's `*` binding, `EnterCommandLine` for `:` and `ReloadConfig` for the keymap's `reload_config`, `EditAppendFsName` for the edit mode's `a`, and the text preview's `PreviewSearch` / `PreviewScrollPage` / `PreviewScrollLine` / `PreviewScrollColumn`) and `AppCommand::from_str` (keymap string → command). |
 | `command/cmds.rs` | Filesystem commands: `rename_file`, `create_file`, `create_symlink`, `file_exists`. |
 | `command/cmd_utils.rs` | Command-line mode plumbing on `App`/`Block` (enter/set/append/quit/parse, history, expand). |
 
 **`command/types.rs`** — `AppCommand` enumerates every user-triggerable action
 (tab/goto/paste/delete/search/refresh, path history (`PrevPath` / `PathHistory`),
-edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
-`from_str` parses the `run = "…"` value of a keymap entry.
+the text preview (`PreviewSearch`, `PreviewScrollPage(bool)`,
+`PreviewScrollLine(bool)`, `PreviewScrollColumn(bool)`), edit mode, navi index,
+shell commands, `shell_command` from the keymap, etc.).
+`from_str` parses the `run = "…"` value of a keymap entry; the preview commands
+are `preview_search`, `preview_scroll_page next|prev`,
+`preview_scroll_line next|prev` and `preview_scroll_column next|prev` (the
+boolean of every scroll command is `next` = true = right/down).
 
 **`command/cmd_utils.rs`** — extends `App` and `Block`:
 
@@ -305,7 +389,9 @@ edit mode, navi index, shell commands, `shell_command` from the keymap, etc.).
 - `App::command_line_append`, `command_select` (history navigation),
   `quit_command_mode`.
 - `App::command_parse` — parse an entered `:command` line. Handles `/` search,
-  `:rename`, `:create_file`, `:create_dir`, `:create_symlink`,
+  `?` search of the text preview (the rest of the line is the query, handled by
+  `App::preview_search` on the search worker), `:rename`, `:create_file`,
+  `:create_dir`, `:create_symlink`,
   `:reload_config` (the same re-read as `AppCommand::ReloadConfig`), and
   `:!<shell>` commands, dispatching to `command/cmds.rs`, `config::load_config`
   and `key_event/shell`. The words after `:!<shell>` go through
@@ -429,7 +515,7 @@ early-returns an `anyhow`-backed error.
 | `key_event/shell/mouse.rs` | `encode_mouse`: `MouseEvent` → the child's mouse protocol mode/encoding (SGR, X10/Default, UTF-8), wheel included (only `Shift`+wheel and the scroll mode keep it for hire). |
 | `key_event/shell/view.rs` | Attach/detach/open/switch one shell (`attach` switches to the shell's tab when it belongs to another one and remembers `shell_return_tab`; `attach_active` handles `attach_shell`, including the most-recent-shell fallback; `attach_pinned` handles the pin; `open_shell` records the caller's `ShellOrigin`), the attached-view key state machine (`C-s x` kill, `C-s D` kill every shell of the tab, `C-s o` kill every other shell and keep the attached one, `C-s t` shell menu, `C-s *` pin, `C-s b` attach the pin, `C-s [` scroll mode, the `y/N` answer to `shell_pending_browser`), exit cleanup, numbered selection, `leave_closed_shell` (where the view goes once a shell is gone), `App::forget_shell` (drop the pin/menu origin of a removed shell), `App::leave_shell_menu` (restore the shell the menu was opened from), `App::close_tab_shells` (the one place which clears a tab's shells) and `App::close_other_shells` (keep one shell of a tab), `graphics_support` and `App::handle_shell_graphics`; `detach` marks `returned_to_browser` on every running shell, re-reads the current directory (`refresh_after_shell`) and, for a borrowed shell, refreshes the shell's tab and returns to `shell_return_tab`. Mouse handling forwards the wheel to the child by default (only `Shift`+wheel or the scroll mode scrolls hire's history), and `outer_mouse_mode` keeps the terminal's native selection when no one needs the mouse. |
 | `key_event/shell/scroll.rs` | The shell scrollback: `ScrollCommand` (parsed from `keymap.toml`), `enter`/`leave`/`apply`, `handle_wheel`; it only moves `vt100`'s scrollback offset and keeps `shell_scroll_mode` in sync with it (any history above the viewport keeps the mode, the bottom leaves it). |
-| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view): lists the current tab's shells first and then the shells of the other tabs (`menu_entries`); digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
+| `key_event/shell/menu.rs` | The shell menu (`shell_menu` from the browser, `C-s t` from the view), a picker: `generate_menu` lists the current tab's shells first and then the shells of the other tabs (`menu_entries`) under non-selectable section headings, and the shell number being typed reverses its entry's key; digits attach any of them (a shell of another tab is borrowed), `n` creates on the current tab (`menu_origin`: a shell of the view when the menu was opened with `C-s t`, of the browser otherwise), `x` + digits and `D` only touch the current tab; `D` asks before clearing every shell of the tab; the shell the menu was opened from is remembered in `App.shell_menu_origin` and shown as `[pinned]` for the pinned shell. |
 | `key_event/simple_operations.rs` | Print full path, write output file / run GUI open command, jump to stored path. |
 | `key_event/sudo_session.rs` | Root session: tab hand-over, isolated config, `sudo -E` launch and tab restore. |
 | `key_event/switch/mod.rs` | The `SwitchCase` menu framework. |
@@ -443,11 +529,24 @@ early-returns an `anyhow`-backed error.
 - `handle_event` dispatches everything to `key_event/shell/view.rs` while
   `selected_block` is `Block::Shell`. Otherwise it handles modifier chords
   (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`, `Ctrl-Backspace`, `Alt-f` / `Alt-b`),
-  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Tab`
-  expand). Non-control characters go to the active `SwitchCase`, the command
-  line, or the keymap.
+  `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Ctrl-Tab`
+  expand). `Ctrl-b`/`Ctrl-f` scroll the expanded view sideways and only move the
+  cursor when nothing is expanded; `Ctrl-p`/`Ctrl-n` page the expanded view.
+  Non-control characters go to the active `SwitchCase`, the command line, or
+  the keymap. `Alt-Ctrl-Tab` toggles only a typed command line: a menu owns its
+  own presentation and ignores it. The chord is matched as **Alt+Tab**: a
+  legacy terminal has no `Ctrl-Tab` encoding (Tab is already the `Ctrl-I`
+  byte), so `Alt-Ctrl-Tab` reaches hire as `ESC Tab` and crossterm reports it
+  with the Control bit lost; plain `Alt-Tab` never arrives because the window
+  manager consumes it.
 - `impl AppCommand::execute` is the single match that turns every `AppCommand`
-  into a concrete call into the operation modules. `AppCommand::ReloadConfig`
+  into a concrete call into the operation modules. `AppCommand::PreviewSearch`
+  opens the command line with `?` (like `Search` does with `/`),
+  `PreviewScrollPage` / `PreviewScrollLine` / `PreviewScrollColumn` call the
+  preview scrollers, and
+  `MoveCandidate` (`n`/`N`) goes to `App::preview_move_candidate` while
+  `preview_search_active()` is true — a preview search takes precedence over the
+  file list's matches. `AppCommand::ReloadConfig`
   calls `config::load_config`, which re-reads the three config files (the
   returned errors are shown in the command line). `AppCommand::Shell` calls
   `shell::open_shell` (a mounted, attachable session); `AppCommand::ShellMenu`
@@ -511,29 +610,35 @@ confirmation), `delete_file` (physical removal plus selection fix-up),
 **`key_event/file_search.rs`** — `FileSearcher` keeps the matched indices and a
 sender to a matching worker thread. `init_search_channel` starts that thread,
 `file_search` (async) / `file_search_sync` request matches, and
-`next_candidate` / `prev_candidate` move to the next/previous match.
+`next_candidate` / `prev_candidate` move to the next/previous match. The thread
+matches with `utils::search_indexes`, the same rule the text preview's search
+uses; only the names of the `FileSaver`s are handed to it.
 
 **`key_event/goto_operation.rs`** — the bookmark menu. `goto_switch` handles
 jumping to a stored directory and entering `+`/`-` sub-modes to add/remove a
 bookmark by key; changes are persisted through `config` and read back by
-`read_config`.
+`read_config`. `generate_menu` builds the picker: a hint line, the mode notice
+(`Adding Directory!` / `Deleting Directory!`) and one entry per bookmark keyed
+by its shortcut.
 
 **`key_event/interaction.rs`** — launches external tools: `fzf_jump` (fuzzy
 find, then jump to the chosen file), `rg_jump` (run the bundled `hire-rg.sh`)
 and `vim_diff` (diff the selected and marked files).
 
-**`key_event/macro_page.rs`** — `macro_operation` opens the macro page,
+**`key_event/macro_page.rs`** — `macro_operation` opens the macro menu,
 `macro_switch` starts recording on `q` and requests execution on `e`
 (collecting marked files as targets when any exist), `execute_macro` replays the
 recorded keys once — or once per target after selecting it —
 `collect_marked_targets` / `select_target` implement that per-file loop, and
-`generate_msg` builds the page text.
+`generate_msg` builds the dialog text.
 
 **`key_event/path_history.rs`** — keeps the paths the user jumped from in
 `App::path_history` (at most 30, newest last, duplicates moved to the end).
 `goto_prev_path` jumps back to the last stored path and pushes the path it left;
 `path_history_operation` / `path_history_switch` show those paths numbered `01`
-to `30` and jump to the one whose number the user types.
+to `30` and jump to the one whose number the user types. The menu is a picker:
+`generate_menu` puts one entry per path in the list, and the number being typed
+reverses its key while it still names one.
 
 **`key_event/paste_operation.rs`** — `paste_operation` / `paste_switch` present
 the paste menu (move, copy, force copy/move, symlink, clear marks);
@@ -637,12 +742,12 @@ coordinates from the outer terminal into the shell area. `sync_terminal_modes`
 is called every loop: it captures the mouse (SGR-encoded) only while the child
 wants it and only while the view is attached, and enables bracketed paste on
 the outer terminal when the child does; `disable_terminal_modes` restores both
-before hire exits. `menu.rs` is the `T` page listing the
-tab's shells, each labelled with the program running in it. The screen is
-rendered by `ui/shell_block.rs`.
+before hire exits. `menu.rs` is the picker (`T`, or `C-s t` from the shell)
+listing the tab's shells under their tab headings, each labelled with the
+program running in it. The screen is rendered by `ui/shell_block.rs`.
 
 **`key_event/simple_operations.rs`** — `print_full_path` (show the selected
-file's full path in a read-only page), `output_path` (run the configured
+file's full path in a read-only dialog box), `output_path` (run the configured
 `gui_file_open_cmd` with the selected path or the current directory appended
 when it's set, otherwise write that path to the temp/output file; both honor
 `quit_after_output`; it hands the terminal to `execute_command` so the UI is
@@ -662,20 +767,38 @@ unprivileged one — there is no euid juggling in either process. Mounted shell
 sessions are **not** transferred (they live in the parent process); they keep
 running while the root instance is open and are still mounted when it returns.
 
-**`key_event/switch/`** — the generic menu framework. `SwitchCase::new` installs
-a function pointer plus `SwitchCaseData` and shows a `CmdContent::Text` message;
-`switch_match` invokes the handler with the pressed character and closes the
-page when the handler returns `true`. `traits.rs` lets arbitrary structs
-(`TabState`) travel through `SwitchCaseData::Struct` as `Box<dyn SwitchStruct>`.
+**`key_event/switch/`** — the generic menu framework. `SwitchCase::new(app,
+handler, presentation, title, body, data)` installs a function pointer plus
+`SwitchCaseData`, puts the menu text into the command-line block and remembers
+the title. `presentation` is a `MenuPresentation`: `Dialog` (free-form text in
+a box), `Picker` (a `MenuList` of rows in a box, which `MenuBody::List` selects
+automatically) or `Inline` (the bottom command line only). A `MenuList` is
+built from builder calls — `header` lines, `line` rows which cannot be selected
+(section titles, continuation paths), `entry` rows with a key (`1`, `01`, `g`)
+and a `Line`, and `select(Some(entry))` for the highlighted entry, whose key the
+picker reverses; `entry_line` prefixes an entry with its aligned `[key]` token
+in the given style (the palette's executable colour), and `to_text` flattens the
+list into the command-line block in the same style. `switch_match` invokes the
+handler with
+the pressed character and closes the menu when the handler returns `true`;
+`SwitchCase::title` is what the overlay draws on its border, and
+`append_notice` puts an error in a picker's footer. `traits.rs` lets arbitrary
+structs (`TabState`) travel through `SwitchCaseData::Struct` as `Box<dyn
+SwitchStruct>`.
 
 **`key_event/tab/`** — multi-tab support. `TabList` stores one `Tab` per open
 tab: stable `TabId`, path, hidden-file flag, remembered selection, the mounted
-`shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab page;
-`switch` handles create/next/prev/close/close-others and numeric selection
-(1-based; multi-digit when there are more than nine tabs). Every removal (`c`,
-`d` + number, `o`, and applying a stored group) checks the affected tabs first: a mounted shell turns
-the action into a `SwitchCase` confirmation (`TabAction` in `TabState`, drawn
-like the other y/N pages, `expand: false`), and only `y` runs it — any other key
+`shells: Vec<ShellId>` and `active_shell`. `tab_operation` opens the tab menu as
+a picker: `generate_menu` builds the hint lines, the mode notices and one entry
+per tab (or per stored group in storage mode, whose other paths follow as
+non-selectable lines); the current tab's key is reversed (only the bracketed
+key, so the shell count after the path stays readable), and a tab number being
+typed takes the highlight over. `switch` handles create/next/prev/close/
+close-others and numeric selection (1-based; multi-digit when there are more
+than nine tabs). Every removal (`c`, `d` + number, `o`, and applying a stored
+group) checks the affected tabs first: a mounted shell turns
+the action into a `SwitchCase` inline confirmation (`TabAction` in `TabState`,
+drawn in the bottom command line), and only `y` runs it — any other key
 returns to the tab menu. Confirmed removals call `App::close_tab_shells`, which
 detaches first when the attached shell belongs to a cleared tab.
 `save_tabs` / `apply_storage_tabs` / `remove_storage_tabs` manage named tab
@@ -689,26 +812,102 @@ hidden flag and selection, never shells.
 | File | Purpose |
 | --- | --- |
 | `ui/mod.rs` | Top-level layout and draw entry point `ui`, error banner, title bar. |
-| `ui/parent_block.rs` | Renders the parent-directory column. |
-| `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list). |
-| `ui/child_block.rs` | Renders the child column and the file/text/image preview; image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
+| `ui/parent_block.rs` | Renders the parent-directory column, the left end of the browser's rounded frame. |
+| `ui/current_block.rs` | Renders the current-directory column (or the edit-mode list); it closes the rounded frame on the right in the root directory. |
+| `ui/child_block.rs` | Renders the child column and the file/text/image preview (the frame's right end); the text preview is drawn from its row/column offsets with the search matches in reverse video and the current match underlined, and image cells get `CellDiffOption::ForcedWidth(1)` so ratatui's diff does not treat their escape-laden symbols as hundreds of columns wide. |
 | `ui/command_line.rs` | Renders the state line / inline command line and status labels. |
-| `ui/cmdline_popup.rs` | Renders the completion candidate popup. |
+| `ui/cmdline_popup.rs` | Renders the completion candidate popup as a rounded floating box. |
+| `ui/menu_block.rs` | Renders an open menu as a centered rounded box over the dimmed page it was opened from: a dialog draws its text, a picker draws the `MenuList`'s hint lines, a `ratatui` `List` of entries with an aligned key column in the executable colour whose selected key is reversed, and the notice lines; the border and the title use the directory colour. |
 | `ui/list.rs` | Custom list widget with sidebars, navigation index and selection. |
 | `ui/shell_block.rs` | Renders the attached shell's `vt100` screen (`screen.cell` follows the scrollback offset) and its status line (`[pinned]` marks the pinned shell); the right-hand key hint is only shown while the prefix is active, the scroll mode is open (built from the configured bindings) or a prompt/notice needs it. The child's cursor is only drawn on the live screen. |
-| `ui/utils.rs` | Builds list items and their styles from files / edit items. |
+| `ui/utils.rs` | Builds list items and their styles from files / edit items, and splits a key-hint string into styled spans. |
 
 **`ui/mod.rs`** — computes the vertical layout (title, browser, command line;
-or title + expanded command line), renders the title bar
+or title + full-page editor), renders the title bar
 (`user@host`, shortened path, selected file name) and the item statistics,
-calls `check_app_error` (turns `app.app_error` into a red command-line message),
+calls `check_app_error` (turns `app.app_error` into a red command-line message,
+a notice line in a picker's box, or the red text of a dialog),
 then lays out and draws the parent/current/child blocks, the command line and
 the completion popup. `title_bar_path` canonicalises the browser path to exactly
 one trailing separator, so a path which still ends with `/` does not render as
-`/home//name`. When `selected_block` is `Block::Shell`, it short-circuits
-to `ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
-shell screen and the bottom band is the shell status line. The title's tab badge
-shows the mounted shell count (`|1:2|`).
+`/home//name`. The bottom command-line band is only dropped for the full-page
+editor (`Alt-Ctrl-Tab`: `command_expand` without a `SwitchCase`, `full_page`); a
+menu keeps the three bands, draws the browser normally and puts its box over the
+middle band. `menu_open` (`command_expand` with a `SwitchCase`) tells the two
+apart. When `selected_block` is `Block::Shell`, it short-circuits to
+`ui/shell_block.rs`: the title bar keeps `SH n/total`, the middle band is the
+shell screen and the bottom band is the shell status line. A menu opened from an
+attached shell (`C-s t`) has no `Block::Shell` any more, so the shell it was
+opened from is taken from `app.shell_menu_origin` and its screen stays behind
+the box. The title's tab badge shows the mounted shell count (`|1:2|`).
+
+The browser behind a menu (or behind a typed command line) is laid out by the
+directory rather than by the block which owns the input: `ui/mod.rs` checks
+`app.root()` instead of `Block::Browser(true)`, because a menu replaces
+`selected_block` with `CommandLine` and the layout (the root directory's two
+columns, the preview in the second one) must not change when a menu opens or a
+command is typed.
+
+**`ui/menu_block.rs`** — draws an open menu as an overlay instead of a page of
+its own. `ui/mod.rs` calls `render_menu` after the browser (or the shell screen
+behind a `C-s t` menu) has been drawn, so a menu keeps the file list visible
+underneath: every cell of the band gets `Modifier::DIM`, then the box is
+cleared and drawn, so the browser recedes while the menu stays at full
+contrast. The box is centered in the band with one row/column of the page left
+visible on each side, sized to the content plus its title (`Line::width()` /
+`display_width`, so CJK text measures correctly) and clamped to the band; a
+band too small for even a minimal box is left untouched instead of dimmed
+without a menu. The `title` argument of `SwitchCase::new` is drawn on the top
+border (`╭ Delete ────╮`), and the border and the title both use the palette's
+`dir_style`, so the box stands out from the dimmed page.
+
+A `Dialog` draws its message with a `Paragraph` scrolled by `command_scroll`. A
+`Picker` splits the box into the hint lines, the entries and the notices (an
+error appended by `SwitchCase::append_notice`): the entries are a real
+`ratatui` `List`, which keeps the selected entry in view while it scrolls; the
+key of every entry is right-aligned in one column (`[ 1]`, `[12]`, `[g]`) and
+drawn in `executable_style`, and only the selected key is reversed, so the rest
+of the row (e.g. the shell count after a tab's path) stays readable. The
+non-selectable rows (section headings, continuation paths) are drawn between
+them. `Ctrl-p`/`Ctrl-n` page the box and
+`Ctrl-b`/`Ctrl-f` scroll it sideways: the stored column offset is applied to
+every line (including the hints) by trimming its first display columns, so a
+long path can be read without leaving the menu. The box size is only known at
+render time, so `render_menu` clamps the stored offsets to the content too: a
+shorter menu (or a re-opened one) never stays scrolled past its end. `Inline`
+menus do not use this path; they answer in the bottom command line and keep the
+browser and the command line untouched.
+
+**Rounded browser frame.** The browser's three columns are drawn as one rounded
+frame, not as three separate boxes: the columns are adjacent, so they must
+describe the borders they share. `ui/parent_block.rs` is the frame's left end
+(`Borders::TOP | LEFT | BOTTOM`) and uses `symbols::border::ROUNDED` — only its
+left corners are drawn, and those are the rounded ones. Every column to its
+right uses the same `Set { top_left: ┬, bottom_left: ┴, ..ROUNDED }`: its left
+border is the separator from the previous column, so it meets the continuous
+top and bottom border in `┬`/`┴` junctions (a rounded corner there would cut the
+line in two), while its right corners are rounded because the column closes the
+frame on that side. The child column and the file preview always do;
+`ui/current_block.rs` draws `Borders::ALL`, and with it the rounded right
+corners, only in the root directory, where there is no child column and the
+current column is the frame's right end. In a normal directory the current
+column has no right border at all: the child column's left border is the
+separator between them. Border presence never changes, so the inner areas and
+the list window sizes are the same as before.
+
+**`ui/child_block.rs`** — `render_file` draws the image preview or the text:
+`preview_lines` takes the lines which fit in the pane from the preview's row
+offset (the text may have got shorter than the offset, then its last line is
+shown) and `highlight_matches` splits each line's spans at the search ranges, so
+only the matched characters get `Modifier::REVERSED` and the syntax colours of
+the rest are kept; on the line `preview.current_line()` names — the match the
+search or `n`/`N` moved to — they get `Modifier::UNDERLINED` as well, which is
+what tells the selected occurrence apart from the other ones. The lines are
+drawn with a `Paragraph` whose `scroll((0,
+column))` is the preview's horizontal offset (`Wrap` is off, so it truncates
+and shifts instead of wrapping). `update_file_linenr` stores the pane height and
+width: the height is the page size of the list and the preview, the width bounds
+the horizontal scroll.
 
 **`ui/list.rs`** — the reusable `List` / `Item` widgets. `Item` renders a left
 line plus an optional right sidebar; `List` handles the visible window, selection
@@ -720,16 +919,21 @@ digits. `prefix_split` highlights the typed prefix of the index number.
 `render_editing_list` does the same for `EditItem`s, including the edit cursor
 (highlighted with the same byte-offset logic as the command line) and
 delete/marked sidebars; `shorten_path` abbreviates a path so it fits in the
-state line.
+state line; `key_hints` turns a hint string (`"[n] new tab  [Esc] close"`) into
+a `Line`, drawing every `[key]` token in the given style — the menus pass
+`marked_style` — and keeping an unclosed `[` plain text.
 
-**`ui/shell_block.rs`** — `render_shell` resizes the parser and the PTY to the
-drawn area and copies every `vt100::Cell` into the ratatui buffer (fg/bg
-colours, bold/italic/underline/inverse; wide-cell continuations are skipped).
+**`ui/shell_block.rs`** — `render_shell(id, area, show_cursor)` resizes the
+parser and the PTY to the drawn area and copies every `vt100::Cell` into the
+ratatui buffer (fg/bg colours, bold/italic/underline/inverse; wide-cell
+continuations are skipped).
 A blank cell is written as a real space: `vt100::Cell::contents()` is empty for
 cleared cells and an empty symbol would not erase the old character on the
 outer terminal. `screen.cell()` follows the scrollback offset set by
 `key_event/shell/scroll.rs`, so the same loop renders the history; the child's
-cursor is only placed with `Frame::set_cursor_position` while the offset is 0.
+cursor is only placed with `Frame::set_cursor_position` while the offset is 0,
+and only when `show_cursor` is true (`ui/mod.rs` passes `false` for the screen
+which is only the background of the shell menu).
 `shell_status_lines` builds the shell's left/right status text (the program
 running in the shell — `vim` while vim is open, the shell's own name at its
 prompt — its start directory, position, prefix hint, the scroll-mode hint
@@ -752,13 +956,20 @@ state line.
 **`ui/cmdline_popup.rs`** — `CompletionPopup` and `render_completion` position
 and draw the completion candidate list above the command line. The position and
 width come from `utils::display_width`, so CJK candidates line up with the
-command line; the layout arithmetic saturates instead of overflowing.
+command line; the layout arithmetic saturates instead of overflowing. The popup
+is a floating window which shares an edge with nothing, so unlike the browser
+columns it uses `symbols::border::ROUNDED` on all four sides; the box width
+already includes the two border cells, so the rounded corners take no extra
+room. `Clear` erases the covered cells first, so the corners do not mix with
+the browser frame underneath.
 
 ### `src/utils/` — shared helpers
 
 | File | Purpose |
 | --- | --- |
 | `utils/mod.rs` | CLI `Args`, `Direction`, text helpers, window-height global. |
+| `utils/syntax.rs` | Syntax highlighting of the text preview (`syntect`). |
+| `utils/syntaxes/` | `.sublime-syntax` definitions the bundled syntect set lacks (TOML, INI), compiled into the binary. |
 | `utils/types.rs` | Core shared enums/structs used across modules. |
 
 **`utils/mod.rs`**
@@ -769,10 +980,20 @@ command line; the layout arithmetic saturates instead of overflowing.
   `--shell` is `-S` (capital) because `-s` belongs to `--start-from`, and it
   conflicts with `--working-directory`.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
-- `str_split`, `read_to_text` (read a limited number of lines, strip `\r`,
-  expand tabs, parse ANSI), `delete_word` (character-based, so multi-byte
-  content is never split; its separators are the ASCII punctuation characters,
-  `_` included).
+- `str_split`, `read_to_text` (read the preview prefix, strip `\r`, expand
+  tabs, parse ANSI), `delete_word` (character-based, so multi-byte content is
+  never split; its separators are the ASCII punctuation characters, `_`
+  included). `read_to_text` is built from the two helpers the preview calls
+  directly: `read_text_prefix` (reads at most `MAX_PREVIEW_BYTES` = 256 KiB and
+  rejects a prefix which is not UTF-8 — the failure which means "not text"; a
+  character the limit cuts in half is dropped instead of rejecting the file;
+  buffered, because `File` is not and an unbuffered `bytes()` costs one
+  `read(2)` per byte) and `plain_text` (ANSI parsing plus tab expansion). The
+  whole prefix is kept because the text preview pages, scrolls and searches it.
+- `search_indexes` — the indices of the names which contain a query
+  (case-insensitively), or of the first name which equals it. It is shared by
+  the file search (`FileSaver` names) and the text preview's search (`Text`
+  lines), which is why it takes any iterator of strings.
 - `extension_start` — the byte index where a file name's extension starts (its
   last `.`), shared by the command-line `append_file_name` and the edit-mode
   `enter_insert_before_extension` so both put the cursor in the same place.
@@ -791,8 +1012,54 @@ command line; the layout arithmetic saturates instead of overflowing.
   `next_char_boundary` for character-wise movement and deletion.
 - `display_width` — the terminal column width of a text (wide characters take
   two columns), used by the command line cursor and the completion popup.
-- The global rendered window height (`WINDOW_HEIGHT`, `update_window_height`,
-  `get_window_height`) used to size scrolling and preview reads.
+- The global rendered pane size: `WINDOW_HEIGHT` (`update_window_height`,
+  `get_window_height`) sizes list scrolling and the text preview's pages, while
+  `WINDOW_WIDTH` (`update_window_width`, `get_window_width`) bounds the text
+  preview's horizontal scroll.
+
+**`utils/syntax.rs`**
+
+`highlight_text(content, path)` is the whole highlighting step: it takes the
+text the UI thread read, and returns `None` when there is nothing to highlight.
+It runs on the highlighting worker (`app/highlight.rs`), never on the UI thread.
+The steps:
+
+- `syntax_for` asks syntect for a syntax: extension first, then file name, then
+  the first line of the file. When there is none (or syntect's "Plain Text",
+  which is what a `.txt` file maps to), `highlight_text` returns `None` and the
+  plain preview the UI thread already drew stays as it is.
+- Otherwise `highlighted_text` runs syntect's `HighlightLines` over the lines
+  (keeping their `\n`, which the parser needs) and turns every highlighted
+  range into a styled `Span`: the theme's foreground colour plus bold, italic
+  and underline. The theme background is not used — the preview is drawn on the
+  terminal's own background, not in an editor window. Tabs are expanded inside
+  each span and the line break is left to the `Line`, as in the plain preview.
+  Content which reaches `MAX_HIGHLIGHT_BYTES` (256 KiB, the same limit as
+  `MAX_PREVIEW_BYTES`) is not highlighted: a file that large is shown plain,
+  because syntect would parse every byte of it (a minified JSON, a base64 blob)
+  although the terminal shows only the first columns of a line, and the
+  highlight runs again for every cursor movement.
+
+`SYNTAX_SET` and `THEME` are `lazy_static`s: loading them takes milliseconds,
+which is why the first highlight — not just every later one — happens off the
+UI thread. The theme is `base16-ocean.dark`, or `base16-ocean.light` when
+`$COLORFGBG` (`"fg;bg"`, written by many terminals) reports a light background
+(index >= 7); both themes are bundled with syntect.
+
+`syntect`'s bundled set is Sublime's default package and has **no TOML and no
+INI syntax**, so `Cargo.toml`, `Cargo.lock`, `.conf`, `.ini` and `.cfg` files
+used to be previewed as plain text. `EXTRA_SYNTAXES` holds the two definitions in
+`utils/syntaxes/` (embedded with `include_str!`, parsed by the `yaml-load`
+feature). They live in a second, tiny `EXTRA_SET` built by `SyntaxSetBuilder`:
+merging them into the bundled set would take `into_builder()` + `build()`, which
+re-links all 75 bundled syntaxes and costs hundreds of milliseconds, while a
+second lookup only happens for a file the bundled set does not know.
+`syntax_for` therefore returns the set *and* the syntax, and `highlighted_text`
+hands that set back to `HighlightLines`. The TOML definition claims `toml` and
+`lock`; the INI one claims `ini`, `conf`, `cfg`, `properties`, `desktop`,
+`.editorconfig`, `.env` and `gitconfig`. They are deliberately small: comments,
+`[tables]`, `key =`/`key:`, quoted strings (with escapes) and
+numbers/booleans/dates, which is what these files contain.
 
 **`utils/types.rs`**
 
@@ -846,12 +1113,14 @@ metadata shown in the state line and preview.
 
 ### Command line and completion
 
-`:` (`AppCommand::EnterCommandLine`), `/` (search) and `!` (`cmdline_shell`)
+`:` (`AppCommand::EnterCommandLine`), `/` (search), `?` (the text preview's
+search, `AppCommand::PreviewSearch`) and `!` (`cmdline_shell`)
 switch `selected_block` to `CommandLine`. `command_parse`
-(`command/cmd_utils.rs`) interprets the line. `Tab` triggers
-`key_event::command_line::completion`, which completes builtin commands, file
-names, or the selected browser item (when the cursor is right after a space) and
-shows a candidate popup (`ui/cmdline_popup.rs`).
+(`command/cmd_utils.rs`) interprets the line: `/` searches the file list, `?`
+the selected file's preview (asynchronously, see `app/preview.rs`). `Tab`
+triggers `key_event::command_line::completion`, which completes builtin
+commands, file names, or the selected browser item (when the cursor is right
+after a space) and shows a candidate popup (`ui/cmdline_popup.rs`).
 
 ### Shell sessions
 
@@ -998,19 +1267,38 @@ sudo_session (keybinding, e.g. `Z`)
 
 ### Menus (`SwitchCase`)
 
-A menu is created with `SwitchCase::new(app, handler, expand, message, data)`.
-It sets the command-line block to the (usually multi-line) help text and stores
-the handler. Subsequent characters are delivered to the handler until it returns
-`true`, at which point `quit_command_mode` restores the browser. Complex menu
-state (e.g. tab operations) is boxed in `SwitchCaseData::Struct`.
+A menu is created with `SwitchCase::new(app, handler, presentation, title,
+body, data)`. It sets the command-line block to the body's text and stores the
+handler, the title and the presentation. `MenuPresentation` picks how the menu
+is shown: `Dialog` draws its text in a rounded box over the dimmed browser,
+`Picker` draws a `MenuList` in that box (hint lines whose `[key]` tokens use
+`marked_style`, a `List` of keyed entries whose aligned keys use
+`executable_style` and whose selected key is reversed, and the notices), and
+`Inline` stays in the
+bottom command line and leaves the browser fully visible. A `MenuBody::List`
+always makes a picker. Subsequent characters are delivered to the handler until
+it returns `true`, at which point `quit_command_mode` restores the browser; an
+error stays open, goes to the picker's footer (or the dialog's text) and is
+dismissed by the next key. Complex menu state (e.g. tab operations) is boxed in
+`SwitchCaseData::Struct`.
 
 ### Background work
 
 - **Search:** `FileSearcher` sends `(query, exact, files)` to a worker thread
   started by `init_search_channel`; the main loop polls the receiver and updates
   the match list.
+- **Preview search:** `init_preview_search_channel` starts the thread which
+  searches the text preview's lines; its answers are `PreviewMatches`
+  (generation + matched line indices). The main loop polls the receiver and
+  calls `apply_preview_search`, which drops an answer of a replaced search. The
+  thread uses the same `utils::search_indexes` rule as the file search and
+  blocks on its channel between queries.
 - **Images:** two threads decode and resize/encode images; the main loop polls
   their receivers and updates `file_content` / the image protocol.
+- **Syntax highlighting:** one thread (`HighlightPreview`, started once in
+  `main`) parses the selected file's text for the preview. It keeps only the
+  newest request, the main loop keeps only the newest answer
+  (`App::apply_highlight`), and it blocks on its channel when idle.
 
 ### Macros
 
@@ -1027,7 +1315,7 @@ when files are marked, execution is repeated for every marked target.
 | Path | Purpose |
 | --- | --- |
 | `Cargo.toml` | Package metadata, dependencies and the size-optimized release profile (`opt-level = 's'`, LTO, stripped). |
-| `keymap_config/default.toml`, `keymap_config/colemak.toml` | Shipped keymap presets; `install.sh` copies the selected one to `~/.config/springhan/hire/keymap.toml`. |
+| `keymap_config/default.toml`, `keymap_config/colemak.toml` | Shipped keymap presets; `install.sh` copies the selected one to `~/.config/springhan/hire/keymap.toml`. Every text preview command is bound in both (page `>`/`<`; line `J`/`K` and column `)`/`(` in `default`, line `E`/`U` and column `I`/`N` in `colemak`). |
 | `scripts/hire-rg.sh` | `rg` + `fzf` helper invoked by the `rg_search` command. |
 | `install.sh` | Builds the release binary and installs the binary, keymap and scripts. |
 | `README.md` | User documentation (configuration, features, keybindings). |
@@ -1055,6 +1343,32 @@ explicit value, so `cargo test` works in a bare CI shell. They are
 included — no `/bin/sh` or terminal needed),
 `app::test::test_file_content_of_a_socket_is_its_type` (a socket is previewed by
 its type instead of failing with `ENXIO`),
+`app::test::test_file_content_is_syntax_highlighted` (a `.rs` preview is plain
+at first, coloured once the worker answered; a `.txt` one keeps a single default
+style), `app::test::test_stale_highlight_is_dropped` (an answer for another file
+never repaints the preview), `app::preview::test::*` (one line, one page, one
+column and the end of the text are reachable and clamped, a directory is not
+scrollable and has nothing to search; the search is case-insensitive, jumps to
+the first match at or below the view,
+`n`/`N` walk the matches with wrap-around, an empty query clears it, and an
+answer of a replaced search never moves the view; the character ranges of the
+matches across spans, multi-byte text and a lowercasing expansion),
+`ui::child_block::test::test_highlight_matches_splits_the_spans` (only the
+matched characters are reversed, the match of the current line is underlined
+too, the rest of the line keeps its style),
+`utils::test::test_search_indexes` (the shared case-insensitive substring and
+exact-name matching) and `test_preview_read_is_limited_but_keeps_utf8` (the byte
+limit, a character cut by it and invalid UTF-8 in the middle),
+`app::highlight::test::*` (the worker answers with
+the path of the file, answers `None` when there is nothing to highlight — so the
+UI stops waiting — and ignores requests when it was not started) and
+`utils::syntax::test::*` (a source file highlighted, tabs expanded, plain text
+and unknown files left as before — the latter still parsing ANSI colours, a
+binary file rejected so the preview shows its MIME type, a line too long to be
+worth highlighting left plain, the `$COLORFGBG` background guess, the two
+bundled themes, and the configuration formats: a `.toml`/`.lock`/`.conf`/`.ini`
+preview is coloured and every extension the extra definitions claim resolves to
+a syntax),
 `key_event::paste_operation::test::*` (a copy through `c`/`o` or a symlink
 through `s` keeps the marked files, while a move through `p`/`O` and the clear
 entry drop them),
@@ -1083,6 +1397,8 @@ cannot be parsed), `command::types::test::test_reload_config_command`
 `test_enter_command_line_command` (`enter_command_line` parses to
 `AppCommand::EnterCommandLine`), `test_edit_append_filename_command`
 (`edit_append_filename` parses to `AppCommand::EditAppendFsName`),
+`test_preview_commands` (`preview_search` and the `next`/`prev` forms of the
+three preview scroll commands parse, and the argument is required),
 `config::keymap::test::test_edit_bindings_are_routed_to_the_edit_map` (an
 edit-only command never becomes a browser binding),
 `command::cmd_utils::test::*`
@@ -1094,19 +1410,34 @@ leading-dot and multi-byte cases), `key_event::file_operations::test::*`
 `test_enter_insert_before_extension_of_marked_items` (the edit-mode
 `append_filename`: insert mode, one cursor per active item, the extension
 untouched),
-`key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`,
+`key_event::goto_operation::goto_test::test_read_config_skips_broken_bookmarks`
+and `test_menu_lists_the_bookmarks` (the bookmark picker's keyed entries),
 `key_event::tab::test::*` (a broken stored tab group is skipped, a missing
 section is accepted, `clear_storage`),
 `key_event::command_line::test_completion_suggests_builtin_commands` (`:reload`
 completes to `reload_config`), `key_event::command_line::test_delete_to_end`
 (`Ctrl-k` keeps what is before the cursor and resets the completion popup),
-`key_event::shell::menu::test::*` (the shell
-menu's `D` confirmation, the cross-tab list/borrow and the `x` scope),
-`ui::shell_block::test::*` (the idle status line and the prefix
-hint) and `key_event::tab::utils::test::*` (tab-removal confirmations).
+`key_event::path_history::test::*` (the path picker's `01`-numbered entries and
+the typed-number highlight, and an empty history being a hint),
+`key_event::shell::menu::test::*` (the shell menu's `D` confirmation, the
+cross-tab list/borrow, the `x` scope and the typed-shell highlight among
+non-selectable headings),
+`ui::shell_block::test::*` (the idle status line and the prefix hint),
+`ui::menu_block::test::*` (the centered rounded dialog with its title and the
+dimmed page around it, the border/title colour, a picker's aligned key column
+in the executable colour, the reversed selected key with the rest of its row
+left alone, the scrolling/clamping of a list taller than the box and the
+selection being
+scrolled back into view, an error notice below the entries, and a page too
+small for a box being left alone), `ui::utils::test::*` (the cursor rendering
+of edit names, `shorten_path`, and `key_hints` styling only the bracketed keys)
+and
+`key_event::tab::utils::test::*` (tab-removal confirmations, the tab picker's
+keys and current-tab highlight, and the stored-group rows).
 `key_event::simple_operations::test::*` covers the temp-file target
 normalisation (`/home/` → `/home`) and `ui::test::*` the title's single
-trailing separator.
+trailing separator plus the error routing (a picker error goes to its footer,
+a dialog error stays in its own text).
 
 **Any test that drives the real binary — a pty harness, an expect-like script or
 a manual smoke test — must isolate the config with `HIRE_CONFIG_DIR`.** Otherwise

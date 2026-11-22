@@ -51,7 +51,9 @@ pub use sudo_session::SessionTabs;
 pub use macro_page::execute_macro;
 pub use edit::{EditMode, EditItem};
 pub use simple_operations::output_path;
-pub use switch::{SwitchCase, SwitchCaseData};
+pub use switch::{
+    MenuList, MenuPresentation, MenuRow, SwitchCase, SwitchCaseData
+};
 pub use command_line::{AppCompletion, get_content};
 pub use cursor_movement::{move_cursor, Goto, NaviIndex};
 pub use shell::{
@@ -103,18 +105,40 @@ pub fn handle_event(
                     KeyModifiers::CONTROL => {
                         match c {
                             'g' => app.command_completion.hide(),
-                            'b' | 'a' => {
-                                if app.edit_mode.inserting() {
-                                    app.edit_mode.cursor_move(false, c == 'a')?;
+
+                            // `Ctrl-b`/`Ctrl-f` scroll the expanded view
+                            // sideways; in the command line (or edit mode)
+                            // they move the cursor instead. `Ctrl-a`/`Ctrl-e`
+                            // always move it to the beginning/end.
+                            'b' => {
+                                if app.command_expand {
+                                    app.expand_scroll(Direction::Left);
+                                } else if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(false, false)?;
                                 } else {
-                                    app.cursor_left(c == 'a');
+                                    app.cursor_left(false);
                                 }
                             },
-                            'f' | 'e' => {
-                                if app.edit_mode.inserting() {
-                                    app.edit_mode.cursor_move(true, c == 'e')?;
+                            'f' => {
+                                if app.command_expand {
+                                    app.expand_scroll(Direction::Right);
+                                } else if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(true, false)?;
                                 } else {
-                                    app.cursor_right(c == 'e');
+                                    app.cursor_right(false);
+                                }
+                            },
+                            'a' | 'e' => {
+                                let to_end = c == 'e';
+
+                                if app.edit_mode.inserting() {
+                                    app.edit_mode.cursor_move(to_end, true)?;
+                                } else {
+                                    if to_end {
+                                        app.cursor_right(true);
+                                    } else {
+                                        app.cursor_left(true);
+                                    }
                                 }
                             },
 
@@ -379,7 +403,8 @@ pub fn handle_event(
                 SwitchCase::new(
                     app,
                     edit::save_edit,
-                    false,
+                    MenuPresentation::Inline,
+                    "Edit",
                     edit::generate_msg(),
                     SwitchCaseData::None
                 );
@@ -415,45 +440,38 @@ pub fn handle_event(
             }
         },
 
-        KeyCode::Left => {
-            if app.command_expand && key.modifiers == KeyModifiers::ALT {
-                app.expand_scroll(Direction::Left);
-                return Ok(())
-            }
-            app.cursor_left(false)
-        },
+        KeyCode::Left => app.cursor_left(false),
 
-        KeyCode::Right => {
-            if app.command_expand && key.modifiers == KeyModifiers::ALT {
-                app.expand_scroll(Direction::Right);
-                return Ok(())
-            }
-            app.cursor_right(false)
-        },
+        KeyCode::Right => app.cursor_right(false),
 
-        KeyCode::Tab => {
-            match key.modifiers {
-                KeyModifiers::ALT => {
-                    if let Block::CommandLine(_, _) = app.selected_block {
-                        // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
-                        if app.command_expand {
-                            app.command_expand = false;
-                            app.command_scroll = None;
-                        } else {
-                            app.expand_init();
-                        }
-                    }
-                },
-
-                KeyModifiers::NONE => {
-                    completion(app)?;
-                },
-
-                _ => ()
-            }
-        },
+        KeyCode::Tab => handle_tab(app, key.modifiers)?,
 
         _ => ()
+    }
+
+    Ok(())
+}
+
+/// Handle a `Tab` press: completion, or the full-page command-line editor.
+fn handle_tab(app: &mut App, modifiers: KeyModifiers) -> AppResult<()> {
+    if modifiers.contains(KeyModifiers::ALT) {
+        if let Block::CommandLine(_, _) = app.selected_block {
+            // A menu owns its presentation (`MenuPresentation`), so the chord
+            // only toggles the full editor of a typed command.
+            if app.switch_case.is_some() {
+                return Ok(())
+            }
+
+            // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+            if app.command_expand {
+                app.command_expand = false;
+                app.command_scroll = None;
+            } else {
+                app.expand_init();
+            }
+        }
+    } else if modifiers.is_empty() {
+        completion(app)?;
     }
 
     Ok(())
@@ -551,6 +569,19 @@ impl AppCommand {
                 CursorPos::End
             ),
 
+            AppCommand::PreviewSearch => app.selected_block.set_command_line(
+                "?",
+                CursorPos::End
+            ),
+
+            AppCommand::PreviewScrollPage(down) => app.preview_scroll_page(down),
+
+            AppCommand::PreviewScrollLine(down) => app.preview_scroll_line(down),
+
+            AppCommand::PreviewScrollColumn(right) => {
+                app.preview_scroll_column(right)
+            },
+
             AppCommand::CreateDir => app.selected_block.set_command_line(
                 ":create_dir ",
                 CursorPos::End
@@ -619,7 +650,11 @@ impl AppCommand {
                 rt_error!("Edit mode cannot enabled in the root directory")
             },
 
-            AppCommand::MoveCandidate(next) => if next {
+            // A preview search owns `n`/`N` while it is active: the file
+            // list's own matches are only used when the preview has no query.
+            AppCommand::MoveCandidate(next) => if app.preview_search_active() {
+                app.preview_move_candidate(next);
+            } else if next {
                 app.next_candidate()?
             } else {
                 app.prev_candidate()?
@@ -671,5 +706,64 @@ impl AppCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn app_with_command_line() -> App<'static> {
+        App {
+            selected_block: Block::CommandLine(
+                CmdContent::String(String::from(":reload")),
+                CursorPos::End
+            ),
+            ..Default::default()
+        }
+    }
+
+    /// The editor chord is `Alt-Ctrl-Tab`, but the terminal drops the Control
+    /// bit (Tab already is the `Ctrl-I` byte), so it arrives as Alt+Tab.
+    #[test]
+    fn test_alt_ctrl_tab_toggles_the_full_page_editor() {
+        let mut app = app_with_command_line();
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(app.command_expand);
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(!app.command_expand);
+
+        // A terminal which does report both modifiers still works.
+        handle_tab(&mut app, KeyModifiers::ALT | KeyModifiers::CONTROL)
+            .unwrap();
+        assert!(app.command_expand);
+    }
+
+    /// Ctrl-Tab is the plain Tab byte and stays the completion key; a menu
+    /// ignores the chord and keeps its own presentation.
+    #[test]
+    fn test_the_chord_needs_alt_and_ignores_a_menu() {
+        let mut app = app_with_command_line();
+
+        handle_tab(&mut app, KeyModifiers::CONTROL).unwrap();
+        assert!(!app.command_expand);
+
+        fn stub(_: &mut App, _: char, _: SwitchCaseData) -> AppResult<bool> {
+            Ok(true)
+        }
+
+        SwitchCase::new(
+            &mut app,
+            stub,
+            MenuPresentation::Inline,
+            "Tabs",
+            CmdContent::String(String::from("menu")),
+            SwitchCaseData::None
+        );
+
+        handle_tab(&mut app, KeyModifiers::ALT).unwrap();
+        assert!(!app.command_expand);
     }
 }

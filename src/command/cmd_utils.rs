@@ -183,6 +183,13 @@ impl<'a> App<'a> {
                 return Ok(self.quit_command_mode())
             }
 
+            // `?` searches the text preview instead of the file list, with the
+            // same asynchronous worker the `/` search uses.
+            if content_ref.starts_with("?") {
+                self.preview_search(content_ref[1..].to_owned())?;
+                return Ok(self.quit_command_mode())
+            }
+
             let argu_err = "Wrong number argument for current command";
 
             let command = content_ref.to_owned();

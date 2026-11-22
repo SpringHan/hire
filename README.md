@@ -186,6 +186,61 @@ Edit Mode provides an enhanced interface for batch file operations. When activat
    - `Enter` - Apply edited content to current path
    - `Q`/`Esc` - Quit edit mode
 
+### Syntax Highlighting
+
+The text preview is highlighted with [syntect](https://crates.io/crates/syntect),
+using its bundled syntax definitions and themes. The language is detected from
+the file's extension, its name (`Makefile`, `Gemfile`, …) or its first line.
+A file syntect has no language for (a `.txt` file, a log, …) is previewed as
+plain text, exactly as before, and a file which is not UTF-8 keeps its image or
+MIME-type preview.
+
+syntect's bundled set has no TOML and no INI syntax, so hire ships two small
+ones for the configuration files a project is full of: `.toml` and `.lock`
+(`Cargo.toml`, `Cargo.lock`, `pyproject.toml`, …) are highlighted as TOML, and
+`.conf`, `.ini`, `.cfg`, `.properties`, `.desktop`, `.editorconfig`, `.env` and
+`.gitconfig` as INI.
+
+The file is shown as plain text at once; the colours are computed on a
+background thread and appear as soon as they are ready, so moving through a
+directory never waits for the parser (only the file the cursor lands on is
+highlighted, not every file it passed).
+
+The theme is `base16-ocean.dark`, or `base16-ocean.light` when `$COLORFGBG`
+(`"fg;bg"`, set by many terminals) reports a light background. Only the
+foreground colours are used: the preview is drawn on your terminal's own
+background.
+
+### Text Preview
+
+The text preview holds the whole file up to 256 KiB and can be scrolled, paged,
+scrolled horizontally and searched. The shipped keymaps bind:
+
+| Command | Action | `default.toml` | `colemak.toml` |
+| --- | --- | --- | --- |
+| `preview_search` | Search the preview (see below) | `?` | `?` |
+| `preview_scroll_page next` / `prev` | Page down / up | `>` / `<` | `>` / `<` |
+| `preview_scroll_line next` / `prev` | One line down / up | `J` / `K` | `E` / `U` |
+| `preview_scroll_column next` / `prev` | Five columns right / left | `)` / `(` | `I` / `N` |
+
+Horizontal scrolling moves the text five columns at a time and stops when the end
+of the longest line reaches the right edge, so a file whose lines fit the pane
+cannot be scrolled and the text is never shifted off into an empty screen. A
+jump to a search match (`?`, `n`/`N`) returns to the first column, so the match
+at the beginning of a line is never hidden by a previous horizontal scroll.
+
+Typing `?needle` searches the preview of the selected file on a background
+thread, scrolls to the first match at or below the current view and draws every
+match in reverse video. `move_candidate next` / `move_candidate prev`
+(`n`/`N` by default) then jump between the matches, wrapping around at both
+ends; the match the view last moved to is underlined as well, so it stands out
+from the other matches of the same query. While a preview search is active
+those keys belong to the preview, not to the file list. An empty `?` clears the
+search, its highlight, and gives `n`/`N` back to the file list.
+
+A file larger than 256 KiB is only previewed (and searchable) up to that limit,
+and a file which reaches it is shown without syntax colours.
+
 ### Output File
 
 The Output File feature allows you to write file/directory paths to a specified output file. This is useful for integration with other tools such as your editor. It's a really convenient way to get target file path with hire.
@@ -356,8 +411,8 @@ keymap = [
 ## Keybindings for command line
 
 - Open the command line (prefilled with `:`): `:` (`enter_command_line`)
-- Cursor move left: `C-b`
-- Cursor move right: `C-f`
+- Cursor move left: `C-b` (in the expanded view: scroll the content left)
+- Cursor move right: `C-f` (in the expanded view: scroll the content right)
 - Cursor move to beginning: `C-a`
 - Cursor move to end: `C-e`
 - Delete word: `Alt-Backspace` (Also in edit mode)
@@ -367,9 +422,11 @@ keymap = [
 - Cursor move to the start of the previous word: `Alt-b` (Also in edit mode)
 - Delete the character after the cursor: `C-d` (Also in edit mode)
 - Delete everything after the cursor: `C-k`
-- Expand command line: `Alt-Tab`
-- Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view and switch prev/next history command)
+- Expand command line: `Alt-Ctrl-Tab`
+- Previous/next completion candidate: `C-p` / `C-n` (also page the expanded command line view or a menu box, and switch prev/next history command)
 - Previous/next command history from the browser: `Up` / `Down` (enters the command line and fills the newest / oldest history command)
+- Search the file list: type `/` (`search`) followed by the text; `n`/`N` jump between the matches.
+- Search the text preview: type `?` (`preview_search`) followed by the text; the matches are drawn in reverse video, the one `n`/`N` moved to is underlined, and `n`/`N` jump between them (see "Text Preview").
 - Complete the selected file name: `Tab` right after a space inserts the name of the item selected in the browser. In a `:!` command it is inserted quoted (`'a b.txt'`), so a space in it does not split it into several arguments; other commands take the name literally.
 
 ## TODO
@@ -381,7 +438,7 @@ keymap = [
 - [x] Add Edit mode for more convenient file editing
 - [x] Mountable shell sessions per tab (tmux-like attach/detach)
 - [ ] Refactor the project
-- [ ] Highlight for file preview
+- [x] Highlight for file preview
 - [x] Migrate to Rust 2024 Edition
 
 ## LICENSE

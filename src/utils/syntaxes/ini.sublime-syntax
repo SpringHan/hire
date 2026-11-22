@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# A small INI syntax for the configuration formats syntect's bundled set does
+# not cover: `.conf`, `.ini`, `.cfg`, `.properties`, `.desktop`, systemd units
+# and `.env` files are all `key = value` lines with `;`/`#` comments and
+# `[section]` headers.
+name: INI
+file_extensions:
+  - ini
+  - conf
+  - cfg
+  - properties
+  - desktop
+  - .editorconfig
+  - .env
+  - gitconfig
+scope: source.ini
+contexts:
+  main:
+    - match: '^\s*[;#].*$'
+      scope: comment.line.ini
+
+    # `[section]`
+    - match: '^\s*\[.*\]'
+      scope: entity.name.tag.ini
+
+    # A key is only a key at the beginning of a line, before `=` or `:`.
+    - match: "^[ \t]*[^=:\r\n]+?(?=[ \t]*[=:])"
+      scope: entity.name.tag.ini
+    - match: '[=:]'
+      scope: keyword.operator.assignment.ini
+
+    - match: '"[^"]*"'
+      scope: string.quoted.double.ini
+    - match: "'[^']*'"
+      scope: string.quoted.single.ini
+
+    - match: '\b(true|false|yes|no|on|off)\b'
+      scope: constant.language.ini
+    - match: '\b[-+]?[0-9]+(?:\.[0-9]+)?\b'
+      scope: constant.numeric.ini

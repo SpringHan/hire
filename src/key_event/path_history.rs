@@ -2,13 +2,14 @@
 
 use std::any::Any;
 
-use ratatui::style::{Modifier, Stylize};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::Line;
 
-use super::switch::{SwitchCase, SwitchCaseData, SwitchStruct};
+use super::switch::{
+    MenuList, MenuPresentation, SwitchCase, SwitchCaseData, SwitchStruct,
+};
 use crate::error::{AppResult, ErrorType, NotFoundType};
-use crate::utils::CmdContent;
 use crate::app::App;
+use crate::ui::key_hints;
 use crate::rt_error;
 
 /// The maximum number of paths that `App::path_history` can store.
@@ -85,8 +86,9 @@ pub fn path_history_operation(app: &mut App) {
     SwitchCase::new(
         app,
         path_history_switch,
-        true,
-        generate_msg(app, &state),
+        MenuPresentation::Picker,
+        "Path History",
+        generate_menu(app, &state),
         SwitchCaseData::Struct(Box::new(state))
     );
 }
@@ -138,8 +140,9 @@ fn path_history_switch(
     SwitchCase::new(
         app,
         path_history_switch,
-        true,
-        generate_msg(app, &state),
+        MenuPresentation::Picker,
+        "Path History",
+        generate_menu(app, &state),
         SwitchCaseData::Struct(Box::new(state))
     );
 
@@ -173,33 +176,95 @@ fn jump_to_history_path(app: &mut App, idx: usize) -> AppResult<()> {
     Ok(())
 }
 
-fn generate_msg(app: &App, state: &PathHistoryState) -> CmdContent {
-    let mut msg = Text::raw("[Esc] close the page  [01-30] jump to the path");
-    msg.push_line("");
+/// The path history menu: a hint line and one entry per recorded path.
+fn generate_menu(app: &App, state: &PathHistoryState) -> MenuList {
+    let mut menu = MenuList::new()
+        .header(key_hints(
+            "[Esc] close the page  [01-30] jump to the path",
+            app.term_colors.marked_style
+        ))
+        .header(Line::default());
 
     if app.path_history.is_empty() {
-        msg.push_line("There's no path in the history");
-        return CmdContent::Text(msg)
+        return menu.header(Line::raw("There's no path in the history"))
     }
-
-    let selecting = state.number();
 
     for (idx, path) in app.path_history.iter().enumerate() {
-        let mut line = Line::default();
-        line.push_span(
-            Span::raw(format!("[{:02}]", idx + 1))
-                .add_modifier(
-                    if !state.selecting.is_empty() && selecting == idx + 1 {
-                        Modifier::REVERSED
-                    } else {
-                        Modifier::empty()
-                    }
-                )
+        menu = menu.entry(
+            format!("{:02}", idx + 1),
+            Line::raw(path.to_string_lossy().into_owned())
         );
-        line.push_span(format!(" {}", path.to_string_lossy()));
-
-        msg.push_line(line);
     }
 
-    CmdContent::Text(msg)
+    // The number being typed highlights the path it names; it is only shown
+    // once it is a real entry, a half-typed number names nothing yet.
+    let number = state.number();
+    let selected = if !state.selecting.is_empty() &&
+        number >= 1 && number <= app.path_history.len()
+    {
+        Some(number - 1)
+    } else {
+        None
+    };
+
+    menu.select(selected)
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    use crate::key_event::MenuRow;
+
+    use super::*;
+
+    fn app_with(paths: &[&str]) -> App<'static> {
+        let mut app = App::default();
+        app.path_history = paths.iter().map(PathBuf::from).collect();
+        app
+    }
+
+    fn keys(menu: &MenuList) -> Vec<&str> {
+        menu.rows()
+            .iter()
+            .filter_map(|row| match row {
+                MenuRow::Entry(entry) => Some(entry.key.as_str()),
+                MenuRow::Line(_) => None,
+            })
+            .collect()
+    }
+
+    /// The menu lists the recorded paths with 1-based keys and highlights the
+    /// number being typed while it names an entry.
+    #[test]
+    fn test_menu_lists_paths_and_highlights_the_typed_number() {
+        let app = app_with(&["/a", "/b", "/c"]);
+        let menu = generate_menu(&app, &PathHistoryState::default());
+
+        assert_eq!(keys(&menu), vec!["01", "02", "03"]);
+        assert_eq!(menu.selected_row(), None);
+
+        let mut state = PathHistoryState::default();
+        state.push(2);
+
+        assert_eq!(generate_menu(&app, &state).selected_row(), Some(1));
+    }
+
+    /// An empty history is a hint, not an empty list.
+    #[test]
+    fn test_empty_history_is_a_hint() {
+        let app = App::default();
+        let menu = generate_menu(&app, &PathHistoryState::default());
+
+        assert_eq!(menu.entry_count(), 0);
+
+        let header: String = menu
+            .header_lines()
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(header.contains("no path"), "{header}");
+    }
 }

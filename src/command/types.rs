@@ -60,6 +60,19 @@ pub enum AppCommand {
     /// When the boolean is true, scroll down.
     ListScroll(bool),
 
+    /// Search the text preview; like [`Self::Search`] it opens the command line,
+    /// with a leading `?` instead of `/`.
+    PreviewSearch,
+
+    /// Page the text preview, down when the boolean is true.
+    PreviewScrollPage(bool),
+
+    /// Scroll the text preview by one line, down when the boolean is true.
+    PreviewScrollLine(bool),
+
+    /// Scroll the text preview by one column, right when the boolean is true.
+    PreviewScrollColumn(bool),
+
     /// The command to insert navigation index.
     /// Element of it is used to imply what the index number is.
     NaviIndexInput(u8),
@@ -157,6 +170,20 @@ impl AppCommand {
             "reload_config"     => Self::ReloadConfig,
 
             "list_scroll" => Self::ListScroll(
+                *option_get!(cmd_arg, command_err) == "next"
+            ),
+
+            "preview_search" => Self::PreviewSearch,
+
+            "preview_scroll_page" => Self::PreviewScrollPage(
+                *option_get!(cmd_arg, command_err) == "next"
+            ),
+
+            "preview_scroll_line" => Self::PreviewScrollLine(
+                *option_get!(cmd_arg, command_err) == "next"
+            ),
+
+            "preview_scroll_column" => Self::PreviewScrollColumn(
                 *option_get!(cmd_arg, command_err) == "next"
             ),
 
@@ -287,5 +314,47 @@ mod test {
             AppCommand::from_str("edit_append_filename").unwrap(),
             AppCommand::EditAppendFsName
         ));
+    }
+
+    /// The text preview commands ship without a key, but the strings a user
+    /// writes into `keymap.toml` are fixed by `from_str`.
+    #[test]
+    fn test_preview_commands() {
+        assert!(matches!(
+            AppCommand::from_str("preview_search").unwrap(),
+            AppCommand::PreviewSearch
+        ));
+
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_page next").unwrap(),
+            AppCommand::PreviewScrollPage(true)
+        ));
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_page prev").unwrap(),
+            AppCommand::PreviewScrollPage(false)
+        ));
+
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_line next").unwrap(),
+            AppCommand::PreviewScrollLine(true)
+        ));
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_line prev").unwrap(),
+            AppCommand::PreviewScrollLine(false)
+        ));
+
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_column next").unwrap(),
+            AppCommand::PreviewScrollColumn(true)
+        ));
+        assert!(matches!(
+            AppCommand::from_str("preview_scroll_column prev").unwrap(),
+            AppCommand::PreviewScrollColumn(false)
+        ));
+
+        // The direction argument is mandatory, like the other scroll commands.
+        assert!(AppCommand::from_str("preview_scroll_page").is_err());
+        assert!(AppCommand::from_str("preview_scroll_line").is_err());
+        assert!(AppCommand::from_str("preview_scroll_column").is_err());
     }
 }

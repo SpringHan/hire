@@ -12,7 +12,7 @@ use crate::error::{AppResult, ErrorType};
 
 use super::App;
 use super::shell::execute_command;
-use super::switch::{SwitchCase, SwitchCaseData};
+use super::switch::{MenuPresentation, SwitchCase, SwitchCaseData};
 
 pub fn print_full_path(app: &mut App) {
     let file_name = if let Some(file_saver) = app.get_file_saver() {
@@ -32,7 +32,8 @@ pub fn print_full_path(app: &mut App) {
     SwitchCase::new(
         app,
         |_, _,_| Ok(true),
-        true,
+        MenuPresentation::Dialog,
+        "Full Path",
         CmdContent::String(full_path),
         SwitchCaseData::None
     )

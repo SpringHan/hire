@@ -53,7 +53,7 @@ pub fn directory_movement(
             app.refresh_parent_item();
 
             if app.file_content.is_some() {
-                app.file_content.reset();
+                app.reset_preview();
                 app.clean_search_idx();
             }
         },
@@ -201,7 +201,7 @@ pub fn move_cursor(
             app.init_current_files()?;
             app.selected_item.current_select(Some(0));
             if app.file_content.is_some() {
-                app.file_content.reset();
+                app.reset_preview();
             }
         } else {
             app.set_file_content()?;

@@ -1,6 +1,6 @@
 [package]
 name = "hire"
-version = "0.3.4"
+version = "0.4.0"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -29,6 +29,14 @@ portable-pty = "0.9"
 # 0.16 is the first line with a working scrollback (offset > rows no longer
 # underflows); it needs unicode-width 0.2.1+, which is why ratatui is 0.30.
 vt100 = "0.16"
+# Syntax highlighting
+# `regex-fancy` keeps the regex engine pure Rust, so no C library is compiled;
+# `yaml-load` reads the extra syntax definitions in `src/utils/syntaxes`; the
+# rest is syntect's bundled definitions and themes.
+syntect = { version = "5.3.0", default-features = false, features = [
+    "parsing", "regex-fancy", "dump-load", "default-syntaxes", "default-themes",
+    "yaml-load"
+] }
 
 [profile.release]
 opt-level = 's'

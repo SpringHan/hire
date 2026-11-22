@@ -1,16 +1,19 @@
 // Utils
 
-use std::{borrow::Cow, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, path::PathBuf};
 
 use anyhow::bail;
 use toml_edit::{value, Array};
-use ratatui::{style::{Modifier, Stylize}, text::{Line, Span, Text}};
+use ratatui::{style::Stylize, text::{Line, Span, Text}};
 
 use crate::{
-    key_event::{move_cursor, Goto, SwitchCase, SwitchCaseData},
+    key_event::{
+        move_cursor, Goto, MenuList, MenuPresentation, SwitchCase, SwitchCaseData,
+    },
     config::{get_conf_file, get_document, write_document},
     error::{AppResult, ErrorType, NotFoundType},
     app::{path_is_hidden, App},
+    ui::key_hints,
     utils::CmdContent,
     option_get,
     rt_error,
@@ -33,8 +36,9 @@ pub fn tab_operation(app: &mut App) -> AppResult<()> {
     SwitchCase::new(
         app,
         switch,
-        true,
-        generate_msg(Some(app), &TabState::default())?,
+        MenuPresentation::Picker,
+        "Tabs",
+        generate_menu(Some(app), &TabState::default())?,
         SwitchCaseData::Struct(TabState::wrap())
     );
 
@@ -79,7 +83,8 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
             SwitchCase::new(
                 app,
                 switch,
-                false,
+                MenuPresentation::Inline,
+                "Tabs",
                 CmdContent::Text(Text::raw(
                     "Are you sure to store current tabs?"
                 ).red()),
@@ -89,20 +94,21 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         },
 
         's' => {
-            let msg = generate_msg(Some(app), data.set_storage())?;
+            let menu = generate_menu(Some(app), data.set_storage())?;
 
             SwitchCase::new(
                 app,
                 switch,
-                true,
-                msg,
+                MenuPresentation::Picker,
+                "Tabs",
+                menu,
                 SwitchCaseData::Struct(Box::new(data))
             );
             return Ok(false)
         },
 
         'd' => {
-            let msg = generate_msg(
+            let menu = generate_menu(
                 Some(app),
                 data.set_delete()
             )?;
@@ -110,8 +116,9 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
             SwitchCase::new(
                 app,
                 switch,
-                true,
-                msg,
+                MenuPresentation::Picker,
+                "Tabs",
+                menu,
                 SwitchCaseData::Struct(Box::new(data))
             );
             return Ok(false)
@@ -164,13 +171,14 @@ fn confirm_action(
 
 /// Show the tab menu again with `data`.
 fn open_tab_menu(app: &mut App, data: &TabState) -> AppResult<()> {
-    let msg = generate_msg(Some(app), data)?;
+    let menu = generate_menu(Some(app), data)?;
 
     SwitchCase::new(
         app,
         switch,
-        true,
-        msg,
+        MenuPresentation::Picker,
+        "Tabs",
+        menu,
         SwitchCaseData::Struct(Box::new(data.to_owned()))
     );
 
@@ -191,7 +199,8 @@ fn request_confirm(
     SwitchCase::new(
         app,
         switch,
-        false,
+        MenuPresentation::Inline,
+        "Tabs",
         CmdContent::Text(Text::raw(message).red()),
         SwitchCaseData::Struct(Box::new(data.to_owned()))
     );
@@ -395,8 +404,9 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
             SwitchCase::new(
                 app,
                 switch,
-                true,
-                generate_msg(Some(app), data)?,
+                MenuPresentation::Picker,
+                "Tabs",
+                generate_menu(Some(app), data)?,
                 SwitchCaseData::Struct(Box::new(data.to_owned()))
             );
 
@@ -631,81 +641,109 @@ fn switch_to(app: &mut App, idx: usize) -> AppResult<()> {
     Ok(())
 }
 
-fn generate_msg(app: Option<&App>, data: &TabState) -> AppResult<CmdContent> {
-    let mut text = Text::raw("[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab
-[d] delete tab with number  [o] delete other tabs
-[s] open tabs from storage  [S] store opening tabs\n\n");
+/// The tab menu: key hints, the active mode and the tab (or stored group)
+/// entries.
+fn generate_menu(app: Option<&App>, data: &TabState) -> AppResult<MenuList> {
+    // The keys are drawn in the marked colour; without an app (the tab list is
+    // still being restored) the hints stay uncoloured.
+    let keys = app
+        .map(|app| app.term_colors.marked_style)
+        .unwrap_or_default();
+
+    let mut menu = MenuList::new()
+        .header(key_hints(
+            "[n] create new tab  [f] next tab  [b] prev tab  [c] close current tab",
+            keys
+        ))
+        .header(key_hints(
+            "[d] delete tab with number  [o] delete other tabs",
+            keys
+        ))
+        .header(key_hints(
+            "[s] open tabs from storage  [S] store opening tabs",
+            keys
+        ))
+        .header(Line::default());
 
     if data.delete {
-        text.push_line(Line::raw("Executing delete operation!").red());
-        text.push_line("");
+        menu = menu.header(Line::raw("Executing delete operation!").red());
+        menu = menu.header(Line::default());
     }
 
     if data.storage {
-        text.push_line("Storage tabs:");
+        menu = menu.header(Line::raw("Storage tabs:"));
     }
 
-    if let Some(_app) = app {
+    if let Some(app) = app {
         if data.storage {
-            storage_tab_string(&mut text, _app.tab_list.storage.iter())?;
+            menu = storage_rows(menu, app, data)?;
         } else {
-            tab_string_list(&mut text, _app.tab_list.tabs().iter(), _app.tab_list.current());
+            menu = tab_rows(menu, app, data);
         }
     }
 
-    Ok(CmdContent::Text(text))
+    Ok(menu)
 }
 
-#[inline]
-fn storage_tab_string<'a, I>(text: &mut Text, iter: I) -> AppResult<()>
-where I: Iterator<Item = &'a Rc<[Cow<'a, str>]>>
-{
-    let mut idx = 1;
-
-    for tabs in iter {
-        if tabs.is_empty() {
-            rt_error!("Found empty tabs from `storage_tabs`")
-        }
-
-        text.push_line(format!("[{}]: {}\n", idx, tabs[0]));
-        for j in 1..tabs.len() {
-            text.push_line(format!("     {}\n", tabs[j]));
-        }
-        text.push_line("");
-
-        idx += 1;
+/// The index of the entry the number being typed names, if it names one.
+fn typed_index(data: &TabState, len: usize) -> Option<usize> {
+    if data.selecting.is_empty() {
+        return None
     }
 
-    Ok(())
+    let idx = data.calc_idx();
+
+    if idx >= 1 && idx <= len {
+        Some(idx - 1)
+    } else {
+        None
+    }
 }
 
-#[inline]
-fn tab_string_list<'a, I>(text: &mut Text, iter: I, current: usize)
-where I: Iterator<Item = &'a Tab>
-{
-    let mut idx = 1;
-
-    for tab in iter {
-        let mut line = Line::default();
-        line.push_span(
-            Span::raw(format!("[{}]", idx))
-                .add_modifier(if current + 1 == idx {
-                    Modifier::REVERSED
-                } else {
-                    Modifier::empty()
-                })
-        );
-        line.push_span(format!(": {}", tab.path.to_string_lossy()));
+/// One entry per open tab; the current tab is highlighted.
+fn tab_rows(mut menu: MenuList, app: &App, data: &TabState) -> MenuList {
+    for (idx, tab) in app.tab_list.tabs().iter().enumerate() {
+        let mut row = Line::raw(tab.path.to_string_lossy().into_owned());
 
         if !tab.shells.is_empty() {
-            line.push_span(
+            row.push_span(
                 Span::raw(format!("  ({})", shells_text(tab.shells.len()))).dim()
             );
         }
 
-        text.push_line(line);
-        idx += 1;
+        menu = menu.entry((idx + 1).to_string(), row);
     }
+
+    menu.select(
+        typed_index(data, app.tab_list.len())
+            .or(Some(app.tab_list.current()))
+    )
+}
+
+/// One entry per stored group, followed by the group's other paths.
+fn storage_rows(
+    mut menu: MenuList,
+    app: &App,
+    data: &TabState
+) -> AppResult<MenuList> {
+    for (idx, tabs) in app.tab_list.storage.iter().enumerate() {
+        if tabs.is_empty() {
+            rt_error!("Found empty tabs from `storage_tabs`")
+        }
+
+        menu = menu.entry(
+            (idx + 1).to_string(),
+            Line::raw(tabs[0].to_string())
+        );
+
+        for path in tabs.iter().skip(1) {
+            menu = menu.line(Line::raw(format!("     {}", path)));
+        }
+
+        menu = menu.line(Line::default());
+    }
+
+    Ok(menu.select(typed_index(data, app.tab_list.storage.len())))
 }
 
 #[cfg(test)]
@@ -881,5 +919,58 @@ mod test {
 
         assert_eq!(app.tab_list.len(), 1);
         assert_eq!(app.shell_sessions.alive_count(), 0);
+    }
+
+    /// The tab menu lists every tab with a 1-based key, highlights the current
+    /// tab and lets a typed number take the highlight over.
+    #[test]
+    fn test_tab_menu_lists_tabs_and_highlights_the_current() {
+        let mut app = App::default();
+        app.tab_list.push(PathBuf::from("/tmp/second"), false);
+        app.tab_list.push(PathBuf::from("/tmp/third"), false);
+        app.tab_list.set_current(1);
+
+        let menu = generate_menu(Some(&app), &TabState::default()).unwrap();
+
+        let keys = menu.rows().iter().filter_map(|row| match row {
+            crate::key_event::MenuRow::Entry(entry) => Some(entry.key.as_str()),
+            crate::key_event::MenuRow::Line(_) => None,
+        }).collect::<Vec<_>>();
+
+        assert_eq!(keys, vec!["1", "2", "3"]);
+        assert_eq!(menu.selected_row(), Some(1));
+
+        // A typed tab number (only needed past nine tabs) moves it.
+        let mut data = TabState::default();
+        data.selecting.push(2);
+
+        let menu = generate_menu(Some(&app), &data).unwrap();
+        assert_eq!(menu.selected_row(), Some(1));
+    }
+
+    /// Storage mode lists the stored groups, their other paths going on
+    /// non-selectable lines.
+    #[test]
+    fn test_tab_menu_lists_stored_groups() {
+        let mut app = App::default();
+        app.tab_list.storage.push(
+            vec![
+                Cow::Owned(String::from("/tmp/a")),
+                Cow::Owned(String::from("/tmp/b")),
+            ].into()
+        );
+
+        let mut data = TabState::default();
+        data.set_storage();
+
+        let menu = generate_menu(Some(&app), &data).unwrap();
+
+        assert_eq!(menu.entry_count(), 1);
+        // The entry, the continuation line and the blank line after the group.
+        assert_eq!(menu.rows().len(), 3);
+
+        data.selecting.push(1);
+        let menu = generate_menu(Some(&app), &data).unwrap();
+        assert_eq!(menu.selected_row(), Some(0));
     }
 }

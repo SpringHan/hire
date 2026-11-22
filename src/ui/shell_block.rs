@@ -21,19 +21,20 @@ use super::utils::shorten_path;
 
 const CWD_MAX_LEN: usize = 40;
 
-/// Draw the attached shell's screen into `area`.
+/// Draw the screen of shell `id` into `area`.
 ///
 /// The PTY and the parser are resized to the area first, so the shell sees the
-/// same dimensions it is drawn with.
+/// same dimensions it is drawn with. `show_cursor` is `false` when the screen
+/// is only the background of a menu: the child's cursor must not be drawn over
+/// the menu box.
 pub fn render_shell(
     app: &mut App,
     frame: &mut Frame,
     area: Rect,
+    id: ShellId,
+    show_cursor: bool,
 ) -> anyhow::Result<()>
 {
-    let Some(id) = app.selected_block.shell_id() else {
-        return Ok(())
-    };
     let Some(session) = app.shell_sessions.get_mut(id) else {
         return Ok(())
     };
@@ -79,7 +80,7 @@ pub fn render_shell(
 
     // While the history is shown the child's cursor is somewhere on the live
     // screen, not in the viewport; drawing it there would be wrong.
-    if !screen.hide_cursor() && screen.scrollback() == 0 {
+    if show_cursor && !screen.hide_cursor() && screen.scrollback() == 0 {
         let (row, col) = screen.cursor_position();
 
         if row < area.height && col < area.width {

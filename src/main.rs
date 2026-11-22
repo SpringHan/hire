@@ -37,7 +37,9 @@ fn main() -> AppResult<()> {
     let mut initial = true;
     let mut app = App::default();
     let image_recvs = app.init_image_picker();
+    app.highlight.start();
     let search_recv = app.init_search_channel();
+    let preview_search_recv = app.init_preview_search_channel();
 
     // Init config information. A broken entry is skipped by `load_config` and
     // shown in the command line once the UI runs; it never stops hire.
@@ -86,14 +88,21 @@ fn main() -> AppResult<()> {
             app.clear_screen = false;
         }
 
+        // A finished syntax highlight for the selected file replaces the plain
+        // preview drawn before it.
+        app.apply_highlight();
+
         terminal.draw(|frame| {
             if initial {
                 initial = false;
 
+                // The window height is the page size of the list and the text
+                // preview, so it must be known before the first frame draws.
+                ui::update_file_linenr(frame.area());
+
                 if let Err(err) = app.init_all_files() {
                     app.app_error.append_errors(err.iter());
                 }
-                ui::update_file_linenr(frame.area());
             }
 
             if let Err(err) = ui::ui(frame, &mut app) {
@@ -102,9 +111,11 @@ fn main() -> AppResult<()> {
         })?;
 
         // An attached shell needs a short poll so its output is painted
-        // promptly; the rest of the time the old 200ms cadence is kept.
+        // promptly; the rest of the time the old 200ms cadence is kept. While
+        // the highlighting thread is busy the poll is short too, so the
+        // coloured preview appears as soon as it is ready.
         let shell_view = app.selected_block.is_shell();
-        let timeout = if shell_view {
+        let timeout = if shell_view || app.highlight.pending() {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(200)
@@ -181,6 +192,11 @@ fn main() -> AppResult<()> {
             if let Err(err) = app.next_candidate() {
                 app.app_error.append_errors(err.iter());
             }
+        }
+
+        // Preview search handler
+        if let Ok(matches) = preview_search_recv.try_recv() {
+            app.apply_preview_search(matches);
         }
 
         // Image perview handler
@@ -297,7 +313,7 @@ fn check_quit_condition(app: &mut App) -> QuitCheckRes {
     }
 
     use ratatui::style::Stylize;
-    use crate::key_event::{SwitchCase, SwitchCaseData};
+    use crate::key_event::{MenuPresentation, SwitchCase, SwitchCaseData};
 
     let mounted = app.shell_sessions.alive_count();
 
@@ -317,7 +333,8 @@ fn check_quit_condition(app: &mut App) -> QuitCheckRes {
         SwitchCase::new(
             app,
             really_quit,
-            false,
+            MenuPresentation::Inline,
+            "Quit",
             crate::utils::CmdContent::Text(Text::raw(message).red()),
             SwitchCaseData::None
         );

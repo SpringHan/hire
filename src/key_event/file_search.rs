@@ -8,7 +8,7 @@ use crate::{
     error::AppResult,
     key_event::Goto,
     app::FileSaver,
-    utils::Block,
+    utils::{search_indexes, Block},
 };
 
 use super::App;
@@ -30,9 +30,15 @@ impl<'a> App<'a> {
         let (update_tx, update_rx) = mpsc::channel::<Vec<usize>>();
         let (calc_tx, calc_rx)     = mpsc::channel::<(String, bool, Vec<FileSaver>)>();
 
-        thread::spawn(move || loop {
-            if let Ok((name, exactly, files)) = calc_rx.recv() {
-                update_tx.send(search_core(name, &files, exactly))
+        thread::spawn(move || {
+            while let Ok((name, exactly, files)) = calc_rx.recv() {
+                let indexes = search_indexes(
+                    &name,
+                    files.iter().map(|file| file.name.as_str()),
+                    exactly
+                );
+
+                update_tx.send(indexes)
                     .expect("Error occurred from channel when searching file!")
             }
         });
@@ -53,7 +59,11 @@ impl<'a> App<'a> {
         }
 
         let current_files = self.get_directory_mut().0;
-        let indexes = search_core(name, current_files, exactly);
+        let indexes = search_indexes(
+            &name,
+            current_files.iter().map(|file| file.name.as_str()),
+            exactly
+        );
 
         if !indexes.is_empty() {
             self.file_searcher.update_idx(indexes);
@@ -131,36 +141,6 @@ impl<'a> App<'a> {
     pub fn clean_search_idx(&mut self) {
         self.file_searcher.searched_idx.clear();
     }
-}
-
-/// Core function of file searcher.
-fn search_core(name: String, files: &Vec<FileSaver>, exactly: bool) -> Vec<usize> {
-    let name = if !exactly {
-        name.to_lowercase()
-    } else {
-        name
-    };
-
-    let mut i = 0;
-    let mut indexes: Vec<usize> = Vec::new();
-    for file in files.iter() {
-        if exactly {
-            if file.name == name {
-                indexes.push(i);
-                break;
-            }
-
-            i += 1;
-            continue;
-        }
-
-        if file.name.to_lowercase().contains(&name) {
-            indexes.push(i);
-        }
-        i += 1;
-    }
-
-    indexes
 }
 
 #[inline]
