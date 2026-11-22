@@ -2,7 +2,7 @@
 
 use std::{
     fs::File,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
     thread,
 };
@@ -156,35 +156,51 @@ impl HighlightPreview {
     }
 }
 
-/// Highlight the window of `job`, with the lines before it as context.
-fn highlight_job(job: &Job) -> Option<Text<'static>> {
-    let mut content = String::new();
+/// Highlight `content`, a window of `path` which starts at `start_line` and
+/// `start_byte`.
+///
+/// The lines just before the window are read and parsed first, so a block
+/// comment or a string which started above it keeps its colour; they are
+/// dropped from the answer, which holds only the window. `None` when syntect
+/// knows no language for `path`, or when its parser fails.
+pub fn highlight_window(
+    path: &Path,
+    start_line: usize,
+    start_byte: u64,
+    content: &str,
+) -> Option<Text<'static>> {
+    let mut whole = String::new();
     let mut context_lines = 0;
 
-    if let Ok(file) = File::open(&job.path) &&
+    if let Ok(file) = File::open(path) &&
         let Ok(prev) = read_prev_window(
             &file,
-            job.start_byte,
-            job.start_line,
+            start_byte,
+            start_line,
             CONTEXT_LINES
         )
     {
         context_lines = prev.lines.len();
 
         for line in &prev.lines {
-            content.push_str(line);
-            content.push('\n');
+            whole.push_str(line);
+            whole.push('\n');
         }
     }
 
-    content.push_str(&job.content);
+    whole.push_str(content);
 
-    let mut text = highlight_text(&content, &job.path)?;
+    let mut text = highlight_text(&whole, path)?;
 
     // Only the window itself is painted; the context was there for the parser.
     text.lines.drain(..context_lines.min(text.lines.len()));
 
     Some(text)
+}
+
+/// Highlight the window of `job`, with the lines before it as context.
+fn highlight_job(job: &Job) -> Option<Text<'static>> {
+    highlight_window(&job.path, job.start_line, job.start_byte, &job.content)
 }
 
 #[cfg(test)]

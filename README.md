@@ -242,7 +242,10 @@ those keys belong to the preview, not to the file list. An empty `?` clears the
 search, its highlight, and gives `n`/`N` back to the file list.
 
 Only the window on screen is syntax highlighted, with the lines just above it as
-parser context, and a terminal resize reloads the window around the same line.
+parser context. A scroll or a jump highlights the new window before it is drawn,
+so navigation does not flash; only the first window of a newly selected file
+arrives asynchronously. A terminal resize reloads the window around the same
+line.
 A line longer than 16 KiB is cut at the limit (horizontal scrolling stops there),
 and a search keeps at most the first 100000 matching lines.
 

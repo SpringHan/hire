@@ -256,8 +256,10 @@ Responsibilities:
   and hands it to `HighlightPreview::request`, which highlights that window on a
   worker thread (see `app/highlight.rs`); `apply_highlight` swaps the coloured
   window in when it arrives, and drops it if its path or window generation is no
-  longer the one on screen. Windows are reloaded as the view scrolls or the
-  terminal is resized, so the whole file is never held. A file which is not
+  longer the one on screen. Later windows (a scroll, a jump, a resize) are
+  highlighted synchronously before they are installed, so they never flash
+  plain. Windows are reloaded as the view scrolls or the terminal is resized, so
+  the whole file is never held. A file which is not
   UTF-8 in the probe is the error that sends `set_file_content` to the image or
   MIME-type preview, so the highlighter never sees non-text content, and a file
   syntect has no language for is answered with "nothing to highlight" and keeps
@@ -318,18 +320,20 @@ diff skips the rest of the screen (only part of the image is drawn and the
 following cells/layout are not updated).
 
 **`app/highlight.rs`** — `HighlightPreview` owns the worker which syntax
-highlights the text preview. Only the loaded window is sent, plus up to
-`CONTEXT_LINES` = 32 lines the worker reads before it as syntect context (a
-block comment or a string can start above the window); the context is dropped
-from the answer, so only the window is painted. The UI thread draws the plain
-window at once, `request`s the highlight, and `apply_highlight` replaces it when
-the answer arrives — but only while the answer's path and window generation are
-still the ones on screen, the same guard `apply_preview` uses for images. The
-worker is one thread blocked on a channel between windows (an idle hire spends
-nothing on it). It keeps only the newest request, and the UI thread only the
-newest answer, so neither side can pile up work or text: a cursor moving through
-a directory highlights the file it lands on, not every file it passed, and a
-scroll leaves only the newest window waiting. `pending` tells the main loop a
+highlights the first window of a selected file. `highlight_window` is the shared
+entry point: it reads up to `CONTEXT_LINES` = 32 lines before the window, parses
+them together with the window (a block comment or a string can start above it)
+and drops the context from the answer, so only the window is painted. The worker
+uses it for the first window; a scroll or a jump calls it directly on the UI
+thread (see `app/preview.rs`), so a reload is installed already coloured and no
+plain frame is painted. The first window is drawn plain at once, `request`ed,
+and `apply_highlight` replaces it when the answer arrives — but only while the
+answer's path and window generation are still the ones on screen, the same guard
+`apply_preview` uses for images. The worker is one thread blocked on a channel
+between windows (an idle hire spends nothing on it). It keeps only the newest
+request, and the UI thread only the newest answer, so neither side can pile up
+work or text: a cursor moving through a directory highlights the file it lands
+on, not every file it passed. `pending` tells the main loop a
 request is in flight, which is when it polls at 16 ms instead of 200 ms so the
 colours appear as soon as they are ready; an answer of `None` (there is no
 language to highlight) ends that wait too.
@@ -360,6 +364,12 @@ end; a page which runs past EOF is accepted once the window reaches EOF.
 `preview_jump_to` first checks `preview_window_covers`: when the centred page is
 already loaded, it only moves `offset` (and returns to the first column), so
 `n`/`N` and search jumps inside the window do not reload and cannot flash.
+A reload which does happen is highlighted before it is installed
+(`highlight_window`), so scrolling and jumping show the coloured window in the
+first frame; only the first window of a file goes through the worker. A window
+whose content reaches `MAX_SYNC_HIGHLIGHT_BYTES` (128 KiB, a screenful of
+minified lines) falls back to the worker, because syntect would block the UI
+thread.
 `preview_scroll_line` / `preview_scroll_page` move the row offset (a page is
 `get_window_height()`); `preview_scroll_column` moves the column in steps of
 five and stops when the end of the widest *visible* line (`Line::width`) reaches
@@ -1396,6 +1406,9 @@ its type instead of failing with `ENXIO`),
 at first, coloured once the worker answered; a `.txt` one keeps a single default
 style), `app::test::test_stale_highlight_is_dropped` (an answer for another file
 never repaints the preview; an answer for an older window is dropped too),
+`app::preview::test::test_preview_reload_is_highlighted_synchronously` (a
+scroll past the loaded window is coloured even when the worker was never
+started, so no plain frame is painted),
 `app::preview::test::*` (a 500-line file is held as one 40-line window, three
 page downs stay inside it without a reload, a page can be scrolled far past it,
 a taller terminal reloads it around the same offset, one line, one page, one column and the end of the text are reachable and

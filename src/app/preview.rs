@@ -29,7 +29,7 @@ use crate::{
     },
 };
 
-use super::App;
+use super::{highlight::highlight_window, App};
 
 /// How many matches a preview search keeps.
 ///
@@ -49,6 +49,14 @@ const PREVIEW_WINDOW_PAGES: usize = 4;
 
 /// Which page of the window the view starts on after a scroll.
 const PREVIEW_WINDOW_ABOVE_PAGES: usize = 1;
+
+/// The largest window which is highlighted before it is drawn.
+///
+/// Highlighting happens on the UI thread for a reload, so the plain text is
+/// never painted; a window of very long lines (a minified file) would block
+/// that thread in syntect, so those rare windows keep the asynchronous path
+/// (and its plain first frame) instead.
+const MAX_SYNC_HIGHLIGHT_BYTES: usize = 128 * 1024;
 
 /// One line of the preview which contains a search match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,7 +301,7 @@ impl<'a> App<'a> {
     /// Start the text preview of `path` with its first window.
     pub fn start_preview(&mut self, path: PathBuf) -> anyhow::Result<()> {
         self.preview.path = Some(path);
-        self.load_preview_window(0, 0)
+        self.load_preview_window_skipping(0, 0, 0, false)
     }
 
     /// Drop the preview and the scroll/search state which belongs to it.
@@ -553,7 +561,7 @@ impl<'a> App<'a> {
             let above = page * PREVIEW_WINDOW_ABOVE_PAGES;
             let ds = target.saturating_sub(above);
             let (line, byte, skip) = self.window_start_for(ds)?;
-            self.load_preview_window_skipping(line, byte, skip)?;
+            self.load_preview_window_skipping(line, byte, skip, true)?;
 
             if self.preview_window_len() == 0 {
                 self.preview.set_offset(0);
@@ -669,7 +677,7 @@ impl<'a> App<'a> {
             }
         };
 
-        self.load_preview_window(start_line, start_byte)?;
+        self.load_preview_window_skipping(start_line, start_byte, 0, true)?;
 
         let mut offset = offset;
 
@@ -690,21 +698,18 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Load the window which starts at `start_line`.
-    fn load_preview_window(
-        &mut self,
-        start_line: usize,
-        start_byte: u64,
-    ) -> anyhow::Result<()> {
-        self.load_preview_window_skipping(start_line, start_byte, 0)
-    }
-
     /// Load a window which starts `skip` lines after `start_byte`.
+    ///
+    /// `sync` asks for the window to be highlighted before it is installed: a
+    /// scroll or a jump then never paints plain text, only the coloured window.
+    /// The first window of a file stays asynchronous, so browsing a directory
+    /// does not block on syntect.
     fn load_preview_window_skipping(
         &mut self,
         start_line: usize,
         start_byte: u64,
         skip: usize,
+        sync: bool,
     ) -> anyhow::Result<()> {
         let Some(path) = self.preview.path.clone() else {
             return Ok(())
@@ -720,7 +725,6 @@ impl<'a> App<'a> {
         )?;
 
         let content = window.lines.join("\n");
-        let text = plain_text(&content)?;
         // The window may start a few lines after `start_byte` (a page far
         // below the loaded one); its context must be read from its own start.
         let window_byte = window.starts
@@ -728,15 +732,29 @@ impl<'a> App<'a> {
             .copied()
             .unwrap_or(start_byte);
 
+        let sync = sync && content.len() < MAX_SYNC_HIGHLIGHT_BYTES;
+        let text = if sync {
+            match highlight_window(&path, window.start_line, window_byte, &content)
+            {
+                Some(text) => text,
+                None => plain_text(&content)?,
+            }
+        } else {
+            plain_text(&content)?
+        };
+
         let generation = self.preview.install_window(&window, start_byte);
         self.file_content = FileContent::Text(text);
-        self.highlight.request(
-            path,
-            window.start_line,
-            window_byte,
-            content,
-            generation
-        );
+
+        if !sync {
+            self.highlight.request(
+                path,
+                window.start_line,
+                window_byte,
+                content,
+                generation
+            );
+        }
 
         Ok(())
     }
@@ -1019,6 +1037,51 @@ mod test {
         assert!(app.preview_window_covers(0, 10));
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A reload is highlighted before it is installed: even without the worker
+    /// running, scrolling past the loaded window leaves a coloured preview, so
+    /// no plain frame is painted.
+    #[test]
+    fn test_preview_reload_is_highlighted_synchronously() {
+        let _guard = window_size(10, 80);
+
+        let dir = temp_dir("sync-highlight");
+        let lines: Vec<String> = (0..200)
+            .map(|idx| format!("let value_{idx} = {idx};"))
+            .collect();
+        fs::write(dir.join("a.rs"), lines.join("\n")).unwrap();
+
+        let mut app = App::default();
+        app.goto_dir(&dir, Some(false)).unwrap();
+
+        // The first window is left to the worker, which is not started here:
+        // it stays plain.
+        assert!(!preview_has_colours(&app));
+
+        // Scrolling out of the first window reloads it synchronously.
+        for _ in 0..5 {
+            app.preview_scroll_page(true);
+        }
+
+        assert!(preview_has_colours(&app));
+        assert!(!app.highlight.pending());
+
+        update_window_height(0);
+        update_window_width(0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Whether the preview already has syntax colours.
+    fn preview_has_colours(app: &App) -> bool {
+        let FileContent::Text(ref text) = app.file_content else {
+            return false
+        };
+
+        text.lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .any(|span| span.style.fg.is_some())
     }
 
     /// A page of scrolling fits in the loaded window: it does not reload (and
