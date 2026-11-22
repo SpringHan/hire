@@ -71,6 +71,10 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     pub quit_after_output: bool,
 
+    /// Print the version of hire and exit
+    #[arg(short, long, default_value_t = false)]
+    pub version: bool,
+
     /// Internal: restore the tabs handed over by a sudo session.
     #[arg(long, hide = true, default_value_t = String::from("NULL"))]
     pub sudo_session: String,
@@ -1053,6 +1057,24 @@ mod test {
         assert!(
             Args::try_parse_from(["hire", "-S", "-w"]).is_err()
         );
+    }
+
+    /// `-v` / `--version` is a boolean of its own: `main` prints the version
+    /// and leaves before any config or terminal setup, so a normal run keeps
+    /// the flag off.
+    #[test]
+    fn test_version_flag() {
+        let args = Args::try_parse_from(["hire", "-v"]).unwrap();
+        assert!(args.version);
+
+        let args = Args::try_parse_from(["hire", "--version"]).unwrap();
+        assert!(args.version);
+
+        let args = Args::try_parse_from(["hire"]).unwrap();
+        assert!(!args.version);
+
+        // Only the lowercase `-v` is bound; clap's own `-V` is not enabled.
+        assert!(Args::try_parse_from(["hire", "-V"]).is_err());
     }
 
     /// A path `xdg-mime` cannot identify falls back to the old label, whether

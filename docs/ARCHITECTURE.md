@@ -163,7 +163,9 @@ hire/
 Declares all top-level modules, parses CLI arguments (`utils::Args`), builds the
 default `App`, initializes config, starts the image and search background
 channels (file search and text-preview search), enters the ratatui alternate
-screen, and runs the main loop.
+screen, and runs the main loop. `-v` / `--version` stops right after parsing:
+`main` prints `hire <version>` and returns, so the flag works without a terminal
+and without touching the config.
 
 Responsibilities:
 
@@ -975,10 +977,12 @@ the browser frame underneath.
 **`utils/mod.rs`**
 
 - `Args` — clap-derived CLI options (`--working-directory`, `--start-from`,
-  `--shell`, `--output-file`, `--quit-after-output`), plus the hidden
-  `--sudo-session` / `--config-dir` arguments used by the sudo session.
+  `--shell`, `--output-file`, `--quit-after-output`, `--version`), plus the
+  hidden `--sudo-session` / `--config-dir` arguments used by the sudo session.
   `--shell` is `-S` (capital) because `-s` belongs to `--start-from`, and it
-  conflicts with `--working-directory`.
+  conflicts with `--working-directory`. `--version` is `-v`; `main` prints
+  `hire <CARGO_PKG_VERSION>` for it and returns before the config and the
+  terminal are set up.
 - `Direction` — Up/Down/Left/Right parsed from keymap strings.
 - `str_split`, `read_to_text` (read the preview prefix, strip `\r`, expand
   tabs, parse ANSI), `delete_word` (character-based, so multi-byte content is
@@ -1359,6 +1363,8 @@ too, the rest of the line keeps its style),
 `utils::test::test_search_indexes` (the shared case-insensitive substring and
 exact-name matching) and `test_preview_read_is_limited_but_keeps_utf8` (the byte
 limit, a character cut by it and invalid UTF-8 in the middle),
+`utils::test::test_version_flag` (`-v` and `--version` set the flag, it is off
+by default and `-V` is not bound),
 `app::highlight::test::*` (the worker answers with
 the path of the file, answers `None` when there is nothing to highlight — so the
 UI stops waiting — and ignores requests when it was not started) and

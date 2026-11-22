@@ -29,6 +29,13 @@ use key_event::{
 fn main() -> AppResult<()> {
     let args = utils::Args::parse();
 
+    // `-v`/`--version` only prints the version, so it leaves before the config
+    // and the terminal are touched.
+    if args.version {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(())
+    }
+
     // A sudo session runs with an isolated config directory.
     if args.config_dir != "NULL" {
         config::set_config_dir_override(&args.config_dir);
