@@ -411,7 +411,13 @@ pub fn handle_event(
                 return Ok(())
             }
 
-            output_path(app, terminal, false)?;
+            // `Enter` writes the selected file's path; `Shift-Enter` writes the
+            // current directory. The latter needs a terminal which reports the
+            // Shift modifier on Enter (kitty keyboard protocol / `CSI u`),
+            // because a legacy Enter byte carries no modifier.
+            let file_out = !key.modifiers.contains(KeyModifiers::SHIFT);
+
+            output_path(app, terminal, file_out)?;
         },
 
         KeyCode::Up => {

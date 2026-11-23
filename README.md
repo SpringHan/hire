@@ -255,9 +255,14 @@ The Output File feature allows you to write file/directory paths to a specified 
 
 Key behaviors:
 - When enabled, writes either:
-  - The full path of the currently selected file (if one is selected and you pressed key of `move right` command)
-  - The current directory path (if you pressed `Enter` in a path)
+  - The full path of the currently selected file (if one is selected and you pressed `Enter`)
+  - The current directory path (if you pressed `Shift-Enter`)
 - Automatically quits the application after writing
+
+`Shift-Enter` is only visible when the terminal reports the Shift modifier on
+Enter (`CSI 13;2u`, the kitty keyboard protocol). Hire does not switch the
+terminal into that mode itself, so a terminal that does not send it by default
+delivers a plain Enter, which writes the selected file's path.
 
 This feature should be used with `--output-file` argument:
 

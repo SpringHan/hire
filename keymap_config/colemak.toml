@@ -82,7 +82,6 @@ keymap = [
     { key = "P",  run = "full_path"         },  # Print full path of current file
     { key = "i",  run = "edit_mode"         },  # Enter edit mode
     { key = "\"", run = "goto_file"         },  # Goto path stored in `temp-file`
-    { key = "'",  run = "output_file"       },  # Output selected file path to `temp-file`
     { key = "-",  run = "hide_or_show"      },  # Toggle hidden files visibility
     { key = "s",  run = "single_symlink"    },  # Create symlink of currently selected file
     { key = "\\", run = "quit_after_output" },  # Switch between whether quit hire after an output operation

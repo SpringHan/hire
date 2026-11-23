@@ -571,7 +571,12 @@ early-returns an `anyhow`-backed error.
   `selected_block` is `Block::Shell`. Otherwise it handles modifier chords
   (`Ctrl-b/f/a/e/n/p`, `Ctrl-g`, `Ctrl-Backspace`, `Alt-f` / `Alt-b`),
   `Backspace`, `Esc`, `Enter`, arrows, and `Tab` (completion / `Alt-Ctrl-Tab`
-  expand). `Ctrl-b`/`Ctrl-f` scroll the expanded view sideways and only move the
+  expand). `Enter` in the browser writes the selected file's path to the output
+  file while `Shift-Enter` writes the current directory; the modifier only
+  arrives on terminals which report Enter as `CSI u` (the kitty keyboard
+  protocol), because a legacy Enter byte is the same with and without Shift.
+  Hire does not push the enhancement flags itself.
+  `Ctrl-b`/`Ctrl-f` scroll the expanded view sideways and only move the
   cursor when nothing is expanded; `Ctrl-p`/`Ctrl-n` page the expanded view.
   Non-control characters go to the active `SwitchCase`, the command line, or
   the keymap. `Alt-Ctrl-Tab` toggles only a typed command line: a menu owns its
