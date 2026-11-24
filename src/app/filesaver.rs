@@ -204,8 +204,9 @@ impl FileSaver {
         if let Some(ref permission) = self.permissions {
             permission.readonly()
         } else {
-            // When DANGLING_SYMLINK is true, the file must be mutable.
-            if self.dangling_symlink {
+            // `read_only` function always should be written after `cannot_read`,
+            // The 'if' is to avoid unnecessary panic.
+            if self.dangling_symlink || self.cannot_read {
                 return false
             }
             panic!("Unknow Error!")
