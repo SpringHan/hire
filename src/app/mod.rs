@@ -1,4 +1,4 @@
-// App
+//! The application state: the browser, the shell views and the previews.
 
 mod color;
 mod filesaver;
@@ -44,7 +44,6 @@ pub use image_preview::Preview;
 pub use preview::PreviewState;
 
 pub struct App<'a> {
-    // Core
     pub path: PathBuf,
     pub quit_now: bool,
     pub hide_files: bool,
@@ -56,16 +55,15 @@ pub struct App<'a> {
     // NOTE: When file_content is not None, child_files must be empty.
     pub file_content: FileContent,
 
-    /// Whether to show the index of file to allow user to jump to.
+    /// The numbering shown next to files, for jumping to a file by number.
     pub navi_index: NaviIndex,
 
-    // Block
     pub selected_block: Block,
 
     pub switch_case: Option<SwitchCase>,
     pub marked_files: HashMap<PathBuf, MarkedFiles>,
 
-    /// When command_error is true, the content in command line will be displayed in red.
+    /// The command line is drawn in red: the last command failed.
     pub command_error: bool,
     pub command_expand: bool,
     pub command_scroll: Option<(u16, u16)>, // Used for expanded mode.
@@ -75,30 +73,22 @@ pub struct App<'a> {
 
     pub command_completion: AppCompletion<'a>,
 
-    // Search file
     pub file_searcher: FileSearcher,
 
-    // Macro
     pub macro_attri: Macro,
 
-    // ColorScheme
     pub term_colors: TermColors,
 
-    // Target directories
     pub target_dir: HashMap<char, String>,
 
-    /// The paths jumped from, the oldest one is stored at the first place.
-    /// The length of it will never be more than 30.
+    /// The paths jumped from, oldest first; at most 30 are kept.
     pub path_history: Vec<PathBuf>,
 
-    // Working directory
     /// The working directory stored in the cache file, if any.
     pub working_directory: Option<PathBuf>,
 
-    // Tab
     pub tab_list: crate::key_event::TabList<'a>,
 
-    // Shell sessions
     pub shell_sessions: ShellSessions,
 
     /// The chord which gives hire a command while a shell is attached.
@@ -163,7 +153,7 @@ pub struct App<'a> {
     /// Digits typed after the prefix, used to select a shell by number.
     pub shell_digits: String,
 
-    /// When the typed digits are committed automatically.
+    /// Deadline after the last digit, so `1` can still become `12`.
     pub shell_digit_deadline: Option<Instant>,
 
     /// The whole terminal must be repainted on the next draw (after attaching
@@ -186,36 +176,28 @@ pub struct App<'a> {
     /// The rectangle occupied by the shell screen in the last frame.
     pub shell_area: Rect,
 
-    // Image Preview
     pub image_preview: ImagePreview,
 
-    // Syntax Highlighting
     pub highlight: HighlightPreview,
 
-    // Text Preview
     /// The scroll offset and the search of the text preview.
     pub preview: PreviewState,
 
-    // Edit Mode
     pub edit_mode: EditMode,
 
-    /// When this var is true, the navigation will be with selection.
+    /// Moving the cursor marks every entry it passes (the EXPAND mode).
     pub mark_expand: bool,
 
-    // App Config
     pub keymap: Keymap,
     pub config_path: String,
     pub config: AppConfig<'a>,
 
-    // AppErrors
     pub app_error: AppError,
 
-    // Output
     pub quit_after_output: bool,
     /// The temporary file for communicating between hire and other programs.
     pub temp_file: String,
 
-    // Computer & User name
     pub user_name: Cow<'static, str>,
     pub computer_name: Cow<'static, str>,
 }
@@ -236,20 +218,17 @@ impl<'a> Default for App<'a> {
         let term_colors = TermColors::init();
 
         App {
-            // Base
             path: current_dir,
             child_files: Vec::new(),
             parent_files: Vec::new(),
             current_files: Vec::new(),
 
-            // UI
             term_colors,
             selected_block,
             hide_files: true,
             file_content: FileContent::None,
             selected_item: ItemIndex::default(),
 
-            // Operations
             tab_list,
             shell_sessions: ShellSessions::default(),
             shell_prefix: ShellPrefix::default(),
@@ -285,21 +264,17 @@ impl<'a> Default for App<'a> {
             preview: PreviewState::default(),
             file_searcher: FileSearcher::default(),
 
-            // Command
             command_idx: None,
             command_expand: false,
             command_history: Vec::new(),
             command_completion: AppCompletion::default(),
 
-            // Error handle
             command_error: false,
             app_error: AppError::new(),
 
-            // Output
             quit_after_output: false,
             temp_file: String::from("/tmp/hire.tmp"),
 
-            // Config & others
             quit_now: false,
             config: Vec::new(),
             macro_attri: Macro::new(),
@@ -311,14 +286,13 @@ impl<'a> Default for App<'a> {
     }
 }
 
-// Basic
 impl<'a> App<'a> {
     pub fn root(&self) -> bool {
         self.path.to_string_lossy() == "/"
     }
 
-    /// When the user is in non-root dir, only return the path of current file.
-    /// When the user is in root dir, return the selected file in parent block.
+    /// The directory the current block lists. At the root it is the selected
+    /// entry of the parent block, when that entry is a directory.
     pub fn current_path(&self) -> PathBuf {
         if self.root() {
             let current_file = self.search_file(SearchFile::Parent).unwrap();
@@ -332,9 +306,7 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Initialize parent, current and child files.
     pub fn init_all_files(&mut self) -> AppResult<()> {
-        // Parent files
         self.init_parent_files()?;
 
         if self.parent_files.is_empty() {
@@ -343,7 +315,6 @@ impl<'a> App<'a> {
 
         self.refresh_parent_item();
 
-        // Current files
         self.init_current_files()?;
         self.refresh_current_item();
 
@@ -358,7 +329,6 @@ impl<'a> App<'a> {
             return Ok(())
         }
 
-        // Child Files
         if !self.root() {
             self.init_child_files()?;
             self.refresh_child_item();
@@ -393,7 +363,6 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Select the first item if it exists, otherwise select None.
     pub fn refresh_child_item(&mut self) {
         if !self.child_files.is_empty() {
             self.selected_item.child_select(Some(0));
@@ -412,7 +381,6 @@ impl<'a> App<'a> {
         self.refresh_child_item();
     }
 
-    /// Select the first item or not select.
     pub fn select_normal(&mut self, file: SearchFile) {
         match file {
             SearchFile::Parent => {
@@ -450,7 +418,7 @@ impl<'a> App<'a> {
             let temp_path = if let Some(path) = self.path.parent() {
                 path.to_path_buf()
             } else {
-                // Cannot get parent directory info at root dir.
+                // `Path::parent` is `None` at the root itself.
                 PathBuf::from("/")
             };
 
@@ -462,7 +430,8 @@ impl<'a> App<'a> {
                 break;
             }
 
-            // Handle the case when the current parent dir is not in parent_files.
+            // The current directory may be missing from its parent's
+            // listing.
             let current_parent_name = self.path
                 .file_name()
                 .unwrap()
@@ -510,7 +479,6 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// The PATH is used when the user is in root directory.
     pub fn init_current_files(&mut self) -> io::Result<()> {
         let temp_path = self.current_path();
 
@@ -518,8 +486,6 @@ impl<'a> App<'a> {
             .read_files(temp_path.as_path())
             .expect("Error for read_files on a file!");
 
-        // To aovid the situation that current_files do not be refreshed
-        // when reading a empty directory.
         if self.current_files.is_empty() && current_files.is_empty() {
             return Ok(())
         }
@@ -531,12 +497,10 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// It's your deal to ensure CURRENT_FILES is not empty.
     pub fn init_child_files(&mut self) -> AppResult<()>
     {
         let temp_path = self.path.clone();
         let current_select = {
-            // NOTE: Pay attention to here (An incomplete NOTE, to be removed later).
             let file_saver = self.search_file(SearchFile::Current);
             if let Some(file_saver) = file_saver {
                 file_saver
@@ -556,7 +520,7 @@ impl<'a> App<'a> {
                 self.reset_preview();
             }
         } else {
-            // See the note at the definition of App structure.
+            // See the note on `App::file_content` above.
             if !self.file_content.is_some() {
                 self.child_files.clear();
             }
@@ -599,10 +563,8 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Partly update the file browser block.
-    /// 
-    /// Update parent files & current files if the user is in root directory.
-    /// Otherwise update current & child files.
+    /// Re-read the lists the browser shows, with the selection reset to the
+    /// first entry.
     pub fn partly_update_block(&mut self) -> AppResult<()> {
         if self.root() {
             self.selected_item.parent_select(Some(0));
@@ -646,12 +608,11 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Update all files and still tick currently selected files.
-    /// 
-    /// When there's a file that should be selected out from this function,
-    /// use TARGET argument.
+    /// Re-read every list and keep the entries that were selected.
+    ///
+    /// `target` is selected instead of the previous name (a rename, or the
+    /// item a macro runs on).
     pub fn update_with_prev_selected(&mut self, target: Option<String>) -> AppResult<()> {
-        // Prev states
         let parent_file = self
             .search_file(SearchFile::Parent)
             .unwrap()
@@ -674,7 +635,7 @@ impl<'a> App<'a> {
             None
         };
 
-        // The first one is for parent, the other one for current.
+        // `select_prev[0]` is the parent's; `select_prev[1]` the current's.
         let mut select_prev = [true, true];
         let root = self.root();
 
@@ -682,7 +643,6 @@ impl<'a> App<'a> {
         self.reset_preview();
 
 
-        // Refresh parent
         self.init_parent_files()?;
         list_state_select(
             &mut self.selected_item.parent,
@@ -696,7 +656,6 @@ impl<'a> App<'a> {
         );
 
 
-        // Refresh current
         if root {
             let parent_filesaver = self.get_file_saver()
                 .expect("Error 1 at update_with_prev_selected in app.rs.");
@@ -739,18 +698,17 @@ impl<'a> App<'a> {
         }
 
 
-        // Refresh child or show file content
         self.child_files.clear();
         if self.current_files.is_empty() {
             return Ok(())
         }
 
-        self.init_child_files()?; // Set file content is included by this func.
+        self.init_child_files()?; // This also sets the file content.
         if select_prev[1] {
             list_state_select(
                 &mut self.selected_item.child,
                 &mut self.child_files,
-                &mut select_prev[1], // It's doesn't matter what thing is here.
+                &mut select_prev[1], // `select_prev[1]` is not read again.
                 child_file
             );
         } else {
@@ -772,7 +730,6 @@ impl<'a> App<'a> {
     }
 }
 
-// File Content
 impl<'a> App<'a> {
     pub fn set_file_content(&mut self) -> anyhow::Result<()> {
         use io::ErrorKind;
@@ -837,7 +794,6 @@ impl<'a> App<'a> {
                             return Ok(())
                         }
 
-                        // Try to display image file
                         if self.image_preview.with_image_feat() {
                             // The preview thread runs asynchronously:
                             // blank the pane so the previous file's
@@ -865,14 +821,12 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Apply the syntax highlighting the highlighting thread finished.
+    /// Apply the answer of the highlighting thread.
     ///
-    /// The thread runs asynchronously, so the selection may have moved on: a
-    /// late answer for another file must never replace the current preview,
-    /// which is the same rule `apply_preview` follows for images. An answer
-    /// with no text means there was nothing to highlight (no language, a
-    /// parser error), and the plain preview stays. An answer for a window the
-    /// preview has already scrolled away from is dropped too.
+    /// The thread runs asynchronously, so the selection may have moved on: an
+    /// answer for another file or an older window must never replace the
+    /// current preview (the same rule `apply_preview` follows for images).
+    /// An answer with no text leaves the plain preview in place.
     pub fn apply_highlight(&mut self) {
         if let Some((path, generation, text)) = self.highlight.take() {
             self.apply_highlight_for(path, generation, text);
@@ -898,10 +852,10 @@ impl<'a> App<'a> {
 
     /// Apply the preview the preview thread produced for `path`.
     ///
-    /// The thread runs asynchronously, so the selection may have moved on (to
-    /// another file, or to a directory) while it was busy. A late result must
-    /// never replace the current view: it used to paint a file's type over a
-    /// directory's listing, or over the next file's preview.
+    /// The thread is asynchronous, so the selection may have moved on while it
+    /// was busy: a late result must never replace the current view. It used to
+    /// paint a file's type over a directory's listing, or over the next file's
+    /// preview.
     pub fn apply_preview(&mut self, path: PathBuf, preview: Preview) {
         if self.selected_file_path().as_deref() != Some(path.as_path()) {
             return
@@ -966,9 +920,7 @@ impl<'a> App<'a> {
     }
 }
 
-// Other Action
 impl<'a> App<'a> {
-    /// Jump to `dir` directory.
     pub fn goto_dir<P: AsRef<Path>>(&mut self,
                                     dir: P,
                                     hide_files: Option<bool>
@@ -1004,7 +956,6 @@ impl<'a> App<'a> {
         Ok(())
     }
     
-    /// Append FILE to marked file list.
     pub fn append_marked_file<S: Into<String>>(&mut self, file: S, is_dir: bool) {
         let path = self.path.to_owned();
 
@@ -1031,8 +982,8 @@ impl<'a> App<'a> {
     pub fn marked_file_contains<S: Into<String>>(&self, file: S) -> bool {
         let path = self.path.to_owned();
         if let Some(marked_files) = self.marked_files.get(&path) {
-            // In Linux, there could not be more than one files that have the same name.
-            // (Include directories)
+            // Linux keeps at most one entry per name in a directory, so the
+            // name alone identifies the file (directories included).
             return marked_files.files.contains_key(&file.into())
         }
 
@@ -1055,14 +1006,13 @@ impl<'a> App<'a> {
         self.marked_files.contains_key(&path)
     }
     
-    /// Clear marked files in current directory.
     pub fn clear_path_marked_files(&mut self) {
         let path = self.current_path();
         self.marked_files.remove(&path);
     }
 }
 
-/// Check whether `path` is in hidden directories.
+/// Whether `path` contains a hidden (dot) component.
 pub fn path_is_hidden<P: AsRef<Path>>(path: P) -> bool {
     let path = path.as_ref().to_string_lossy();
     path.contains("/.")
@@ -1080,8 +1030,8 @@ fn filesave_closure(ele: Result<fs::DirEntry, io::Error>) -> FileSaver {
     }
 }
 
-/// Select item in parent/current/child file.
-/// Return whether passed the name of previous name.
+/// Select the entry named `file_name`, and clear `keep_prev` when no entry has
+/// that name.
 #[inline]
 fn list_state_select(
     item: &mut ListState,
@@ -1175,7 +1125,6 @@ mod test {
         );
         assert!(app.file_content == FileContent::Text(Text::raw("before")));
 
-        // The result for the selected file is applied.
         app.apply_preview(
             app.current_path().join("a.txt"),
             Preview::FileType(String::from("text/x-a"))
@@ -1323,7 +1272,6 @@ mod test {
         );
         assert!(app.file_content == FileContent::Text(Text::raw("before")));
 
-        // The answer for the current window of the selected file is applied.
         app.apply_highlight_for(
             app.current_path().join("a.rs"),
             app.preview.window_generation(),

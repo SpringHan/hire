@@ -1,6 +1,6 @@
-// Types for cursor movement.
+//! The movement commands and the navigation index the user types.
 
-/// The enum that used to control move of `List` widget in ratatui.
+/// How far to move: one item, one page, or to a given index.
 #[derive(PartialEq, Eq)]
 pub enum Goto {
     Up,

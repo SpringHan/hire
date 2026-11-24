@@ -1,4 +1,4 @@
-// Macro utils
+//! The recorded keys of a macro and the items it runs on.
 
 use std::path::PathBuf;
 
@@ -11,19 +11,15 @@ pub enum MacroStatus {
     None
 }
 
-/// The item that a macro should be executed on.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MacroTarget {
-    /// The directory which contains the target item.
     pub dir: PathBuf,
-    /// The name of the target item.
     pub name: String,
 }
 
 pub struct Macro {
     keys: Vec<KeyEvent>,
-    /// The items that the macro should be executed on.
-    /// When it's empty, the macro is executed on the selected item.
+    /// The items the macro runs on; empty means the selected item.
     targets: Vec<MacroTarget>,
     pub status: MacroStatus,
 }
@@ -53,12 +49,10 @@ impl Macro {
         self.keys.clear();
     }
 
-    /// Set the items that the macro should be executed on.
     pub fn set_targets(&mut self, targets: Vec<MacroTarget>) {
         self.targets = targets;
     }
 
-    /// Take the items that the macro should be executed on.
     pub fn take_targets(&mut self) -> Vec<MacroTarget> {
         std::mem::take(&mut self.targets)
     }

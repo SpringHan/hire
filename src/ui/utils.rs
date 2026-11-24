@@ -1,4 +1,4 @@
-// Utils
+//! Item rendering and the hint/path helpers the browser columns share.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,7 +16,6 @@ use crate::{
 
 use super::list::Item;
 
-/// Create a list of ListItem
 pub fn render_list<'a>(
     files: std::slice::Iter<'a, FileSaver>,
     colors: &TermColors,
@@ -28,7 +27,7 @@ pub fn render_list<'a>(
         return (temp_items, false)
     }
 
-    // Use this method to avoid extra clone.
+    // Borrow a local empty set so `marked_items` need not be cloned.
     let mut marked = false;
     let temp_set: HashMap<String, bool> = HashMap::new();
     let marked_files = if let Some(item) = marked_items {
@@ -56,7 +55,6 @@ pub fn render_list<'a>(
     (temp_items, marked)
 }
 
-/// Create ListItems for EditItems
 pub fn render_editing_list<'a>(
     edit_ref: &'a EditMode,
     files: &Vec<FileSaver>,
@@ -118,9 +116,8 @@ pub fn key_hints(text: &str, style: Style) -> Line<'static> {
 /// highlighted.
 ///
 /// The cursor is a byte offset on a character boundary, so the name is walked
-/// with `char_indices()` and compared by the byte position. Comparing the
-/// character count would be wrong as soon as the name holds multi-byte
-/// characters (e.g. CJK ones).
+/// with `char_indices()` and compared by byte position: a character count
+/// would be wrong once the name holds multi-byte characters (e.g. CJK).
 fn editing_name_line<'a>(name: &'a str, cursor: CursorPos) -> Line<'a> {
     if let CursorPos::Index(pos) = cursor {
         let mut line = Line::default();
@@ -201,7 +198,6 @@ fn get_editing_item_color<'a>(
     (temp_item, sidebar_style)
 }
 
-/// Return the item which has the style of normal file.
 fn get_normal_item_color<'a>(
     file: &'a FileSaver,
     colors: &TermColors,
@@ -228,11 +224,9 @@ fn get_normal_item_color<'a>(
         })
 }
 
-/// Shorten a path so that it can be displayed in a single line.
-///
-/// The home directory is displayed as `~`; when the path is too long, every
-/// directory component before the last one is abbreviated to its first
-/// character, and a leading `…` is used if it's still longer than `max_len`.
+/// Shorten a path to a single line: `~` for the home directory, one character
+/// per directory component when it is too long, and a leading `…` when the
+/// abbreviated path is still longer than `max_len`.
 pub fn shorten_path(
     path: &Path,
     home: Option<&Path>,
@@ -253,8 +247,7 @@ pub fn shorten_path(
         return display
     }
 
-    // Abbreviate every directory component except the last one, which is the
-    // name of the directory itself.
+    // Every component but the last (the directory itself) becomes one char.
     let components: Vec<&str> = display.split('/').collect();
     let last = components.len().saturating_sub(1);
     let mut shorted: Vec<String> = Vec::with_capacity(components.len());
@@ -272,7 +265,6 @@ pub fn shorten_path(
         return shorted
     }
 
-    // Keep the tail of the path when it's still too long.
     let mut tail: Vec<char> = shorted.chars()
         .rev()
         .take(max_len.saturating_sub(1))

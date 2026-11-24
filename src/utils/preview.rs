@@ -1,4 +1,4 @@
-// Reading the text preview from a file, a window at a time.
+//! Reading the text preview from a file, a window at a time.
 
 use std::{
     fs::File,
@@ -7,15 +7,14 @@ use std::{
 
 /// The number of bytes read to decide whether a file is text.
 ///
-/// The file is not read to the end: binary data usually gives itself away in
-/// the first kilobytes, and the rest is read window by window when the preview
-/// needs it.
+/// Binary data gives itself away in the first kilobytes; the rest is read
+/// window by window when the preview needs it.
 pub const PREVIEW_PROBE_BYTES: usize = 64 * 1024;
 
 /// The longest line the preview keeps, in bytes.
 ///
-/// A minified document can put the whole file on one line; reading it would load
-/// the file although the terminal shows only a screenful of columns.
+/// A minified document can put the whole file on one line, which would then be
+/// loaded although the terminal shows only a screenful of columns.
 pub const MAX_PREVIEW_LINE_BYTES: usize = 16 * 1024;
 
 /// How many bytes are read at a time when the preview needs earlier lines.
@@ -37,22 +36,17 @@ pub struct PreviewWindow {
     /// The absolute line index of `lines[0]`.
     pub start_line: usize,
 
-    /// The byte offset just after the last line read.
     pub end_byte: u64,
 
-    /// Whether the read reached the end of the file.
     pub eof: bool,
 }
 
 /// Read up to [`PREVIEW_PROBE_BYTES`] bytes of `file` as UTF-8.
 ///
-/// The newline character of Windows is removed, so a CRLF file renders like an
-/// LF one. A file which is not valid UTF-8 within the bytes read is an error:
-/// the preview takes that as "not text" and shows an image or the MIME type
-/// instead.
-///
-/// A multi-byte character which the limit cuts in half is dropped instead of
-/// making the whole file look like binary data.
+/// CR bytes are dropped, so a CRLF file renders like an LF one. Invalid UTF-8
+/// within the bytes read is an error, which the preview takes as "not text". A
+/// multi-byte character cut in half by the limit is dropped rather than making
+/// the whole file look like binary data.
 pub fn read_probe(file: &File) -> io::Result<String> {
     let mut reader = BufReader::new(file);
     reader.seek(SeekFrom::Start(0))?;
@@ -89,9 +83,8 @@ pub fn read_probe(file: &File) -> io::Result<String> {
 
 /// Read up to `count` lines of `file`, starting at `start_byte`.
 ///
-/// `start_line` is the absolute line index of `start_byte`; the returned
-/// window starts there. A file which ends earlier is returned with fewer lines
-/// and `eof` set.
+/// `start_line` is the absolute line index of `start_byte`. A file which ends
+/// earlier yields fewer lines and `eof`.
 pub fn read_window(
     file: &File,
     start_byte: u64,
@@ -104,9 +97,8 @@ pub fn read_window(
 
 /// Read a window which starts `skip` lines after `start_byte`.
 ///
-/// The skipped lines are still read (they are the only way to reach the next
-/// line), but they are not returned; this is what a scroll far below the
-/// loaded window uses.
+/// The skipped lines are still read (the only way to reach the next line) but
+/// not returned; a scroll far below the loaded window uses this.
 pub fn read_window_skipping(
     file: &File,
     start_byte: u64,
@@ -158,12 +150,12 @@ pub fn read_window_skipping(
 /// Read up to `count` lines which end at `end_byte`.
 ///
 /// `end_byte` is the first byte of a line (or the start of the file), so the
-/// bytes before it end with a line break. The window is what a scroll upwards
-/// needs: the lines above the loaded view. `start_line` is the absolute line
-/// index of `end_byte`; the window starts `lines.len()` lines before it.
+/// bytes before it end with a line break; this is what a scroll upwards (and
+/// the highlight context) needs. `end_line` is the absolute line index of
+/// `end_byte`.
 ///
-/// At most [`MAX_BACK_BYTES`] are read; a file whose lines are longer than that
-/// yields fewer lines, which is harmless for a preview.
+/// At most [`MAX_BACK_BYTES`] are read, so a file with longer lines yields
+/// fewer lines — harmless for a preview.
 pub fn read_prev_window(
     file: &File,
     end_byte: u64,
@@ -200,9 +192,8 @@ pub fn read_prev_window(
         bytes.extend_from_slice(block);
     }
 
-    // Split `[start, end_byte)` into pieces: a piece is one line without its
-    // line break. A partial line at the front is not a line the window can
-    // start at.
+    // Split `[start, end_byte)` into lines: a partial line at the front is not
+    // a line the window can start at.
     let mut pieces: Vec<(usize, usize)> = Vec::new();
     let mut from = 0;
 
@@ -250,10 +241,9 @@ pub fn read_prev_window(
 
 /// Read one line of `reader`, without its line break.
 ///
-/// The returned number is how many bytes the line occupied in the file,
-/// including its line break (and the part of a line which the limit cut off).
-/// `None` at the end of the file. Invalid UTF-8 is replaced instead of failing:
-/// the probe already decided the file is text, and a byte in the middle must
+/// The returned number counts the bytes the line occupied in the file, its line
+/// break and any part the limit cut off. Invalid UTF-8 is replaced rather than
+/// failing: the probe already decided the file is text, and one bad byte must
 /// not end the preview.
 fn read_line(reader: &mut impl BufRead) -> io::Result<Option<(String, u64)>> {
     let mut bytes: Vec<u8> = Vec::new();
@@ -338,8 +328,6 @@ mod test {
         fs::write(dir.join("a.txt"), text.join("\n")).unwrap();
     }
 
-    /// A forward window knows where every line starts and stops at the end of
-    /// the file without an extra read.
     #[test]
     fn test_read_window_forward() {
         let dir = temp_dir("forward");
@@ -367,9 +355,7 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A window can skip lines without giving up the absolute line numbering
-    /// or the byte offsets, which is what a page which is far below the loaded
-    /// lines uses.
+    /// A skipped window keeps the absolute numbering and the byte offsets.
     #[test]
     fn test_read_window_skipping() {
         let dir = temp_dir("skip");
@@ -382,7 +368,6 @@ mod test {
         assert_eq!(window.start_line, 5);
         assert_eq!(window.starts, [35, 42]);
 
-        // Skipping past the end is an empty window at the end of the file.
         let window = read_window_skipping(&file, 0, 0, 20, 2).unwrap();
         assert!(window.lines.is_empty());
         assert!(window.eof);
@@ -390,8 +375,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Earlier lines are found from the end; a partial line at the front is
-    /// dropped and the window keeps its absolute numbering.
     #[test]
     fn test_read_prev_window() {
         let dir = temp_dir("back");
@@ -405,11 +388,9 @@ mod test {
         assert_eq!(window.start_line, 3);
         assert_eq!(window.starts, [21, 28]);
 
-        // At the start of the file there are no earlier lines.
         let window = read_prev_window(&file, 0, 0, 2).unwrap();
         assert!(window.lines.is_empty());
 
-        // Asking for more lines than exist returns what there is.
         let window = read_prev_window(&file, end, 5, 100).unwrap();
         assert_eq!(window.lines.len(), 5);
         assert_eq!(window.start_line, 0);
@@ -417,7 +398,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// CRLF files render like LF ones, and an empty file has no line.
     #[test]
     fn test_read_window_crlf_and_empty() {
         let dir = temp_dir("crlf");
@@ -460,8 +440,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The probe accepts text (including a character cut by its limit) and
-    /// rejects binary data.
     #[test]
     fn test_read_probe() {
         let dir = temp_dir("probe");

@@ -1,4 +1,4 @@
-// Types
+//! Tab identity, the tab menu's state and the tab list.
 
 use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
@@ -15,8 +15,7 @@ use crate::{
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TabId(pub u64);
 
-/// One open tab: its directory, its remembered selection and the shells
-/// mounted on it.
+/// One open tab: its directory, remembered selection and mounted shells.
 #[derive(Clone)]
 pub struct Tab {
     pub id: TabId,
@@ -51,13 +50,10 @@ impl Tab {
 /// there is a mounted shell to lose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TabAction {
-    /// Close the tab at this index.
     Remove(usize),
 
-    /// Close every tab except the current one.
     RemoveOthers,
 
-    /// Replace every open tab with the stored group at this index.
     ApplyStorage(usize),
 }
 
@@ -69,13 +65,13 @@ pub struct TabState {
     /// The destructive operation waiting for a `y` confirmation, if any.
     pub(super) pending: Option<TabAction>,
 
-    /// Whether the user attempts to save opening tabs.
+    /// Whether the menu waits for the answer to "store the open tabs?".
     pub(super) save_tabs: bool,
 
-    /// Whether just receive a single character of tab index.
+    /// Whether one digit already names the tab (`quick_switch`).
     pub(super) single_index: bool,
 
-    /// The cache of selecting number of tabs.
+    /// The digits typed so far, once a tab number needs several keys.
     pub(super) selecting: Vec<u8>,
 }
 
@@ -83,10 +79,9 @@ pub struct TabList<'a> {
     pub(super) current: usize,
     pub(super) list: Vec<Tab>,
 
-    /// A collection of specific tabs stored in auto_config.toml
+    /// The tab groups read from `storage_tabs` in `auto_config.toml`.
     pub(super) storage: Vec<Rc<[Cow<'a, str>]>>,
 
-    /// The next id handed out to a new tab.
     pub(super) next_id: u64,
 }
 
@@ -160,7 +155,6 @@ impl<'a> TabList<'a> {
         self.list.len()
     }
 
-    /// All open tabs.
     pub fn tabs(&self) -> &[Tab] {
         &self.list
     }
@@ -189,7 +183,6 @@ impl<'a> TabList<'a> {
         id
     }
 
-    /// Append a new tab and return its id.
     pub fn push(&mut self, path: PathBuf, hide_files: bool) -> TabId {
         let id = self.next_tab_id();
         self.list.push(Tab::new(id, path, hide_files));
@@ -197,7 +190,8 @@ impl<'a> TabList<'a> {
     }
 
     /// Replace the whole tab list (used when restoring a session or a stored
-    /// tab group). Provided ids are kept so mounted shells stay associated.
+    /// tab group). Provided ids are kept so mounted shells stay associated; an
+    /// empty list is ignored, since there is always at least one tab.
     pub fn set_tabs(&mut self, tabs: Vec<Tab>) {
         if tabs.is_empty() {
             return
@@ -223,8 +217,11 @@ impl<'a> TabList<'a> {
         self.storage.clear();
     }
 
-    /// Remove the tab at `idx`; the current index is kept in range and moves
-    /// to the previous tab when the removed one was focused.
+    /// Remove the tab at `idx`; the current index is kept in range and moves to
+    /// the previous tab when the removed one was focused.
+    ///
+    /// The last remaining tab is never removed, so a `None` means nothing
+    /// changed.
     pub fn remove(&mut self, idx: usize) -> Option<Tab> {
         if idx >= self.list.len() || self.list.len() == 1 {
             return None

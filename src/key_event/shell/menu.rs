@@ -1,8 +1,6 @@
-// The shell menu.
-//
-// Lists the shells mounted on the current tab. Numbers attach a shell; `x`
-// switches to kill mode and `D` clears every shell of the tab. The menu
-// follows the `SwitchCase` convention used by the tab menu.
+//! The shell menu: attach, kill or clear the shells mounted on the tabs.
+//!
+//! It follows the `SwitchCase` convention used by the tab menu.
 
 use ratatui::{
     style::Stylize,
@@ -29,7 +27,6 @@ pub struct ShellMenuState {
     /// The next number kills a shell instead of attaching it.
     deleting: bool,
 
-    /// Digits typed so far.
     selecting: String,
 
     /// The tab whose shells are about to be cleared; waits for `y`.
@@ -45,11 +42,10 @@ impl SwitchStruct for ShellMenuState {
     }
 }
 
-/// Open the shell menu.
+/// Open the shell menu, remembering the shell it was opened from.
 ///
-/// The same page serves the browser's `T` and `C-s t` inside an attached
-/// shell. The shell the menu is opened from is remembered, so closing the menu
-/// without attaching anything returns there instead of the browser.
+/// The page serves both the browser's `T` and `C-s t` in an attached shell;
+/// closing it without attaching returns to that shell, not to the browser.
 pub fn shell_operation(app: &mut App) -> AppResult<()> {
     app.shell_menu_origin = app.selected_block.shell_id();
 
@@ -113,14 +109,12 @@ fn shell_switch(
             return Ok(false)
         },
 
-        // Kill every shell mounted on the current tab and keep the tab open.
-        // This is the tab-level action; `C-s D` in the attached view does the
-        // same thing while a shell owns the input.
+        // Kill every shell of the tab but keep the tab; `C-s D` in the attached
+        // view does the same while a shell has the input.
         'D' => {
             let tab = app.tab_list.current_tab();
 
             if tab.shells.is_empty() {
-                // Nothing to clear; the page already says so.
                 reopen(app, state);
                 return Ok(false)
             }
@@ -179,9 +173,8 @@ fn shell_switch(
 
 /// Where a shell created by the menu's `n` belongs.
 ///
-/// The menu replaced the view it was opened from, so `shell_menu_origin` is
-/// what tells a shell spawned from a shell (`C-s t`, then `n`) apart from one
-/// spawned from the browser's menu.
+/// `shell_menu_origin` tells one spawned from a shell (`C-s t`, then `n`) from
+/// one spawned from the browser.
 fn menu_origin(app: &App) -> ShellOrigin {
     if app.shell_menu_origin.is_some() {
         ShellOrigin::Shell
@@ -213,8 +206,8 @@ fn kill_shell(app: &mut App, id: ShellId) {
     }
 }
 
-/// The shells the menu attaches, in display order: the current tab's shells
-/// first (so their numbers do not change), then the shells of the other tabs.
+/// The shells the menu attaches, in display order: the current tab's first, so
+/// their numbers do not change, then those of the other tabs.
 fn menu_entries(app: &App) -> Vec<ShellId> {
     let current = app.tab_list.current_tab().id;
     let mut entries = app.tab_list.current_tab().shells.clone();
@@ -266,8 +259,7 @@ fn selected_index(
     None
 }
 
-/// The shell menu: the hint line, the active mode and one entry per shell,
-/// grouped by tab.
+/// The menu page: hint line, active mode, and one entry per shell, by tab.
 fn generate_menu(app: &App, state: &ShellMenuState) -> MenuList {
     let mut menu = MenuList::new();
 
@@ -323,8 +315,6 @@ fn generate_menu(app: &App, state: &ShellMenuState) -> MenuList {
     let current = app.tab_list.current_tab().id;
     let current_index = app.tab_list.current();
 
-    // The current tab's shells come first so their numbers are the ones users
-    // already know; every other tab with a shell follows.
     let mut sections = vec![(current_index, app.tab_list.current_tab(), true)];
 
     for (idx, tab) in app.tab_list.tabs().iter().enumerate() {
@@ -459,9 +449,8 @@ mod test {
             .join("")
     }
 
-    /// The menu lists the shells of the other tabs after the current tab's
-    /// ones. Attaching one of them borrows it: the tab is switched internally,
-    /// and `detach` returns to the tab the menu was opened on.
+    /// Attaching a shell of another tab borrows it: `detach` returns to the tab
+    /// the menu was opened on.
     #[test]
     fn test_menu_attaches_a_shell_of_another_tab_and_returns() {
         if !Path::new("/bin/sh").exists() {
@@ -491,14 +480,12 @@ mod test {
         let case = app.switch_case.clone().expect("the shell menu is open");
         switch_match(&mut app, case, '1').unwrap();
 
-        // The view belongs to the shell's own tab while it is attached.
         assert_eq!(app.selected_block.shell_id(), Some(second_shell));
         assert_eq!(app.tab_list.current(), second_index);
         assert_eq!(app.shell_return_tab, Some(first_tab));
 
         detach(&mut app);
 
-        // ...and the user is back on the tab the menu was opened on.
         assert!(matches!(app.selected_block, Block::Browser(_)));
         assert_eq!(app.tab_list.current(), 0);
         assert_eq!(app.tab_list.current_tab().id, first_tab);
@@ -567,7 +554,6 @@ mod test {
         assert!(app.switch_case.is_some());
     }
 
-    /// Any other key cancels the confirmation.
     #[test]
     fn test_clear_shells_cancel_keeps_them() {
         if !Path::new("/bin/sh").exists() {
@@ -601,8 +587,7 @@ mod test {
         assert_eq!(menu_origin(&app), ShellOrigin::Browser);
     }
 
-    /// The menu marks the shell pinned with `C-s *`, so the one `C-s b`
-    /// attaches is visible before typing a number.
+    /// The menu marks the pinned shell, so `C-s b`'s target is visible.
     #[test]
     fn test_menu_marks_the_pinned_shell() {
         if !Path::new("/bin/sh").exists() {
@@ -618,8 +603,7 @@ mod test {
         assert!(menu_text(&app).contains("[pinned]"));
     }
 
-    /// Opening the menu from an attached shell (`C-s t`) and closing it with
-    /// any other key returns to that shell instead of the browser.
+    /// Closing the menu opened with `C-s t` returns to that shell.
     #[test]
     fn test_menu_closed_from_a_shell_returns_to_it() {
         if !Path::new("/bin/sh").exists() {
@@ -641,7 +625,6 @@ mod test {
         assert!(app.switch_case.is_none());
     }
 
-    /// The browser's menu still closes to the browser.
     #[test]
     fn test_menu_closed_from_the_browser_goes_to_the_browser() {
         let mut app = App::default();
@@ -652,8 +635,7 @@ mod test {
         assert!(!app.selected_block.is_shell());
     }
 
-    /// `D` on a tab without shells does not ask, it just says there is nothing
-    /// to clear.
+    /// `D` on a tab without shells says so instead of asking.
     #[test]
     fn test_clear_shells_without_shells_does_not_ask() {
         let mut app = App::default();
@@ -684,9 +666,8 @@ mod test {
 
         assert_eq!(menu.entry_count(), 2);
 
-        // The selected entry is the second shell row; the section heading
-        // before the entries is not selectable, so the row index is not the
-        // entry index.
+        // The selected entry is the second shell row; the heading before the
+        // entries is not selectable, so the row index is not the entry index.
         let entry_rows = menu.rows().iter().enumerate()
             .filter(|(_, row)| matches!(row, crate::key_event::MenuRow::Entry(_)))
             .map(|(idx, _)| idx)

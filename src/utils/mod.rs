@@ -1,4 +1,4 @@
-// Utils for crate.
+//! Shared helpers: `Args`, cursor/word editing, file probing, and previews.
 
 mod preview;
 mod syntax;
@@ -23,11 +23,14 @@ pub use syntax::*;
 pub use preview::*;
 
 lazy_static! {
-    /// The height of file list & content preview windows.
+    /// The height of the file list and content preview panes.
+    ///
+    /// The pane size is only known while drawing, so it is stored here for the
+    /// key handlers and list rendering which read it later.
     pub static ref WINDOW_HEIGHT: AtomicU16 = AtomicU16::new(0);
 
-    /// The width of the content preview window, used to bound the preview's
-    /// horizontal scrolling.
+    /// The width of the content preview pane, which bounds its horizontal
+    /// scrolling.
     pub static ref WINDOW_WIDTH: AtomicU16 = AtomicU16::new(0);
 }
 
@@ -107,7 +110,6 @@ impl Direction {
     }
 }
 
-/// Split String into Vec<String>
 pub fn str_split(_string: String) -> Vec<String> {
     let mut str_vec: Vec<String> = Vec::new();
 
@@ -118,9 +120,8 @@ pub fn str_split(_string: String) -> Vec<String> {
     str_vec
 }
 
-/// Turn `content` into `Text`, keeping the ANSI colours a file may contain and
-/// replacing every '\t' with 4 spaces (a tab is a control character in a
-/// `Span`).
+/// Turn `content` into `Text` with its ANSI colours, expanding each tab to four
+/// spaces (a tab is a control character inside a `Span`).
 pub fn plain_text(content: &str) -> anyhow::Result<Text<'static>> {
     let mut text = content.into_text()?;
 
@@ -135,10 +136,8 @@ pub fn plain_text(content: &str) -> anyhow::Result<Text<'static>> {
 
 /// Whether `path` is shown as text by the preview.
 ///
-/// Only the probe prefix is read; what is not UTF-8 there is not text for the
-/// preview either (it shows an image or the file's MIME type). The same test
-/// decides which program opens the file: an editor for text, the desktop
-/// handler for everything else.
+/// Only the probe prefix is read, and the same test picks the program the file
+/// opens with: an editor for text, the desktop handler otherwise.
 pub fn is_text_file(path: &Path) -> bool {
     let Ok(file) = File::open(path) else {
         return false
@@ -149,8 +148,7 @@ pub fn is_text_file(path: &Path) -> bool {
 
 /// The MIME type `xdg-mime` reports for `path`, e.g. `application/pdf`.
 ///
-/// `None` when the query fails: no `xdg-mime`, a missing file, an unknown
-/// type, or a path which is not valid UTF-8.
+/// `None` when the query fails or answers nothing.
 pub fn file_mime(path: &Path) -> Option<String> {
     let output = Command::new("xdg-mime")
         .args(["query", "filetype"])
@@ -172,19 +170,17 @@ pub fn file_mime(path: &Path) -> Option<String> {
     }
 }
 
-/// What the preview shows for a file which is not text: the MIME type
-/// `xdg-mime` reports, or the old label when it cannot answer.
+/// What the preview shows for a file which is not text: its MIME type, or the
+/// old label when `xdg-mime` cannot answer.
 pub fn file_type_label(path: &Path) -> String {
     file_mime(path).unwrap_or_else(|| String::from("Non Text File"))
 }
 
 /// The indices of the names which match `query`.
 ///
-/// `exactly` selects the first name which equals the query (the jump-to-file
-/// search used by `goto_file`-style commands); otherwise every name which
-/// contains it is returned, case-insensitively. The same rule is used for the
-/// file list and for the lines of the text preview, which is why the names are
-/// an iterator of strings instead of a file type.
+/// `exactly` picks the first name equal to the query (the jump-to-file search),
+/// otherwise every case-insensitive substring match. The file list and the
+/// preview lines share the rule, hence strings instead of file types.
 pub fn search_indexes<'a, I>(query: &str, names: I, exactly: bool) -> Vec<usize>
 where I: IntoIterator<Item = &'a str>
 {
@@ -214,13 +210,11 @@ where I: IntoIterator<Item = &'a str>
     indexes
 }
 
-/// Return the byte index at which the extension of a file name starts.
+/// The byte index at which the extension of `name` starts, or `None`.
 ///
-/// The extension starts at the last `.` of the name, so `"foo.tar.gz"` returns
-/// the index of the second dot. `None` is returned when there is no extension:
-/// no dot at all, or only a leading one (`".bashrc"` is a hidden file, not an
-/// extension). The index is a byte offset, so it always lies on a character
-/// boundary, even when the name contains multi-byte characters.
+/// The extension starts at the last `.`, except when it is the leading one:
+/// `".bashrc"` is a hidden file, not an extension. The index is a byte offset,
+/// so it is always on a character boundary.
 pub fn extension_start(name: &str) -> Option<usize> {
     match name.rfind('.') {
         Some(idx) if idx > 0 => Some(idx),
@@ -228,20 +222,18 @@ pub fn extension_start(name: &str) -> Option<usize> {
     }
 }
 
-/// Delete word and update content & cursor position.
+/// Delete the word before the cursor and update the content and the cursor.
 ///
-/// The character right before the cursor decides how much is deleted: a word
-/// separator is deleted alone, otherwise the whole word in front of the cursor
-/// is removed. The word separators are the ASCII punctuation characters, which
-/// is the rule this function has always used (see [`is_delete_word_separator`]);
-/// non-ASCII characters are word characters and are never split.
+/// A word separator right before the cursor is deleted alone, otherwise the
+/// whole word is removed. The separator set is the ASCII punctuation range,
+/// which is the rule this function has always used (see
+/// [`is_delete_word_separator`]).
 pub fn delete_word(_str: &mut String, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(_str, *cursor) else {
         return
     };
 
-    // Find the start of the edited slice: either the separator right before the
-    // cursor, or the beginning of the word in front of it.
+    // Find the start of the edited slice.
     let mut start = pos;
     for (idx, _char) in _str[..pos].char_indices().rev() {
         if is_delete_word_separator(_char) {
@@ -265,11 +257,10 @@ pub fn delete_word(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, start);
 }
 
-/// Check whether the character separates words for [`delete_word`].
+/// Whether the character separates words for [`delete_word`].
 ///
-/// The separator set is the ASCII punctuation range, which is the rule
-/// [`delete_word`] has always used. It's kept separate from [`is_word_char`],
-/// which drives the word-wise cursor movement and word deletions.
+/// The ASCII punctuation range is the rule [`delete_word`] has always used; it
+/// is deliberately not [`is_word_char`], which drives word-wise movement.
 fn is_delete_word_separator(_char: char) -> bool {
     matches!(
         _char,
@@ -277,22 +268,19 @@ fn is_delete_word_separator(_char: char) -> bool {
     )
 }
 
-/// Check whether the character is a part of a word when the cursor moves or
-/// deletes word by word.
+/// Whether the character is part of a word for word-wise movement and deletion.
 ///
-/// Whitespace and punctuation like `:`, `.` or `_` separate words, so a file
-/// name such as `foo_bar.txt` is made of the words `foo`, `bar` and `txt`.
-/// Non-ASCII letters (e.g. CJK characters) are word characters.
+/// Whitespace and punctuation such as `:`, `.` or `_` separate words, so
+/// `foo_bar.txt` is three words; non-ASCII letters (CJK included) are word
+/// characters.
 pub fn is_word_char(_char: char) -> bool {
     _char.is_alphanumeric()
 }
 
-/// Convert a cursor position into the insertion point of a text.
+/// The byte index at which the cursor would insert, or `None`.
 ///
-/// The returned value is the byte index at which new characters are inserted,
-/// which may equal the length of `content` when the cursor is at its end.
-/// `None` is returned when there is no cursor or the cursor points inside a
-/// multi-byte character.
+/// The index may equal the length of `content` (the cursor is at its end), but
+/// never points inside a multi-byte character.
 pub fn cursor_insertion_point(content: &str, cursor: CursorPos) -> Option<usize> {
     let pos = match cursor {
         CursorPos::Index(idx) => idx,
@@ -307,9 +295,8 @@ pub fn cursor_insertion_point(content: &str, cursor: CursorPos) -> Option<usize>
     }
 }
 
-/// Return the byte index of the nearest character boundary before `pos`.
-///
-/// `None` is returned when `pos` is 0 or doesn't lie on a character boundary.
+/// The byte index of the character boundary before `pos`, or `None` when `pos`
+/// is 0 or not a boundary.
 pub fn prev_char_boundary(content: &str, pos: usize) -> Option<usize> {
     if pos == 0 || pos > content.len() || !content.is_char_boundary(pos) {
         return None
@@ -318,11 +305,8 @@ pub fn prev_char_boundary(content: &str, pos: usize) -> Option<usize> {
     content[..pos].char_indices().next_back().map(|(idx, _)| idx)
 }
 
-/// Return the byte index of the nearest character boundary after `pos`.
-///
-/// The result may be the length of `content`, which means the cursor reaches
-/// the end of it. `None` is returned when `pos` is at the end or doesn't lie on
-/// a character boundary.
+/// The byte index of the character boundary after `pos`, or `None` when `pos`
+/// is at the end or not a boundary.
 pub fn next_char_boundary(content: &str, pos: usize) -> Option<usize> {
     if pos >= content.len() || !content.is_char_boundary(pos) {
         return None
@@ -332,10 +316,10 @@ pub fn next_char_boundary(content: &str, pos: usize) -> Option<usize> {
     Some(pos + _char.len_utf8())
 }
 
-/// Build the cursor state for an insertion point inside `content`.
+/// Turn an insertion point inside `content` into a cursor position.
 ///
-/// `CursorPos::End` is used when the insertion point is placed after the last
-/// character, which keeps the cursor valid while characters are appended.
+/// A point after the last character becomes `End`, which stays valid while
+/// characters are appended.
 pub fn cursor_from_insertion_point(content: &str, pos: usize) -> CursorPos {
     if pos >= content.len() {
         CursorPos::End
@@ -344,8 +328,8 @@ pub fn cursor_from_insertion_point(content: &str, pos: usize) -> CursorPos {
     }
 }
 
-/// Return the byte index right after the last character of the nearest word at
-/// or after `start`, and the length of `content` when there is no word left.
+/// The byte index just after the word at or after `start`, or the length of
+/// `content` when no word is left.
 pub fn next_word_end(content: &str, start: usize) -> usize {
     let mut end = start;
     let mut in_word = false;
@@ -370,16 +354,16 @@ pub fn next_word_end(content: &str, start: usize) -> usize {
     }
 }
 
-/// Return the byte index of the first character of the nearest word before
-/// `start`, and 0 when there is none.
+/// The byte index of the first character of the word before `start`, or 0 when
+/// there is none.
 pub fn prev_word_start(content: &str, start: usize) -> usize {
     let mut word_start = start;
     let mut in_word = false;
 
     for (idx, _char) in content[..start].char_indices().rev() {
         if !is_word_char(_char) {
-            // The separators right before the cursor are skipped first, and the
-            // first separator after the word marks the word boundary.
+            // The separators right before `start` are skipped first; the next
+            // separator marks the word boundary.
             if in_word {
                 break
             }
@@ -391,8 +375,8 @@ pub fn prev_word_start(content: &str, start: usize) -> usize {
         word_start = idx;
     }
 
-    // There is no word but only separators before the cursor: the beginning of
-    // the content is the nearest boundary.
+    // Only separators before `start`: the start of the content is the nearest
+    // boundary.
     if in_word {
         word_start
     } else {
@@ -400,11 +384,8 @@ pub fn prev_word_start(content: &str, start: usize) -> usize {
     }
 }
 
-/// Move the cursor to the end of the nearest word at or after the cursor.
-///
-/// The word separators are skipped first, so the cursor lands right after the
-/// last character of the next word, and at the end of the content when there is
-/// no word left.
+/// Move the cursor to the end of the word at or after it, or to the end of the
+/// content when no word is left.
 pub fn cursor_next_word_end(content: &str, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(content, *cursor) else {
         return
@@ -413,11 +394,8 @@ pub fn cursor_next_word_end(content: &str, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(content, next_word_end(content, pos));
 }
 
-/// Move the cursor to the start of the nearest word before the cursor.
-///
-/// The word separators right before the cursor are skipped first, so the cursor
-/// lands on the first character of the previous word, and at the beginning of
-/// the content when there is no word left.
+/// Move the cursor to the start of the word before it, or to the start of the
+/// content when no word is left.
 pub fn cursor_prev_word_start(content: &str, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(content, *cursor) else {
         return
@@ -426,16 +404,14 @@ pub fn cursor_prev_word_start(content: &str, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(content, prev_word_start(content, pos));
 }
 
-/// Delete the whole word before the cursor and update content & cursor
-/// position.
+/// Delete the word before the cursor and update the content and the cursor.
 ///
-/// The deleted range starts at the word start found by [`prev_word_start`], so
-/// the separators between the word and the cursor are removed as well:
-/// `:rename foo.txt` becomes `:rename foo.` when the cursor is placed after
-/// `txt`.
+/// The range starts at [`prev_word_start`], so the separators between the word
+/// and the cursor go as well: `:rename foo.txt` becomes `:rename foo.` when the
+/// cursor follows `txt`.
 ///
-/// Unlike [`delete_word`], the word boundaries are the same as the word-wise
-/// cursor movement, and the content is never cut inside a multi-byte character.
+/// Unlike [`delete_word`], the boundaries match word-wise movement, and the
+/// content is never cut inside a multi-byte character.
 pub fn delete_word_before_cursor(_str: &mut String, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(_str, *cursor) else {
         return
@@ -450,15 +426,14 @@ pub fn delete_word_before_cursor(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, start);
 }
 
-/// Delete the whole word after the cursor and update content & cursor position.
+/// Delete the word after the cursor and update the content and the cursor.
 ///
-/// The deleted range ends at the word end found by [`next_word_end`], so the
-/// separators between the cursor and the word are removed as well:
-/// `:rename foo.txt` becomes `:rename .txt` when the cursor is placed before
-/// `foo`.
+/// The range ends at [`next_word_end`], so the separators between the cursor
+/// and the word go as well: `:rename foo.txt` becomes `:rename .txt` when the
+/// cursor is before `foo`.
 ///
-/// The word boundaries are the same as the word-wise cursor movement, and the
-/// content is never cut inside a multi-byte character.
+/// The boundaries match word-wise movement, and the content is never cut
+/// inside a multi-byte character.
 pub fn delete_word_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(_str, *cursor) else {
         return
@@ -473,12 +448,10 @@ pub fn delete_word_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, pos);
 }
 
-/// Delete the character after the cursor and update content & cursor position.
+/// Delete the character after the cursor and update the cursor position.
 ///
-/// The cursor stays at the same insertion point, so repeating the operation
-/// deletes the following characters one by one. A multi-byte character is
-/// removed as a whole, and nothing happens when the cursor is at the end of the
-/// content.
+/// The insertion point does not move, so repeating the operation deletes the
+/// following characters one by one; a multi-byte character is removed whole.
 pub fn delete_char_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(_str, *cursor) else {
         return
@@ -492,13 +465,10 @@ pub fn delete_char_after_cursor(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, pos);
 }
 
-/// Delete everything from the cursor to the end of the content and update the
-/// cursor position.
+/// Delete everything from the cursor to the end of the content (`Ctrl-k`).
 ///
-/// This is the `Ctrl-k` deletion of the command line: `:rename foo.txt` becomes
-/// `:rename ` when the cursor is placed right after `rename `. The cursor stays
-/// at the same insertion point, which becomes the end of the content, and
-/// nothing happens when there is no cursor.
+/// The cursor stays at the same insertion point, which becomes the end of the
+/// content; with no cursor nothing happens.
 pub fn delete_to_end(_str: &mut String, cursor: &mut CursorPos) {
     let Some(pos) = cursor_insertion_point(_str, *cursor) else {
         return
@@ -508,12 +478,11 @@ pub fn delete_to_end(_str: &mut String, cursor: &mut CursorPos) {
     *cursor = cursor_from_insertion_point(_str, pos);
 }
 
-/// Return the width of `text` when it's rendered in the terminal.
+/// The width `text` occupies when rendered in the terminal.
 ///
-/// Wide characters (e.g. CJK ones) take two columns and combining marks take
-/// none, so neither the byte length nor the character count can be used for
-/// layout. Only this width can be used to position the completion popup and the
-/// command line cursor.
+/// Wide characters (CJK) take two columns and combining marks none, so neither
+/// the byte length nor the character count can lay out the completion popup or
+/// the command-line cursor.
 pub fn display_width(text: &str) -> usize {
     Span::raw(text).width()
 }
@@ -561,20 +530,16 @@ mod test {
     fn test_next_word_end() {
         let content = "hello world";
 
-        // From the beginning and from inside a word, the end of that word.
         assert_eq!(next_word_end(content, 0), 5);
         assert_eq!(next_word_end(content, 2), 5);
 
-        // From a separator, the end of the next word.
         assert_eq!(next_word_end(content, 5), 11);
         assert_eq!(next_word_end(content, 6), 11);
         assert_eq!(next_word_end(content, 7), 11);
 
-        // There is no word left.
         assert_eq!(next_word_end(content, 11), 11);
         assert_eq!(next_word_end("hello  ", 5), 7);
 
-        // `_` separates words.
         let content = "foo_bar";
         assert_eq!(next_word_end(content, 0), 3);
         assert_eq!(next_word_end(content, 3), 7);
@@ -585,19 +550,15 @@ mod test {
     fn test_prev_word_start() {
         let content = "hello world";
 
-        // From the end and from inside a word, the start of that word.
         assert_eq!(prev_word_start(content, 11), 6);
         assert_eq!(prev_word_start(content, 8), 6);
 
-        // From a word start, the start of the previous word.
         assert_eq!(prev_word_start(content, 6), 0);
         assert_eq!(prev_word_start(content, 5), 0);
 
-        // There is no word before the cursor.
         assert_eq!(prev_word_start(content, 0), 0);
         assert_eq!(prev_word_start("  hello", 2), 0);
 
-        // `_` separates words.
         let content = "foo_bar";
         assert_eq!(prev_word_start(content, 7), 4);
         assert_eq!(prev_word_start(content, 4), 0);
@@ -652,7 +613,6 @@ mod test {
         cursor_prev_word_start(content, &mut cursor);
         assert!(cursor == CursorPos::Index(4));
 
-        // Nothing happens when there is no cursor.
         let mut cursor = CursorPos::None;
         cursor_next_word_end(content, &mut cursor);
         cursor_prev_word_start(content, &mut cursor);
@@ -661,7 +621,6 @@ mod test {
 
     #[test]
     fn test_delete_word_before_cursor() {
-        // Delete the word in the middle of the content.
         let mut content = String::from("hello world");
         let mut cursor = CursorPos::Index(8);
 
@@ -677,7 +636,6 @@ mod test {
         assert_eq!(content, "文件 ");
         assert!(cursor == CursorPos::End);
 
-        // Nothing to delete at the beginning of the content.
         let mut content = String::from("abc");
         let mut cursor = CursorPos::Index(0);
 
@@ -696,7 +654,6 @@ mod test {
 
     #[test]
     fn test_delete_char_after_cursor() {
-        // Delete the character under the cursor, the cursor stays in place.
         let mut content = String::from("abc");
         let mut cursor = CursorPos::Index(1);
 
@@ -704,12 +661,10 @@ mod test {
         assert_eq!(content, "ac");
         assert!(cursor == CursorPos::Index(1));
 
-        // Repeated deletions remove the following characters one by one.
         delete_char_after_cursor(&mut content, &mut cursor);
         assert_eq!(content, "a");
         assert!(cursor == CursorPos::End);
 
-        // Nothing to delete at the end of the content.
         delete_char_after_cursor(&mut content, &mut cursor);
         assert_eq!(content, "a");
         assert!(cursor == CursorPos::End);
@@ -722,7 +677,6 @@ mod test {
         assert_eq!(content, "件abc");
         assert!(cursor == CursorPos::Index(0));
 
-        // Nothing happens without a cursor.
         let mut content = String::from("abc");
         let mut cursor = CursorPos::None;
 
@@ -733,7 +687,6 @@ mod test {
 
     #[test]
     fn test_delete_word_after_cursor() {
-        // From inside a word, the rest of that word is deleted.
         let mut content = String::from("hello world");
         let mut cursor = CursorPos::Index(2);
 
@@ -741,7 +694,6 @@ mod test {
         assert_eq!(content, "he world");
         assert!(cursor == CursorPos::Index(2));
 
-        // From a separator, the separator and the next word are deleted.
         let mut content = String::from("hello world");
         let mut cursor = CursorPos::Index(5);
 
@@ -749,7 +701,6 @@ mod test {
         assert_eq!(content, "hello");
         assert!(cursor == CursorPos::End);
 
-        // Nothing to delete at the end of the content.
         let mut content = String::from("hello");
         let mut cursor = CursorPos::End;
 
@@ -773,7 +724,6 @@ mod test {
         assert_eq!(content, "_bar");
         assert!(cursor == CursorPos::Index(0));
 
-        // Nothing happens without a cursor.
         let mut content = String::from("abc");
         let mut cursor = CursorPos::None;
 
@@ -789,7 +739,6 @@ mod test {
         assert_eq!(prev_char_boundary("abc", 0), None);
         assert_eq!(prev_char_boundary("", 0), None);
 
-        // A CJK character takes three bytes.
         assert_eq!(prev_char_boundary("中文", 6), Some(3));
         assert_eq!(prev_char_boundary("中文", 3), Some(0));
 
@@ -805,7 +754,6 @@ mod test {
         assert_eq!(next_char_boundary("abc", 3), None);
         assert_eq!(next_char_boundary("", 0), None);
 
-        // A CJK character takes three bytes.
         assert_eq!(next_char_boundary("中文", 0), Some(3));
         assert_eq!(next_char_boundary("中文", 3), Some(6));
 
@@ -878,7 +826,6 @@ mod test {
 
     #[test]
     fn test_delete_to_end() {
-        // Everything after the cursor is deleted; the cursor stays in place.
         let mut content = String::from("hello world");
         let mut cursor = CursorPos::Index(5);
 
@@ -886,7 +833,6 @@ mod test {
         assert_eq!(content, "hello");
         assert!(cursor == CursorPos::End);
 
-        // The cursor is normalized to the end when the content is emptied.
         let mut content = String::from("hello");
         let mut cursor = CursorPos::Index(0);
 
@@ -894,7 +840,6 @@ mod test {
         assert_eq!(content, "");
         assert!(cursor == CursorPos::End);
 
-        // Nothing to delete at the end of the content.
         let mut content = String::from("hello");
         let mut cursor = CursorPos::End;
 
@@ -910,7 +855,6 @@ mod test {
         assert_eq!(content, "文件");
         assert!(cursor == CursorPos::End);
 
-        // Nothing happens without a cursor.
         let mut content = String::from("abc");
         let mut cursor = CursorPos::None;
 
@@ -946,7 +890,6 @@ mod test {
         std::fs::write(&text, "hello\n世界\n").unwrap();
         assert!(is_text_file(&text));
 
-        // An empty file is text too.
         let empty = dir.join("empty");
         std::fs::write(&empty, "").unwrap();
         assert!(is_text_file(&empty));
@@ -961,9 +904,8 @@ mod test {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// `-S` / `--shell` is a boolean of its own and can be combined with the
-    /// start directory, which is what makes `--start-from <path> --shell`
-    /// open the shell there.
+    /// `--shell` combines with the start directory, so `--start-from <path>
+    /// --shell` opens the shell there.
     #[test]
     fn test_shell_flag() {
         let args = Args::try_parse_from(["hire", "-S"]).unwrap();
@@ -990,9 +932,8 @@ mod test {
         );
     }
 
-    /// `-v` / `--version` is a boolean of its own: `main` prints the version
-    /// and leaves before any config or terminal setup, so a normal run keeps
-    /// the flag off.
+    /// `-v` is a boolean of its own: `main` prints the version and leaves
+    /// before any config or terminal setup.
     #[test]
     fn test_version_flag() {
         let args = Args::try_parse_from(["hire", "-v"]).unwrap();
@@ -1008,8 +949,7 @@ mod test {
         assert!(Args::try_parse_from(["hire", "-V"]).is_err());
     }
 
-    /// A path `xdg-mime` cannot identify falls back to the old label, whether
-    /// because the file is gone or because `xdg-mime` is not installed.
+    /// A path `xdg-mime` cannot identify falls back to the old label.
     #[test]
     fn test_file_type_label_falls_back() {
         let dir = temp_dir("mime");
@@ -1017,8 +957,7 @@ mod test {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// `extension_start` is shared by the command-line `append_filename` and
-    /// the edit-mode variant, so it has to find the byte index of the last dot.
+    /// `extension_start` is shared by the command-line and edit-mode paths.
     #[test]
     fn test_extension_start() {
         assert_eq!(extension_start("foo.txt"), Some(3));
@@ -1039,8 +978,7 @@ mod test {
         assert_eq!(extension_start("中文.中文"), Some(6));
     }
 
-    /// The file list and the text preview share one matching rule: a
-    /// case-insensitive substring, or one exact name for a jump.
+    /// The file list and the preview share one matching rule.
     #[test]
     fn test_search_indexes() {
         let names = ["alpha.rs", "beta.txt", "Alpha.md"];

@@ -1,22 +1,15 @@
-// Terminal emulation fixes for the child's screen.
-//
-// `vt100` parses the child's output into the grid hire renders, but it does not
-// implement every sequence a real terminal understands. The child's PTY is
-// emulated by hire, so anything vt100 drops changes what the program inside the
-// shell sees: a missing cursor movement moves the program's whole screen.
-//
-// This module translates the output before vt100 parses it. Translation keeps
-// every byte count, so the graphics filter can still split the stream at its
-// queries.
+//! Rewrites the child's `CSI f` (HVP) to `CSI H` before `vt100` parses it.
+//!
+//! The child's PTY is emulated by hire, so a sequence vt100 drops changes what
+//! the program inside the shell sees. The rewrite keeps the byte count, so the
+//! graphics filter can still split the stream at its queries.
 
 /// The sequences translated so far, one state machine per shell session.
 ///
-/// `vt100` has no `CSI f` (HVP, horizontal and vertical position), although a
-/// terminal treats it exactly like `CSI H` (CUP). Programs which cannot read
-/// the terminal size any other way move the cursor to the bottom right with HVP
-/// and then ask for its position (`CSI 6 n`); `gh`'s prompts do exactly that.
-/// Without the translation the cursor stays where it was, so the position
-/// report and everything the program paints afterwards are wrong.
+/// Programs which cannot read the terminal size any other way (`gh`'s prompts)
+/// move the cursor to the bottom right with `CSI f` (HVP) and ask for its
+/// position (`CSI 6 n`). `vt100` has no HVP although a terminal treats it like
+/// `CSI H` (CUP), so the report and what is painted next would be wrong.
 #[derive(Default, Debug)]
 pub struct Hvp {
     state: State,
@@ -24,7 +17,6 @@ pub struct Hvp {
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
-    /// Ordinary text.
     #[default]
     Ground,
 
@@ -37,21 +29,19 @@ enum State {
     /// Inside an OSC string, which ends with `BEL` or `ESC \`.
     Osc,
 
-    /// An `ESC` was read inside an OSC string.
     OscEscape,
 
     /// Inside a DCS/SOS/PM/APC string, which ends with `ESC \`.
     String,
 
-    /// An `ESC` was read inside a DCS/SOS/PM/APC string.
     StringEscape,
 }
 
 impl Hvp {
     /// Pass `bytes` to `out`, with every `CSI f` final byte rewritten to `H`.
     ///
-    /// The state is kept between calls: the `f` of a sequence split between two
-    /// reads must be recognized as a final byte too.
+    /// The state is kept between calls, so the `f` of a sequence split between
+    /// two reads is recognized as a final byte too.
     pub fn translate(&mut self, bytes: &[u8], out: &mut dyn FnMut(&[u8])) {
         if self.state == State::Ground && !bytes.contains(&0x1b) {
             out(bytes);
@@ -98,7 +88,6 @@ impl Hvp {
                             return b'H'
                         }
                     },
-                    // Parameters and intermediates.
                     _ => (),
                 }
             },
@@ -206,7 +195,6 @@ mod test {
         );
     }
 
-    /// After a final byte the machine is back to plain text.
     #[test]
     fn test_state_resets_after_the_final_byte() {
         let mut hvp = Hvp::default();

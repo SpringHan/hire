@@ -1,4 +1,4 @@
-// Key Event
+//! Dispatch of key presses into `AppCommand`s and editing operations.
 
 mod tab;
 mod edit;
@@ -44,7 +44,6 @@ use crate::utils::{
     Direction,
 };
 
-// Export
 pub use tab::{Tab, TabId, TabList};
 pub use file_search::FileSearcher;
 pub use sudo_session::SessionTabs;
@@ -76,28 +75,25 @@ pub use shell::{
 #[cfg(test)]
 pub use shell::GraphicsSupport;
 
-// Export for auto config
 pub use tab::read_config as tab_read_config;
 pub use goto_operation::read_config as goto_read_config;
 
-// NOTE(for coding): When quiting command-line mode, you're required to use quit_command_mode function!
-// NOTE(for coding): DO NOT use return in the match control to skip specific code, which
-// could cause missing the following procedures.
-/// Handle KEY event.
+// NOTE(for coding): leaving command-line mode must go through
+// `quit_command_mode`, which does the cleanup.
 pub fn handle_event(
     key: KeyEvent,
     app: &mut App,
     terminal: &mut DefaultTerminal
 ) -> AppResult<()>
 {
-    // The attached shell owns every key except its prefix chord.
+    // The attached shell owns every key except its prefix chord, so it must
+    // be checked before the match below.
     if app.selected_block.is_shell() {
         return shell::handle_view_key(key, app)
     }
 
     match key.code {
         KeyCode::Char(c) => {
-            // Handle keys with modifiers
             if !(key.modifiers.is_empty() ||
                  key.modifiers == KeyModifiers::SHIFT)
             {
@@ -107,9 +103,8 @@ pub fn handle_event(
                             'g' => app.command_completion.hide(),
 
                             // `Ctrl-b`/`Ctrl-f` scroll the expanded view
-                            // sideways; in the command line (or edit mode)
-                            // they move the cursor instead. `Ctrl-a`/`Ctrl-e`
-                            // always move it to the beginning/end.
+                            // sideways, but move the cursor elsewhere;
+                            // `Ctrl-a`/`Ctrl-e` always move it to an edge.
                             'b' => {
                                 if app.command_expand {
                                     app.expand_scroll(Direction::Left);
@@ -160,10 +155,9 @@ pub fn handle_event(
                                 }
                             },
 
-                            // Terminals without the kitty keyboard protocol
-                            // report `Ctrl-Backspace` as `Ctrl-h`, so it's
-                            // treated as deleting the word before the cursor.
-                            // `Ctrl-w` is accepted as the readline equivalent.
+                            // Without the kitty keyboard protocol a terminal
+                            // reports `Ctrl-Backspace` as `Ctrl-h`, so both it
+                            // and `Ctrl-w` delete the word before the cursor.
                             'h' | 'w' => {
                                 if app.edit_mode.inserting() {
                                     app.edit_mode.delete_word_before_cursor();
@@ -172,7 +166,6 @@ pub fn handle_event(
                                 }
                             },
 
-                            // Delete the character after the cursor.
                             'd' => {
                                 if app.edit_mode.inserting() {
                                     app.edit_mode.delete_char_after_cursor();
@@ -181,15 +174,13 @@ pub fn handle_event(
                                 }
                             },
 
-                            // Delete everything after the cursor on the command
-                            // line (`Ctrl-k`, the readline "kill line").
+                            // `Ctrl-k` is the readline "kill line".
                             'k' => app.delete_to_end(),
 
                             _ => ()
                         }
                     },
 
-                    // Move word by word in edit mode or on the command line.
                     KeyModifiers::ALT => {
                         match c {
                             'f' => {
@@ -208,7 +199,6 @@ pub fn handle_event(
                                 }
                             },
 
-                            // Delete the word after the cursor.
                             'd' => {
                                 if app.edit_mode.inserting() {
                                     app.edit_mode.delete_word_after_cursor();
@@ -232,15 +222,12 @@ pub fn handle_event(
                 return Ok(())
             }
 
-            // NOTE(for coding): All the function in the blocks below must be end with
-            // code to set OPTION_KEY to None.
             if let Some(ref case) = app.switch_case {
                 let case = case.to_owned();
                 switch::switch_match(app, case, c)?;
                 return Ok(())
             }
 
-            // Execute keybinding or insert character.
             if let Block::Browser(in_root) = app.selected_block {
                 if app.edit_mode.inserting() {
                     app.edit_mode.insert_char(c);
@@ -262,8 +249,6 @@ pub fn handle_event(
         },
 
         KeyCode::Backspace => {
-            // `Ctrl-Backspace` deletes the whole word before the cursor in
-            // edit mode or on the command line, instead of a single character.
             if key.modifiers == KeyModifiers::CONTROL &&
                 matches!(app.selected_block, Block::CommandLine(_, _))
             {
@@ -323,7 +308,7 @@ pub fn handle_event(
             }
         },
         
-        // TODO: Split these special keys function to independent functions.
+        // TODO: split these special keys out; this match has grown too long.
         KeyCode::Esc => {
             match app.selected_block {
                 Block::CommandLine(_, _) => {
@@ -395,7 +380,8 @@ pub fn handle_event(
             }
 
             if app.edit_mode.enabled {
-                // Avoid unexpected exit when editing files.
+                // While a name is being inserted, `Enter` must not open the
+                // save menu and leave edit mode.
                 if app.edit_mode.inserting() {
                     return Ok(())
                 }
@@ -423,7 +409,7 @@ pub fn handle_event(
         KeyCode::Up => {
             match app.selected_block {
                 Block::CommandLine(_, _) => {
-                    // NOTE: The expanded command line is paged with Ctrl-p/Ctrl-n.
+                    // NOTE: Ctrl-p/Ctrl-n page the expanded command line.
                     if !app.command_expand {
                         app.command_select(false);
                     }
@@ -436,7 +422,6 @@ pub fn handle_event(
         KeyCode::Down => {
             match app.selected_block {
                 Block::CommandLine(_, _) => {
-                    // NOTE: The expanded command line is paged with Ctrl-p/Ctrl-n.
                     if !app.command_expand {
                         app.command_select(true);
                     }
@@ -460,6 +445,8 @@ pub fn handle_event(
 
 /// Handle a `Tab` press: completion, or the full-page command-line editor.
 fn handle_tab(app: &mut App, modifiers: KeyModifiers) -> AppResult<()> {
+    // `Alt-Ctrl-Tab` arrives as `Alt-Tab`: `Tab` is the `Ctrl-I` byte, so the
+    // terminal drops the Control bit.
     if modifiers.contains(KeyModifiers::ALT) {
         if let Block::CommandLine(_, _) = app.selected_block {
             // A menu owns its presentation (`MenuPresentation`), so the chord
@@ -468,7 +455,8 @@ fn handle_tab(app: &mut App, modifiers: KeyModifiers) -> AppResult<()> {
                 return Ok(())
             }
 
-            // NOTE(for refactoring): Code about the close of expand mode have appeared twice.
+            // NOTE(for refactoring): this inlines `App::expand_quit`, which
+            // closes the expand mode the same way.
             if app.command_expand {
                 app.command_expand = false;
                 app.command_scroll = None;
@@ -485,9 +473,8 @@ fn handle_tab(app: &mut App, modifiers: KeyModifiers) -> AppResult<()> {
 
 /// Enter command line mode with a command from the command history.
 ///
-/// The boolean value is used to imply the direction of selecting history:
-/// when it's false (`Up`), the history is entered from the newest command,
-/// otherwise (`Down`) it's entered from the oldest one.
+/// `next` is false for `Up`, which enters at the newest command, and true for
+/// `Down`, which enters at the oldest.
 fn enter_command_history(app: &mut App, next: bool) {
     if !app.command_history.is_empty() {
         let idx = if next {
@@ -679,7 +666,6 @@ impl AppCommand {
                 };
                 app.working_directory = Some(working_dir.to_owned());
 
-                // Do nothing when the user is already in the working directory.
                 if app.path != working_dir {
                     app.record_path_history();
                     app.goto_dir(working_dir, None)?;
@@ -747,8 +733,8 @@ mod test {
         assert!(app.command_expand);
     }
 
-    /// Ctrl-Tab is the plain Tab byte and stays the completion key; a menu
-    /// ignores the chord and keeps its own presentation.
+    /// A reported `Ctrl-Tab` is ignored (the chord is the plain `Tab` byte),
+    /// and a menu keeps its own presentation.
     #[test]
     fn test_the_chord_needs_alt_and_ignores_a_menu() {
         let mut app = app_with_command_line();

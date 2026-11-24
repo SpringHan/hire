@@ -1,4 +1,4 @@
-// Utils
+//! The tab menu: switching, creating, removing and storing tabs.
 
 use std::{borrow::Cow, path::PathBuf};
 
@@ -45,7 +45,6 @@ pub fn tab_operation(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-// Core util functions
 fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
     let mut data = if let SwitchCaseData::Struct(data) = _data {
         match data.as_any().downcast_ref::<TabState>() {
@@ -56,12 +55,10 @@ fn switch(app: &mut App, key: char, _data: SwitchCaseData) -> AppResult<bool> {
         panic!("Unexpected situation at switch funciton in tab.rs.")
     };
 
-    // A destructive action is waiting for the user's confirmation.
     if let Some(action) = data.pending.take() {
         return confirm_action(app, key, action, data)
     }
 
-    // Trying to save opening tabs
     if data.save_tabs {
         if key == 'y' {
             save_tabs(app)?;
@@ -169,7 +166,6 @@ fn confirm_action(
     Ok(false)
 }
 
-/// Show the tab menu again with `data`.
 fn open_tab_menu(app: &mut App, data: &TabState) -> AppResult<()> {
     let menu = generate_menu(Some(app), data)?;
 
@@ -208,7 +204,6 @@ fn request_confirm(
     Ok(false)
 }
 
-/// "1 shell" / "3 shells".
 fn shells_text(count: usize) -> String {
     if count == 1 {
         String::from("1 shell")
@@ -217,12 +212,10 @@ fn shells_text(count: usize) -> String {
     }
 }
 
-/// "it" for one shell, "them" for several.
 fn shells_pronoun(count: usize) -> &'static str {
     if count == 1 { "it" } else { "them" }
 }
 
-/// Close the tab at `index`, asking first when it has mounted shells.
 fn request_remove(app: &mut App, index: usize, data: &mut TabState) -> AppResult<bool> {
     if index >= app.tab_list.len() {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -248,7 +241,6 @@ fn request_remove(app: &mut App, index: usize, data: &mut TabState) -> AppResult
     request_confirm(app, data, TabAction::Remove(index), message)
 }
 
-/// Close every other tab, asking first when they have mounted shells.
 fn request_remove_others(app: &mut App, data: &mut TabState) -> AppResult<bool> {
     if app.tab_list.len() == 1 {
         return Ok(true)
@@ -274,8 +266,6 @@ fn request_remove_others(app: &mut App, data: &mut TabState) -> AppResult<bool> 
     request_confirm(app, data, TabAction::RemoveOthers, message)
 }
 
-/// Restore a stored tab group, asking first when the tabs it replaces have
-/// mounted shells.
 fn request_apply_storage(app: &mut App, index: usize, data: &mut TabState) -> AppResult<bool> {
     if index >= app.tab_list.storage.len() {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -327,7 +317,8 @@ pub fn prev(app: &mut App) -> AppResult<bool> {
     Ok(true)
 }
 
-// NOTE: As the new tab is created with current directory, there's no need to call goto function.
+// The new tab is created on the current directory, which the browser already
+// shows, so there is nothing to goto.
 #[inline]
 fn create(app: &mut App) {
     let path = app.path.to_owned();
@@ -339,7 +330,6 @@ fn create(app: &mut App) {
     app.tab_list.set_current(idx);
 }
 
-// Remove tab with its idx. Return false if failed to remove tab.
 fn remove_base(app: &mut App, idx: usize) -> AppResult<bool> {
     if idx >= app.tab_list.len() {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -372,7 +362,6 @@ fn delete_other_tabs(app: &mut App) {
 
     let keep = app.tab_list.current_tab().clone();
 
-    // The removed tabs lose their shells; the kept tab keeps its own.
     let removed = app.tab_list.tabs().iter()
         .filter(|tab| tab.id != keep.id)
         .map(|tab| tab.id)
@@ -387,7 +376,6 @@ fn delete_other_tabs(app: &mut App) {
 }
 
 fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool> {
-    // Handle tabs index
     let tabs_len = if data.storage {
         app.tab_list.storage.len()
     } else {
@@ -426,7 +414,8 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
     }
 
 
-    // Delete specific tab or storage tabs
+    // `delete` and `storage` combine: deleting in storage mode drops the
+    // stored group, not an open tab.
     if data.delete {
         if data.storage {
             return Ok(remove_storage_tabs(app, idx - 1)?)
@@ -435,12 +424,10 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
         return request_remove(app, idx - 1, data)
     }
 
-    // Apply storage tabs
     if data.storage {
         return request_apply_storage(app, idx - 1, data)
     }
 
-    // Switch specific tab
     if app.tab_list.len() < idx {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
     }
@@ -451,7 +438,6 @@ fn handle_tabs(app: &mut App, key: char, data: &mut TabState) -> AppResult<bool>
 }
 
 
-// Non-core functions
 fn apply_storage_tabs(app: &mut App, idx: usize) -> AppResult<bool> {
     if idx >= app.tab_list.storage.len() {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -560,7 +546,6 @@ fn remove_storage_tabs(app: &mut App, idx: usize) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-/// Close every shell mounted on the tab at `idx`.
 fn kill_tab_shells(app: &mut App, idx: usize) {
     let tab_id = app.tab_list.tabs().get(idx).map(|tab| tab.id);
 
@@ -569,7 +554,8 @@ fn kill_tab_shells(app: &mut App, idx: usize) {
     }
 }
 
-/// Update current tab info.
+/// Store the browser's path, hidden-file flag and selection into the current
+/// tab.
 pub fn update_current_tab(app: &mut App) {
     let selected_idx = if app.root() {
         app.selected_item.parent_selected()
@@ -600,12 +586,11 @@ fn select_new(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-/// Switch the current tab to the one identified by `id`.
+/// Switch to the tab identified by `id`.
 ///
-/// The view state of the tab being left (path, hidden-file flag, selection) is
-/// saved and the target tab's is restored, exactly like `[`/`]` and
-/// `switch_tab`. Used by `shell::attach` to display a shell of another tab
-/// without leaving the tab list inconsistent.
+/// Used by `shell::attach` to show a shell of another tab; the view state of
+/// the tab being left is saved and the target's is restored, so the tab list
+/// stays consistent.
 pub fn switch_to_tab(app: &mut App, id: TabId) -> AppResult<()> {
     let Some(idx) = app
         .tab_list
@@ -619,8 +604,7 @@ pub fn switch_to_tab(app: &mut App, id: TabId) -> AppResult<()> {
     switch_to(app, idx)
 }
 
-/// Switch to the tab at `idx`, keeping the tab list and the browser state in
-/// sync.
+/// Switch to the tab at `idx`; the browser state and the tab list stay in sync.
 fn switch_to(app: &mut App, idx: usize) -> AppResult<()> {
     if idx == app.tab_list.current() {
         return Ok(())
@@ -685,7 +669,7 @@ fn generate_menu(app: Option<&App>, data: &TabState) -> AppResult<MenuList> {
     Ok(menu)
 }
 
-/// The index of the entry the number being typed names, if it names one.
+/// The `0`-based entry index the typed number names, if it names one.
 fn typed_index(data: &TabState, len: usize) -> Option<usize> {
     if data.selecting.is_empty() {
         return None
@@ -700,7 +684,7 @@ fn typed_index(data: &TabState, len: usize) -> Option<usize> {
     }
 }
 
-/// One entry per open tab; the current tab is highlighted.
+/// One entry per open tab, the current one unless a number is being typed.
 fn tab_rows(mut menu: MenuList, app: &App, data: &TabState) -> MenuList {
     for (idx, tab) in app.tab_list.tabs().iter().enumerate() {
         let mut row = Line::raw(tab.path.to_string_lossy().into_owned());
@@ -806,7 +790,6 @@ mod test {
 
         menu(&mut app, &['c']);
 
-        // The confirmation is open; the tab and its shell are still there.
         assert!(app.switch_case.is_some());
         assert_eq!(app.tab_list.len(), 2);
         assert_eq!(app.shell_sessions.alive_count(), 1);
@@ -825,7 +808,6 @@ mod test {
 
         menu(&mut app, &['c']);
 
-        // The tab is closed right away; the menu is gone with it.
         assert!(app.switch_case.is_none());
         assert_eq!(app.tab_list.len(), 1);
     }
@@ -843,7 +825,6 @@ mod test {
 
         menu(&mut app, &['c', 'n']);
 
-        // Cancelling brings the menu back, with the tab and its shell intact.
         assert!(app.switch_case.is_some());
         assert_eq!(app.tab_list.len(), 2);
         assert_eq!(app.shell_sessions.alive_count(), 1);
@@ -921,8 +902,6 @@ mod test {
         assert_eq!(app.shell_sessions.alive_count(), 0);
     }
 
-    /// The tab menu lists every tab with a 1-based key, highlights the current
-    /// tab and lets a typed number take the highlight over.
     #[test]
     fn test_tab_menu_lists_tabs_and_highlights_the_current() {
         let mut app = App::default();
@@ -948,8 +927,6 @@ mod test {
         assert_eq!(menu.selected_row(), Some(1));
     }
 
-    /// Storage mode lists the stored groups, their other paths going on
-    /// non-selectable lines.
     #[test]
     fn test_tab_menu_lists_stored_groups() {
         let mut app = App::default();

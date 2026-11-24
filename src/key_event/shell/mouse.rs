@@ -1,7 +1,7 @@
-// Mouse event encoding for attached shell sessions.
-//
-// The outer terminal is captured with SGR mouse reporting; each event is
-// re-encoded into the protocol mode and encoding the child requested.
+//! Mouse encoding for the attached shell view.
+//!
+//! The outer terminal is captured with SGR reporting; each event is re-encoded
+//! into the protocol mode and encoding the child requested.
 
 use ratatui::{
     crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
@@ -9,7 +9,7 @@ use ratatui::{
 };
 use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
-/// The bit used to remember that a button is held down.
+/// The bit which marks `button` in the held-buttons mask.
 pub fn button_bit(button: MouseButton) -> u8 {
     match button {
         MouseButton::Left => 1,
@@ -18,7 +18,6 @@ pub fn button_bit(button: MouseButton) -> u8 {
     }
 }
 
-/// Whether (`column`, `row`) lies inside `area` (0-based terminal cells).
 pub fn inside(area: Rect, column: u16, row: u16) -> bool {
     area.width > 0 &&
         area.height > 0 &&
@@ -30,10 +29,9 @@ pub fn inside(area: Rect, column: u16, row: u16) -> bool {
 
 /// Encode `event` for the child's mouse protocol.
 ///
-/// The caller has already checked the shell area and the pressed-button state:
-/// a press must be inside the area; a drag/release outside is forwarded with
-/// its coordinates clamped so a drag which leaves the shell area does not get
-/// stuck.
+/// The caller filters what may reach the child; here an outside press is
+/// dropped while an outside drag or release is clamped to the edge, so a drag
+/// which leaves the area does not get stuck.
 pub fn encode_mouse(
     event: &MouseEvent,
     mode: MouseProtocolMode,
@@ -52,7 +50,7 @@ pub fn encode_mouse(
     match mode {
         MouseProtocolMode::None => return None,
 
-        // X10 mode: button presses and wheel only.
+        // X10 mode reports presses and the wheel only.
         MouseProtocolMode::Press => {
             if !matches!(
                 kind,
@@ -66,14 +64,14 @@ pub fn encode_mouse(
             }
         },
 
-        // VT200 mode: presses and releases, no motion.
+        // VT200 mode: presses and releases, but no motion.
         MouseProtocolMode::PressRelease => {
             if moving {
                 return None
             }
         },
 
-        // Button motion: no motion with no button held.
+        // Button motion: motion only while a button is held.
         MouseProtocolMode::ButtonMotion => {
             if matches!(kind, MouseEventKind::Moved) {
                 return None
@@ -124,6 +122,8 @@ pub fn encode_mouse(
                 button
             };
 
+            // A report in this encoding carries each coordinate in one byte
+            // after adding 32, so 223 is the largest coordinate it can hold.
             Some(vec![
                 0x1b,
                 b'[',
@@ -254,14 +254,12 @@ mod tests {
 
     #[test]
     fn test_mode_and_area_filtering() {
-        // Press mode ignores releases.
         let release = event(MouseEventKind::Up(MouseButton::Left), 4, 3);
         assert_eq!(
             encode_mouse(&release, MouseProtocolMode::Press, MouseProtocolEncoding::Sgr, area()),
             None
         );
 
-        // A press outside the shell area is not forwarded.
         let outside = event(MouseEventKind::Down(MouseButton::Left), 4, 0);
         assert_eq!(
             encode_mouse(&outside, MouseProtocolMode::AnyMotion, MouseProtocolEncoding::Sgr, area()),

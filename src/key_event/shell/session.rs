@@ -1,8 +1,7 @@
-// Shell sessions.
-//
-// A session is a PTY-backed shell plus its parsed screen. Sessions belong to a
-// tab and survive being detached: the reader thread keeps consuming and
-// parsing output while the file browser is shown.
+//! PTY-backed shell sessions and their parsed screens.
+//!
+//! A session belongs to a tab and survives being detached: the reader thread
+//! keeps consuming and parsing output while the file browser is shown.
 
 use std::{
     collections::HashMap,
@@ -22,8 +21,7 @@ use super::{
     pty::{PtyGraphics, PtyProcess},
 };
 
-/// The size a session is spawned with; the first draw resizes it to the real
-/// terminal area.
+/// The size a session is spawned with; the first draw resizes it to the pane.
 pub const DEFAULT_PTY_ROWS: u16 = 24;
 pub const DEFAULT_PTY_COLS: u16 = 80;
 
@@ -34,20 +32,17 @@ pub const SCROLLBACK_ROWS: usize = 240;
 const GRAPHICS_QUEUE: usize = 32;
 
 pub struct ShellMeta {
-    /// The basename of the shell program the session was started with, e.g.
-    /// `bash`. This is not necessarily what is running in the session right
-    /// now; see [`ShellSession::display_title`].
+    /// The basename of the program the session was started with, e.g. `bash`;
+    /// not what runs in it now (see [`ShellSession::display_title`]).
     pub title: String,
 
-    /// The directory the shell was started in.
     pub cwd: PathBuf,
 }
 
 /// The view a shell was opened from.
 ///
-/// It decides where the user goes when the shell goes away: a shell spawned
-/// from the browser belongs to the browser, one spawned from an attached shell
-/// belongs to that shell.
+/// It decides where the user goes when the shell goes away: back to the
+/// browser, or back to the shell it was opened from.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ShellOrigin {
     /// Opened on its own: `S`, `:shell`, `-S`, `-w`, or the shell menu's `n`
@@ -60,11 +55,9 @@ pub enum ShellOrigin {
     Shell,
 }
 
-/// What the view needs to know once a shell goes away.
-///
-/// It is read from the session before it is dropped (see
-/// [`ShellSessions::close`]): where the shell was opened from and whether the
-/// user had already been back in the browser while it was alive.
+/// What the view needs once a shell goes away, read from the session before it
+/// is dropped: the view it was opened from, and whether the user already
+/// returned to the browser while it was alive.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ClosedShell {
     pub origin: ShellOrigin,
@@ -76,11 +69,10 @@ pub struct ShellSession {
     pub meta: ShellMeta,
     pub alive: bool,
 
-    /// Where the shell was opened from.
     pub origin: ShellOrigin,
 
-    /// The view went back to the browser at least once while this shell was
-    /// alive (`C-s d`, or the `detach` command).
+    /// The browser was shown at least once while this shell was alive (`C-s d`,
+    /// or the `detach` command).
     pub returned_to_browser: bool,
 
     screen: Arc<Mutex<vt100::Parser>>,
@@ -88,7 +80,6 @@ pub struct ShellSession {
 }
 
 impl ShellSession {
-    /// Lock and return the parsed screen.
     pub fn parser(&self) -> MutexGuard<'_, vt100::Parser> {
         // The reader thread never panics while holding the lock, but a poisoned
         // mutex must not take the whole application down.
@@ -99,7 +90,6 @@ impl ShellSession {
         self.pty.write(bytes)
     }
 
-    /// The state the view needs to decide where to go once this shell is gone.
     pub fn closed_state(&self) -> ClosedShell {
         ClosedShell {
             origin: self.origin,
@@ -109,9 +99,8 @@ impl ShellSession {
 
     /// The name of the program which currently owns the session's terminal.
     ///
-    /// `Some("vim")` while vim runs in the shell, `Some("zsh")` at the prompt.
-    /// `None` when it cannot be determined (the session is dead, or `/proc`
-    /// is unreadable), so the caller falls back to the shell name.
+    /// `None` when it cannot be determined (the session is dead, or `/proc` is
+    /// unreadable), so the caller falls back to the shell name.
     pub fn foreground_title(&self) -> Option<String> {
         if !self.alive {
             return None
@@ -120,12 +109,11 @@ impl ShellSession {
         self.pty.foreground_pid().and_then(process_name)
     }
 
-    /// The name to show for this session: the program running in it, falling
-    /// back to the shell program it was started with.
+    /// The name to show for this session: the foreground program, or the shell
+    /// it was started with.
     ///
-    /// A mounted shell whose own name is shown is indistinguishable from every
-    /// other mounted shell of the same shell program; the foreground program
-    /// (`vim`, `htop`, …) is what the user needs to tell them apart.
+    /// Mounted shells of the same shell program would otherwise be
+    /// indistinguishable; `vim` or `htop` is what tells them apart.
     pub fn display_title(&self) -> String {
         self.foreground_title()
             .unwrap_or_else(|| self.meta.title.clone())
@@ -154,9 +142,8 @@ impl ShellSession {
 
 /// The name of `pid` as the kernel reports it (`vim`, `nvim`, `htop`, …).
 ///
-/// `/proc/<pid>/comm` is what a process list shows; programs may change it and
-/// the kernel truncates it to 15 bytes. `None` when it cannot be read, e.g. on
-/// a platform without `/proc`, so the caller falls back to the shell name.
+/// It comes from `/proc/<pid>/comm`, which a program may change itself; the
+/// kernel truncates it to 15 bytes. `None` when `/proc` cannot be read.
 fn process_name(pid: u32) -> Option<String> {
     let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     let name = name.trim();
@@ -188,7 +175,7 @@ impl ShellSessions {
         let (exit_tx, exit_rx) = mpsc::channel();
         // Bounded: while hire is blocked in a foreground program nobody drains
         // the graphics, and image events are large. Dropping one is harmless
-        // (the child repaints on its next preview change), growing forever is
+        // (the child repaints on its next preview change); growing forever is
         // not.
         let (graphics_tx, graphics_rx) = mpsc::sync_channel(GRAPHICS_QUEUE);
 
@@ -204,11 +191,8 @@ impl ShellSessions {
 
     /// Spawn a new shell and return its id.
     ///
-    /// `graphics` is what the new terminal tells the child about image support;
-    /// the PTY's pixel size is derived from it so programs which read the
-    /// window size in pixels scale their images correctly. `origin` is the
-    /// view the shell is opened from, kept for the cleanup which decides where
-    /// the user goes when the shell goes away.
+    /// `graphics` also sets the PTY's pixel size, so programs which ask about
+    /// image support scale correctly; `origin` drives the later cleanup.
     pub fn open(
         &mut self,
         tab: TabId,
@@ -290,12 +274,10 @@ impl ShellSessions {
 
     /// Record that the user is in the browser again, for every running shell.
     ///
-    /// The browser is one place, not a view of one shell: every session which
-    /// is alive now has been left for the browser during its life, so each of
-    /// them asks before the browser is entered again when it closes (see
-    /// `leave_closed_shell`). A shell opened after the detach starts clean.
-    /// Closed sessions are not in the map, so the loop only visits the running
-    /// ones.
+    /// The browser is one place, not a view of one shell: every session alive
+    /// now has been left for it, so each asks before the browser is entered
+    /// again when it closes, while a shell opened after the detach starts
+    /// clean.
     pub fn mark_returned_to_browser(&mut self) {
         for session in self.sessions.values_mut() {
             session.returned_to_browser = true;
@@ -352,9 +334,8 @@ mod test {
         assert!(!name.is_empty());
     }
 
-    /// A session at its prompt reports the shell itself; once a program runs in
-    /// it, the foreground program is reported instead. That name is what the
-    /// shell menu and the status line show.
+    /// At a prompt the shell itself is reported; while a program runs, that
+    /// program is. The shell menu and the status line show this name.
     #[test]
     fn test_display_title_follows_the_foreground_program() {
         // `/bin/sh` and `/proc` are the only assumptions; skip elsewhere.

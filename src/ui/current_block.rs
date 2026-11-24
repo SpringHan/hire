@@ -1,4 +1,4 @@
-// Current Block
+//! The current directory column.
 
 use ratatui::{
     symbols::{border::{self, Set}, line},
@@ -11,7 +11,8 @@ use crate::app::App;
 
 use super::{list::List, utils::{render_editing_list, render_list}};
 
-/// The border set of the current column.
+/// The left corners are T junctions, so the column joins the frame it shares
+/// with the parent column.
 fn current_border_set() -> Set<'static> {
     Set {
         top_left: line::NORMAL.horizontal_down,

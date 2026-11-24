@@ -1,4 +1,4 @@
-// Command
+//! `AppCommand` and the functions its variants run.
 
 mod cmds;
 mod types;

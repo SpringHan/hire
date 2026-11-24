@@ -1609,3 +1609,35 @@ The shipped keymaps bind `:` to `enter_command_line`, so a harness can press
 `:` and type the command name directly. An older `keymap.toml` without that
 binding still reaches the command line through the configured `create_file`,
 `create_dir` or `search` key (e.g. `=` in `keymap_config/default.toml`).
+
+---
+
+## 7. Comment conventions
+
+Comments in `src/` are a record of reasons, not a second description of the
+code. A reader can see *what* the code does; only the comment can explain why
+it is done that way.
+
+- Every module starts with a `//!` comment of one sentence: what the module
+  owns, not a table of contents.
+- `///` documents an item in one short sentence. Add a blank `///` line and a
+  few why/pitfall lines only when the item carries an invariant, an ordering
+  rule or a trap. A doc comment that repeats the name (`/// The path.`) is
+  deleted.
+- Inline `//` comments exist for the reasons the code cannot state: crossterm's
+  key-byte collisions (`Tab`/`Ctrl-i`, `Alt-Ctrl-Tab` arriving as Alt+Tab),
+  terminal protocols and their quirks (DSR answers, kitty graphics, mouse
+  encodings), thread/channel staleness (generations, tickets), borrow-checker
+  workarounds, layout arithmetic that must match another module, and
+  performance choices measured against a real file. Narration (`// Set the
+  value`), section labels (`// Core`, `// Tab`) and commented-out code are not
+  kept.
+- A pitfall is stated with its consequence: "X happens because Y, so Z would
+  break" — not only "be careful here". The `pty`/DSR and the `Tab` byte notes in
+  this document are examples of that level of detail.
+- `TODO`/`FIXME` state the reason and, when known, the intended fix; an
+  untracked "not done yet" is either turned into a `TODO` or dropped.
+- `SAFETY:` comments stay next to the `unsafe` block they justify, including
+  what is put back on drop.
+- `src/app/highlight.rs` and `src/key_event/shell/view.rs` show the intended
+  density: long enough to record the trap, short enough to read in passing.

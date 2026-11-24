@@ -1,8 +1,7 @@
-// Sudo session.
-//
-// Run a root instance of hire in the same terminal, handing over the tabs of
-// the current instance. Quitting the root instance returns to this one, which
-// is how the root privileges are dropped again.
+//! A root instance of hire running in the same terminal, over the current tabs.
+//!
+//! Quitting the root instance returns to this one, which is how the root
+//! privileges are dropped again.
 
 use std::{
     io::{stdout, Write},
@@ -41,8 +40,6 @@ pub struct SessionTabs {
     pub tabs: Vec<SessionTab>,
 }
 
-/// One tab of a session: its path, whether hidden files are shown and which
-/// file is selected in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionTab {
     pub path: PathBuf,
@@ -51,10 +48,8 @@ pub struct SessionTab {
 }
 
 impl SessionTabs {
-    /// Take the tabs of the running instance.
-    ///
-    /// The current tab is synced first, so the path and the selection of the
-    /// active tab are the ones the user currently sees.
+    /// Take the tabs of the running instance, after syncing the current tab so
+    /// its path and selection are the ones on screen.
     pub fn from_app(app: &mut App) -> AppResult<Self> {
         update_current_tab(app);
 
@@ -73,7 +68,6 @@ impl SessionTabs {
         Ok(Self { current, tabs })
     }
 
-    /// Serialize the tabs into a TOML document.
     pub fn to_toml(&self) -> anyhow::Result<String> {
         let mut content = format!("current = {}\n", self.current);
 
@@ -97,7 +91,6 @@ impl SessionTabs {
         Ok(content)
     }
 
-    /// Parse the tabs from a TOML document.
     pub fn from_toml(content: &str) -> anyhow::Result<Self> {
         let document: DocumentMut = content.parse()?;
 
@@ -160,7 +153,6 @@ impl SessionTabs {
         Ok(())
     }
 
-    /// Read the tabs from `path`.
     pub fn load(path: &Path) -> AppResult<Self> {
         let content = fs::read_to_string(path)?;
         Ok(Self::from_toml(&content)?)
@@ -170,8 +162,8 @@ impl SessionTabs {
 impl<'a> App<'a> {
     /// Replace the open tabs with the ones of a previous session.
     ///
-    /// The focus is placed on the tab which was focused before, together with
-    /// the file selected in it.
+    /// The focus goes back to the tab that was focused before, and to the file
+    /// selected in it.
     pub fn apply_session_tabs(&mut self, session: &SessionTabs) -> AppResult<()> {
         if session.tabs.is_empty() {
             return Ok(())
@@ -203,10 +195,9 @@ impl<'a> App<'a> {
 
 /// Start a root instance of hire in the same terminal.
 ///
-/// The new process is `sudo -E <hire> --sudo-session <file> --config-dir <dir>`
-/// with the tabs of this instance; the root instance uses a throw-away copy of
-/// the config, so it can't modify the user's own config files. Quitting it
-/// returns here, which drops the root privileges.
+/// It runs `sudo -E <hire> --sudo-session <file> --config-dir <dir>` with the
+/// tabs of this instance, and uses a throw-away copy of the config, so it
+/// can't modify the user's own config files.
 pub fn sudo_session(app: &mut App, terminal: &mut DefaultTerminal) -> AppResult<()> {
     if is_root() {
         rt_error!("Already running as root, a sudo session isn't needed")
@@ -222,14 +213,12 @@ pub fn sudo_session(app: &mut App, terminal: &mut DefaultTerminal) -> AppResult<
             launch(app, terminal, &session_dir, &session_file)
         });
 
-    // The directory holds the tab state and the throw-away config; it's no
-    // longer needed once the sudo session finished.
+    // The session dir is throw-away: it holds the tab state and config copy.
     let _ = fs::remove_dir_all(&session_dir);
 
     result
 }
 
-/// Whether this process already runs as root.
 fn is_root() -> bool {
     // SAFETY: `geteuid` has no preconditions and never fails.
     unsafe { libc::geteuid() == 0 }
@@ -250,7 +239,6 @@ fn create_session_dir() -> AppResult<PathBuf> {
     Ok(dir)
 }
 
-/// Write the tab state and copy the config into the session directory.
 fn prepare_session(
     session: &SessionTabs,
     session_dir: &Path,
@@ -397,7 +385,6 @@ mod test {
         session.save(&path).unwrap();
         assert_eq!(SessionTabs::load(&path).unwrap(), session);
 
-        // The state file is readable by its owner only.
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
 

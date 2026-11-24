@@ -1,3 +1,5 @@
+//! hire's entry point: terminal setup, the event loop and the shutdown paths.
+
 mod ui;
 mod app;
 mod utils;
@@ -48,13 +50,12 @@ fn main() -> AppResult<()> {
     let search_recv = app.init_search_channel();
     let preview_search_recv = app.init_preview_search_channel();
 
-    // Init config information. A broken entry is skipped by `load_config` and
-    // shown in the command line once the UI runs; it never stops hire.
+    // A broken config entry is shown in the command line once the UI runs; it
+    // never stops hire.
     if let Err(err) = config::load_config(&mut app) {
         app.app_error.append_errors(err.iter());
     }
 
-    // Load the working directory set by the user.
     app.load_working_directory();
 
     // Restore the tabs handed over by a sudo session.
@@ -67,8 +68,6 @@ fn main() -> AppResult<()> {
 
     let mut terminal = ratatui::init();
 
-    // Apply the output mode and the start directory, then open a shell when the
-    // command line asked for one.
     check_output(&args, &mut app);
     check_start_path(&args, &mut app)?;
     shell_at_startup(&args, &mut app)?;
@@ -86,8 +85,8 @@ fn main() -> AppResult<()> {
         // The attached shell may enable/disable mouse tracking or bracketed
         // paste at any time; mirror it on the outer terminal.
         app.sync_terminal_modes();
-        // Forward images the shells painted with the kitty graphics protocol
-        // and answer their terminal queries.
+        // Forward the images a shell painted (kitty graphics) and answer its
+        // terminal queries.
         app.handle_shell_graphics()?;
 
         if app.clear_screen {
@@ -95,8 +94,7 @@ fn main() -> AppResult<()> {
             app.clear_screen = false;
         }
 
-        // A finished syntax highlight for the selected file replaces the plain
-        // preview drawn before it.
+        // A finished highlight replaces the plain preview drawn before it.
         app.apply_highlight();
 
         terminal.draw(|frame| {
@@ -118,9 +116,9 @@ fn main() -> AppResult<()> {
         })?;
 
         // An attached shell needs a short poll so its output is painted
-        // promptly; the rest of the time the old 200ms cadence is kept. While
-        // the highlighting thread is busy the poll is short too, so the
-        // coloured preview appears as soon as it is ready.
+        // promptly; otherwise the old 200ms cadence is kept. A pending
+        // highlight polls short too, so the coloured preview shows up as soon
+        // as it is ready.
         let shell_view = app.selected_block.is_shell();
         let timeout = if shell_view || app.highlight.pending() {
             Duration::from_millis(16)
@@ -192,7 +190,6 @@ fn main() -> AppResult<()> {
             }
         }
 
-        // Search handler
         if let Ok(idx_set) = search_recv.try_recv() {
             app.file_searcher.update_idx(idx_set);
 
@@ -201,12 +198,10 @@ fn main() -> AppResult<()> {
             }
         }
 
-        // Preview search handler
         if let Ok(matches) = preview_search_recv.try_recv() {
             app.apply_preview_search(matches);
         }
 
-        // Image perview handler
         if let Some((ref prx, ref irx)) = image_recvs {
             if app.image_preview.useless {
                 continue;
@@ -234,11 +229,9 @@ fn main() -> AppResult<()> {
 
 /// Spawn a shell at startup when the command line asks for one.
 ///
-/// `--working-directory` changes to the stored working directory first, while
-/// `--shell` uses the directory hire starts in — `--start-from` has already
-/// been applied by the time this runs, so `--start-from <path> --shell` opens
-/// the shell in `<path>`. The two flags conflict, because both would open a
-/// shell and they disagree about the directory.
+/// `--start-from` has already been applied, so `--shell` opens the shell in
+/// that directory; `--working-directory` goes to the stored one first. The two
+/// flags conflict because they would open a shell in different directories.
 fn shell_at_startup(
     args: &utils::Args,
     app: &mut App,
@@ -257,7 +250,6 @@ fn shell_at_startup(
     Ok(())
 }
 
-/// Check whether to enter passive output mode.
 fn check_output(args: &utils::Args, app: &mut App) {
     if &args.output_file != "NULL" {
         app.temp_file = args.output_file.to_owned();
@@ -281,8 +273,6 @@ fn check_start_path(args: &utils::Args, app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-// Macro Details
-/// Macro Check before key event monitoring.
 fn macro_check_before_key(app: &mut App, terminal: &mut DefaultTerminal) {
     if app.macro_attri.status == MacroStatus::Executing {
         let result = execute_macro(app, terminal);
@@ -294,26 +284,22 @@ fn macro_check_before_key(app: &mut App, terminal: &mut DefaultTerminal) {
     }
 }
 
-/// Macro check when key event monitor is working.
 fn macro_check_with_key(app: &mut App, key: event::KeyEvent) {
     if app.macro_attri.status == MacroStatus::Recording {
         app.macro_attri.record_key(key);
     }
 }
 
-// Check before quit
-
 enum QuitCheckRes {
     Quit,
 
-    /// Stop running following code & start a new loop.
+    /// Stop the current iteration and start a new loop.
     Reset,
 
-    /// Continue to run `handle_event` for 'q'.
+    /// Let `handle_event` handle the 'q'.
     Continue
 }
 
-/// Conditions to check before quiting.
 fn check_quit_condition(app: &mut App) -> QuitCheckRes {
     if let utils::Block::CommandLine(_, _) = app.selected_block {
         return QuitCheckRes::Continue
@@ -351,7 +337,6 @@ fn check_quit_condition(app: &mut App) -> QuitCheckRes {
     QuitCheckRes::Quit
 }
 
-/// Really quit hire?
 fn really_quit(
     app: &mut App,
     key: char,

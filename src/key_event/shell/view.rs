@@ -1,7 +1,5 @@
-// Shell view.
-//
-// Opening, attaching, detaching and killing shell sessions, plus the key
-// handling and the numbered selection used while a shell is attached.
+//! Opens, attaches, detaches and kills shell sessions, and handles the keys
+//! and numbered selection of the attached shell.
 
 use std::{
     io::{stdout, Write},
@@ -45,10 +43,8 @@ const DIGIT_COMMIT_DELAY: Duration = Duration::from_millis(450);
 
 /// Open a new shell on the current tab and attach it.
 ///
-/// `origin` is the view the key which opens the shell belongs to (`C-s c`
-/// passes [`ShellOrigin::Shell`], the browser commands pass
-/// [`ShellOrigin::Browser`]); it decides where the view goes when the shell
-/// goes away (see [`leave_closed_shell`]).
+/// `origin` is the view the opening key belonged to; it decides where the view
+/// goes when the shell goes away (see [`leave_closed_shell`]).
 pub fn open_shell(app: &mut App, origin: ShellOrigin) -> AppResult<()> {
     let program = default_shell(app)?;
     let tab_id = app.tab_list.current_tab().id;
@@ -68,14 +64,11 @@ pub fn open_shell(app: &mut App, origin: ShellOrigin) -> AppResult<()> {
 
 /// Attach the shell which the current tab used last.
 ///
-/// `Tab::active_shell` follows every attach (`C-s <number>`, `C-s n/p`, the
-/// shell menu and the exit cleanup), so going back to the shell which was in
-/// front is a single key instead of opening the shell menu.
-///
-/// When the tab has no shell at all, the shell attached most recently on
-/// another tab is borrowed instead, so `B` still reaches the background
-/// shells a tab may not own. The tab is switched internally for the view and
-/// `detach` returns to this one (see `attach`).
+/// `Tab::active_shell` follows every attach, so going back to the shell which
+/// was in front is one key instead of the shell menu. A tab with no shell at
+/// all borrows the shell attached most recently on another tab, so `B` still
+/// reaches background shells; `attach` switches to that tab for the view and
+/// `detach` returns to this one.
 pub fn attach_active(app: &mut App) -> AppResult<()> {
     let (tab_id, active, has_shells) = {
         let tab = app.tab_list.current_tab();
@@ -99,11 +92,9 @@ pub fn attach_active(app: &mut App) -> AppResult<()> {
 
 /// Attach the shell pinned with `C-s *`.
 ///
-/// The pin is one shell at a time and survives detaching, so the program the
-/// user keeps in the background (a music player, a server, …) is one command
-/// away from the browser (`attach_pinned`) and from any attached shell
-/// (`C-s b`). A pin which points at a session that has exited is dropped and
-/// reported instead of leaving a key that silently does nothing.
+/// The pin survives detaching, so the program kept in the background is one
+/// command away from the browser and from any attached shell (`C-s b`). A pin
+/// to an exited session is dropped and reported, not left silently dead.
 pub fn attach_pinned(app: &mut App) -> AppResult<()> {
     let Some(id) = app.pinned_shell else {
         rt_error!("No shell is pinned (pin one with `C-s *`)")
@@ -117,7 +108,6 @@ pub fn attach_pinned(app: &mut App) -> AppResult<()> {
     attach(app, id)
 }
 
-/// Pin the attached shell, or unpin it when it already is the pinned one.
 pub fn toggle_pin(app: &mut App, id: ShellId) {
     app.pinned_shell = if app.pinned_shell == Some(id) {
         None
@@ -126,7 +116,6 @@ pub fn toggle_pin(app: &mut App, id: ShellId) {
     };
 }
 
-/// The most recently attached shell which belongs to another tab.
 fn recent_shell(app: &App, current_tab: TabId) -> Option<ShellId> {
     app.shell_recent.iter().copied().find(|id| {
         app.shell_sessions.get(*id).is_some_and(|session| {
@@ -138,10 +127,9 @@ fn recent_shell(app: &App, current_tab: TabId) -> Option<ShellId> {
 /// Attach `id` and make it the view's shell.
 ///
 /// An attached shell must belong to the current tab: the status line, the
-/// prefix commands (`C-s c`, `C-s n/p`, `C-s D`, …), the exit cleanup and the
-/// mouse/key forwarding all work on `current_tab()`. Attaching a shell of
-/// another tab therefore switches that tab for the duration of the view;
-/// `shell_return_tab` remembers where the user was so `detach` can go back.
+/// prefix commands and the exit cleanup all read `current_tab()`. Attaching
+/// another tab's shell switches to that tab for the duration, and
+/// `shell_return_tab` remembers where `detach` goes back to.
 pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
     let (tab_id, alive) = match app.shell_sessions.get(id) {
         Some(session) => (session.tab, session.alive),
@@ -163,6 +151,8 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
         tab.active_shell = Some(id);
     }
 
+    // The menu, the question and the expanded command line belonged to the
+    // view which is being left.
     app.switch_case = None;
     app.shell_menu_origin = None;
     app.command_error = false;
@@ -194,10 +184,9 @@ pub fn attach(app: &mut App, id: ShellId) -> AppResult<()> {
 pub fn detach(app: &mut App) {
     let in_root = app.root();
 
-    // The shell which is in front is not the only one whose life now includes
-    // the browser, so every running shell is marked: whichever of them closes
-    // later asks before the browser is entered again (see
-    // `leave_closed_shell`). A shell opened after this detach is not touched.
+    // Every running shell's life now includes the browser, not only the one in
+    // front: whichever closes later asks before entering it again (see
+    // `leave_closed_shell`). A shell opened after this detach is not marked.
     app.shell_sessions.mark_returned_to_browser();
 
     app.shell_prefix_active = false;
@@ -233,14 +222,12 @@ pub fn detach(app: &mut App) {
 
 /// Re-read the current directory after leaving the shell view.
 ///
-/// The selected file is selected again when it still exists. Errors are
-/// reported through the usual error banner instead of being dropped: the
-/// directory may have been removed from inside the shell.
+/// The selected file is selected again when it still exists. Errors go to the
+/// error banner: the directory may have been removed from inside the shell.
 fn refresh_after_shell(app: &mut App) {
     let selected = app.get_file_saver().map(|file| file.name.to_owned());
-    // Re-read the directory the browser shows, not `current_path()`: at the
-    // root directory the latter is the selected parent entry, and refreshing
-    // must not navigate into it.
+    // Re-read `app.path`, not `current_path()`: at the root directory the
+    // latter is the selected parent entry, which must not be navigated into.
     let dir = app.path.to_owned();
 
     if let Err(err) = app.goto_dir(dir, Some(app.hide_files)) {
@@ -257,7 +244,6 @@ fn refresh_after_shell(app: &mut App) {
     }
 }
 
-/// Attach the next/previous live shell of the same tab.
 pub fn next_shell(app: &mut App, forward: bool) -> AppResult<()> {
     let Some(current) = app.selected_block.shell_id() else {
         return Ok(())
@@ -291,13 +277,13 @@ pub fn next_shell(app: &mut App, forward: bool) -> AppResult<()> {
     attach(app, alive[next])
 }
 
-/// Handle one key while a shell view owns the input.
 pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
     let Some(id) = app.selected_block.shell_id() else {
         return Ok(())
     };
 
-    // A kill (or kill-all / kill-others) confirmation is waiting for `y`.
+    // Any key answers a pending kill confirmation; `take` clears it either
+    // way, so only `y` performs the kill.
     let pending_all = app.shell_pending_kill_all.take();
     let pending_others = app.shell_pending_kill_others.take();
     let pending_one = app.shell_pending_kill.take();
@@ -329,7 +315,6 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
         return Ok(())
     }
 
-    // Digits typed after the prefix select a shell by number.
     if !app.shell_digits.is_empty() {
         match key.code {
             KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -398,15 +383,14 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
                     app.shell_pending_kill_others = Some(id);
                 }
             },
-            // Open the shell menu from the shell: the same page the browser's
-            // `T` opens, with the shells of every tab. Closing it without
-            // attaching anything comes back here.
+            // The shell menu: the same page the browser's `T` opens. Closing
+            // it without attaching anything comes back to this shell.
             KeyCode::Char('t') => return shell_operation(app),
             // Pin/unpin the attached shell; `C-s b` attaches it from anywhere.
             KeyCode::Char('*') => toggle_pin(app, id),
             KeyCode::Char('b') => return attach_pinned(app),
-            // Browse the shell's history. The configured `shell_scroll_mode`
-            // keys then scroll; `q`/`Esc` returns to the live screen.
+            // Browse the shell's history: the `shell_scroll_mode` keys then
+            // scroll, and `q`/`Esc` returns to the live screen.
             KeyCode::Char('[') => scroll::enter(app, id),
             KeyCode::Char(c) if c.is_ascii_digit() => push_digit(app, c),
             KeyCode::Esc => (),
@@ -431,7 +415,6 @@ pub fn handle_view_key(key: KeyEvent, app: &mut App) -> AppResult<()> {
     write_key(app, id, &key)
 }
 
-/// Forward a mouse event to the attached shell.
 pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
     let Some(id) = app.selected_block.shell_id() else {
         return Ok(())
@@ -515,8 +498,7 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
             }
         },
 
-        // Shift+wheel and the scroll mode are handled before this match;
-        // otherwise the wheel is forwarded to the child like any other event.
+        // A wheel which got here was not claimed above, so the child gets it.
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown |
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
             if !inside_area {
@@ -545,7 +527,6 @@ pub fn handle_view_mouse(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-/// Forward a bracketed paste (or typed text) to the attached shell.
 pub fn handle_view_paste(text: String, app: &mut App) -> AppResult<()> {
     let Some(id) = app.selected_block.shell_id() else {
         return Ok(())
@@ -602,13 +583,12 @@ impl App<'_> {
         }
     }
 
-    /// Leave the shell menu.
+    /// Close the shell menu and return to the view it was opened from.
     ///
-    /// The menu replaces the view it was opened from, so closing it without
-    /// attaching anything attaches the shell it was opened from (`C-s t`)
-    /// again instead of dropping the user into the browser. A menu opened
-    /// from the browser has no origin and leaves the browser in place.
-    /// `quit_command_mode` calls this, and every close path goes through it.
+    /// The menu replaces that view, so closing it without attaching anything
+    /// attaches the shell again (`C-s t`) instead of dropping into the browser;
+    /// a menu opened from the browser has no origin and leaves it in place.
+    /// `quit_command_mode` calls this, so every close path goes through it.
     pub fn leave_shell_menu(&mut self) -> bool {
         let Some(origin) = self.shell_menu_origin.take() else {
             return false
@@ -693,13 +673,11 @@ impl App<'_> {
 
     /// Kill every shell mounted on `tab_id` and forget them on the tab.
     ///
-    /// The tab itself stays open. The attached shell is detached first when it
-    /// belongs to the tab, so the view never points at a session which is
-    /// being dropped. Returns how many shells were closed.
-    ///
-    /// This is the single place which clears a tab's shells: the shell menu's
-    /// `D`, the shell view's `C-s D`, closing a tab and replacing the tab list
-    /// (stored tabs) all go through it.
+    /// The tab stays open. The attached shell is detached first when it
+    /// belongs to the tab, so the view never points at a session being
+    /// dropped. Every clear of a tab's shells goes through this function: the
+    /// menu's `D`, the view's `C-s D`, closing a tab and stored tabs. Returns
+    /// how many shells were closed.
     pub fn close_tab_shells(&mut self, tab_id: TabId) -> usize {
         let shells = self
             .tab_list
@@ -742,9 +720,9 @@ impl App<'_> {
 
     /// Kill every shell mounted on `tab_id` except `keep`.
     ///
-    /// Used by the attached view's `C-s o`: the shell which owns the view
-    /// survives and stays attached, the tab keeps it as its active shell.
-    /// Returns how many shells were closed.
+    /// `C-s o` uses it: the shell which owns the view survives and stays
+    /// attached, and the tab keeps it as its active shell. Returns how many
+    /// shells were closed.
     pub fn close_other_shells(&mut self, tab_id: TabId, keep: ShellId) -> usize {
         let shells = self
             .tab_list
@@ -788,7 +766,6 @@ impl App<'_> {
         self.shell_digit_deadline = None;
     }
 
-    /// Commit typed digits once their deadline passed.
     pub fn tick_shell_digits(&mut self) {
         if self
             .shell_digit_deadline
@@ -917,13 +894,11 @@ fn close_shell(app: &mut App, id: ShellId) {
 
 /// Move the view on after the attached shell was closed.
 ///
-/// `next` is the tab's surviving shell, if any. A tab with a single shell
-/// always goes back to the browser, as it did before. Otherwise the closed
-/// shell decides: one opened from the browser, and never left for it, returns
-/// to the browser; one opened from a shell attaches the tab's previous shell.
-/// A shell the user had already been back in the browser from attaches that
-/// previous shell and asks (`y`) whether the browser is where they want to
-/// continue, instead of guessing.
+/// `next` is the tab's surviving shell, if any; a tab with a single shell goes
+/// back to the browser. Otherwise the closed shell decides: one opened from
+/// the browser and never left for it returns there, one opened from a shell
+/// attaches the tab's previous shell, and one the user had already left for
+/// the browser attaches that shell and asks (`y`) where to continue.
 fn leave_closed_shell(
     app: &mut App,
     closed: ClosedShell,
@@ -951,7 +926,6 @@ fn leave_closed_shell(
     }
 }
 
-/// Whether the tab which owns `id` has another shell which `C-s o` could kill.
 fn attached_tab_has_others(app: &App, id: ShellId) -> bool {
     let Some(tab_id) = app.shell_sessions.get(id).map(|session| session.tab) else {
         return false
@@ -963,7 +937,6 @@ fn attached_tab_has_others(app: &App, id: ShellId) -> bool {
         .unwrap_or(false)
 }
 
-/// Kill every shell of the attached shell's tab except the attached one.
 fn close_other_shells(app: &mut App, keep: ShellId) {
     let Some(tab_id) = app.shell_sessions.get(keep).map(|session| session.tab) else {
         return
@@ -1009,11 +982,11 @@ fn push_digit(app: &mut App, digit: char) {
 
 /// Which mouse mode hire asks the outer terminal for.
 ///
-/// The child's mode is kept as it is: when it enables mouse tracking its own
-/// wheel/clicks work (hire forwards them), and when it does not, hire captures
-/// nothing so the terminal's native wheel and text selection keep working.
-/// Only the scroll mode needs the wheel for hire itself, and then it asks for
-/// at least press reporting (a richer mode the child asked for is kept).
+/// The child's mode is kept as it is: with tracking on, its wheel and clicks
+/// work (hire forwards them); with it off, hire captures nothing so the
+/// terminal's native wheel and text selection keep working. Only the scroll
+/// mode needs the wheel for hire, and then press reporting is enough (a
+/// richer mode the child asked for is kept).
 fn outer_mouse_mode(
     child: MouseProtocolMode,
     scroll_mode: bool,
@@ -1064,9 +1037,8 @@ fn set_outer_bracketed_paste(enabled: bool) -> std::io::Result<()> {
 /// The image support a new shell session is allowed to offer.
 ///
 /// Kitty graphics are forwarded to the real terminal, so they are only offered
-/// when the real terminal speaks kitty. Inside tmux the sequences would have to
-/// be wrapped for tmux passthrough, which is not done yet, so nothing is
-/// offered there.
+/// when it speaks kitty. Inside tmux the sequences would need tmux passthrough
+/// wrapping, which is not done yet, so nothing is offered there.
 fn graphics_support(app: &App) -> GraphicsSupport {
     if in_tmux() {
         return GraphicsSupport::disabled()
@@ -1179,8 +1151,6 @@ mod test {
         id
     }
 
-    /// `attach_active` goes back to the shell the tab used last, not to the
-    /// one which was opened last.
     #[test]
     fn test_attach_active_returns_to_the_last_used_shell() {
         if !Path::new("/bin/sh").exists() {
@@ -1192,8 +1162,6 @@ mod test {
         open_test_shell(&mut app);
         open_test_shell(&mut app);
 
-        // The last opened shell is the active one until another one is
-        // attached.
         attach(&mut app, first).unwrap();
         detach(&mut app);
 
@@ -1201,14 +1169,11 @@ mod test {
 
         assert_eq!(app.selected_block.shell_id(), Some(first));
         assert_eq!(app.tab_list.current_tab().active_shell, Some(first));
-        // The other shells of the tab are untouched.
         assert_eq!(app.tab_list.current_tab().shells.len(), 3);
         // A shell of the current tab does not borrow a tab.
         assert!(app.shell_return_tab.is_none());
     }
 
-    /// `B` on a tab without any shell borrows the shell of another tab which
-    /// was attached last; `detach` returns to the tab the user was on.
     #[test]
     fn test_attach_active_borrows_the_last_shell_of_another_tab() {
         if !Path::new("/bin/sh").exists() {
@@ -1223,7 +1188,6 @@ mod test {
         attach(&mut app, id).unwrap();
         detach(&mut app);
 
-        // Move to a tab without any shell.
         app.tab_list.push(app.path.clone(), false);
         let empty_index = app.tab_list.len() - 1;
         app.tab_list.set_current(empty_index);
@@ -1244,9 +1208,6 @@ mod test {
         assert!(app.shell_return_tab.is_none());
     }
 
-    /// Detaching a borrowed shell refreshes the shell's own tab before
-    /// returning, so the tab's remembered selection still points at the same
-    /// file when the user visits it later.
     #[test]
     fn test_detach_refreshes_the_borrowed_shell_tab() {
         if !Path::new("/bin/sh").exists() {
@@ -1270,7 +1231,6 @@ mod test {
         detach(&mut app);
         assert!(app.shell_return_tab.is_none());
 
-        // A second tab which borrows the shell.
         app.tab_list.push(app.path.clone(), false);
         let other_index = app.tab_list.len() - 1;
         app.tab_list.set_current(other_index);
@@ -1294,8 +1254,6 @@ mod test {
         );
     }
 
-    /// A tab without a shell (or whose shells are all gone) has nothing to
-    /// attach, so the command reports it instead of leaving the browser.
     #[test]
     fn test_attach_active_without_a_shell_reports_an_error() {
         let mut app = App::default();
@@ -1304,8 +1262,6 @@ mod test {
         assert!(matches!(app.selected_block, Block::Browser(_)));
     }
 
-    /// `C-s D` asks before killing every shell of the tab; `y` then kills them
-    /// all and leaves the browser behind.
     #[test]
     fn test_prefix_d_kills_all_shells_after_confirmation() {
         if !Path::new("/bin/sh").exists() {
@@ -1336,7 +1292,6 @@ mod test {
         assert_eq!(app.shell_sessions.alive_count(), 0);
     }
 
-    /// Any other key cancels the kill-all confirmation.
     #[test]
     fn test_prefix_d_cancel_keeps_the_shells() {
         if !Path::new("/bin/sh").exists() {
@@ -1357,8 +1312,6 @@ mod test {
         assert_eq!(app.shell_sessions.alive_count(), 1);
     }
 
-    /// `C-s o` asks before killing the other shells; `y` keeps the attached
-    /// one and makes it the tab's only shell.
     #[test]
     fn test_prefix_o_kills_the_other_shells_after_confirmation() {
         if !Path::new("/bin/sh").exists() {
@@ -1389,7 +1342,6 @@ mod test {
         assert!(app.shell_sessions.is_alive(second));
     }
 
-    /// Any other key cancels the kill-others confirmation.
     #[test]
     fn test_prefix_o_cancel_keeps_the_other_shells() {
         if !Path::new("/bin/sh").exists() {
@@ -1411,7 +1363,6 @@ mod test {
         assert_eq!(app.shell_sessions.alive_count(), 2);
     }
 
-    /// `C-s o` with a single shell has nothing to kill, so it does not ask.
     #[test]
     fn test_prefix_o_without_other_shells_does_not_ask() {
         if !Path::new("/bin/sh").exists() {
@@ -1430,8 +1381,6 @@ mod test {
         assert_eq!(app.tab_list.current_tab().shells, vec![id]);
     }
 
-    /// The prefix chord still works while the scroll mode is open: it leaves
-    /// the mode and arms the usual prefix command.
     #[test]
     fn test_prefix_leaves_the_scroll_mode() {
         if !Path::new("/bin/sh").exists() {
@@ -1457,8 +1406,6 @@ mod test {
         assert!(!app.selected_block.is_shell());
     }
 
-    /// hire only asks for the mouse when the child did, or while the history
-    /// is open (the wheel then belongs to hire).
     #[test]
     fn test_outer_mouse_mode_policy() {
         use MouseProtocolMode::{AnyMotion, None as NoMouse, Press};
@@ -1491,8 +1438,6 @@ mod test {
         session.parser().process(text.as_bytes());
     }
 
-    /// A plain wheel is the child's when it enabled mouse tracking; `Shift`
-    /// gives it to hire and opens the scroll mode.
     #[test]
     fn test_wheel_goes_to_the_child_unless_shift() {
         if !Path::new("/bin/sh").exists() {
@@ -1521,8 +1466,6 @@ mod test {
         assert!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback() > 0);
     }
 
-    /// Without a mouse mode the child never gets the wheel, and with the
-    /// scroll mode open hire keeps it for itself.
     #[test]
     fn test_wheel_needs_shift_or_the_scroll_mode() {
         if !Path::new("/bin/sh").exists() {
@@ -1548,8 +1491,6 @@ mod test {
         assert!(app.shell_sessions.get(id).unwrap().parser().screen().scrollback() > 0);
     }
 
-    /// `C-s *` pins the attached shell and `C-s b` attaches it from a tab
-    /// which has no shell of its own, borrowing the pinned shell's tab.
     #[test]
     fn test_pin_attaches_the_shell_from_another_tab() {
         if !Path::new("/bin/sh").exists() {
@@ -1591,7 +1532,6 @@ mod test {
         assert_eq!(app.selected_block.shell_id(), Some(id));
     }
 
-    /// `C-s *` is a toggle, and the pin never outlives its session.
     #[test]
     fn test_pin_toggles_and_is_forgotten_with_the_shell() {
         if !Path::new("/bin/sh").exists() {
@@ -1624,7 +1564,6 @@ mod test {
         assert!(attach_pinned(&mut app).is_err());
     }
 
-    /// Without a pin the command reports it instead of leaving the browser.
     #[test]
     fn test_attach_pinned_without_a_pin_reports_an_error() {
         let mut app = App::default();
@@ -1633,8 +1572,6 @@ mod test {
         assert!(matches!(app.selected_block, Block::Browser(_)));
     }
 
-    /// `C-s t` opens the shell menu from the shell view; closing the menu
-    /// brings that shell back (`leave_shell_menu`), not the browser.
     #[test]
     fn test_menu_opened_from_a_shell_returns_to_it() {
         if !Path::new("/bin/sh").exists() {
@@ -1659,7 +1596,6 @@ mod test {
         assert!(app.switch_case.is_none());
     }
 
-    /// A menu opened from the browser has no shell to return to.
     #[test]
     fn test_menu_opened_from_the_browser_has_no_origin() {
         let mut app = App::default();
@@ -1670,8 +1606,6 @@ mod test {
         assert!(!app.leave_shell_menu());
     }
 
-    /// Leaving the shell view re-reads the directory, so files the shell
-    /// created appear at once, and the selected file stays selected.
     #[test]
     fn test_detach_refreshes_the_browser() {
         let dir = temp_dir("detach-refresh");
@@ -1712,8 +1646,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A shell spawned from the browser, and never left for it, returns to the
-    /// browser when it closes instead of attaching the tab's other shell.
     #[test]
     fn test_shell_opened_from_the_browser_returns_to_the_browser() {
         if !Path::new("/bin/sh").exists() {
@@ -1732,8 +1664,6 @@ mod test {
         assert_eq!(app.tab_list.current_tab().shells, vec![other]);
     }
 
-    /// A shell spawned from another shell (`C-s c`, the menu's `n`) returns to
-    /// that shell when it closes.
     #[test]
     fn test_shell_opened_from_a_shell_returns_to_it() {
         if !Path::new("/bin/sh").exists() {
@@ -1778,9 +1708,6 @@ mod test {
         assert!(!app.shell_sessions.get(later).unwrap().returned_to_browser);
     }
 
-    /// A shell opened from the browser and left in the background while the
-    /// user detaches from another shell still asks when it closes: the browser
-    /// visit happened during its life.
     #[test]
     fn test_a_detach_from_another_shell_counts_for_the_new_shell() {
         if !Path::new("/bin/sh").exists() {
@@ -1803,8 +1730,6 @@ mod test {
         assert!(app.shell_pending_browser);
     }
 
-    /// A shell the user already went to the browser from asks before the
-    /// browser is entered again; `y` takes it.
     #[test]
     fn test_closing_a_shell_which_had_returned_to_the_browser_asks() {
         if !Path::new("/bin/sh").exists() {
@@ -1832,8 +1757,6 @@ mod test {
         assert!(!app.shell_pending_browser);
     }
 
-    /// Any other key answers "no" and stays on the shell the view fell back
-    /// to; the key is not forwarded to that shell.
     #[test]
     fn test_the_browser_question_is_cancelled_by_any_other_key() {
         if !Path::new("/bin/sh").exists() {
@@ -1854,8 +1777,8 @@ mod test {
         assert!(!app.shell_pending_browser);
     }
 
-    /// A shell which is the tab's only one always goes back to the browser, as
-    /// it did before, even when the user had been there during its life.
+    /// A shell which is the tab's only one always goes back to the browser,
+    /// even when the user had been there during its life.
     #[test]
     fn test_the_only_shell_of_a_tab_returns_to_the_browser() {
         if !Path::new("/bin/sh").exists() {
@@ -1875,8 +1798,6 @@ mod test {
         assert!(app.tab_list.current_tab().shells.is_empty());
     }
 
-    /// The exit cleanup applies the same rule as killing the shell: a shell
-    /// spawned from the browser and exited there returns to the browser.
     #[test]
     fn test_an_exited_shell_from_the_browser_returns_to_the_browser() {
         if !Path::new("/bin/sh").exists() {

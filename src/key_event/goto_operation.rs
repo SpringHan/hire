@@ -1,4 +1,4 @@
-// Goto Operation.
+//! The bookmark picker: jump to a saved directory and edit the bookmarks.
 
 use std::path::PathBuf;
 
@@ -90,8 +90,7 @@ fn goto_switch(app: &mut App, key: char, data: SwitchCaseData) -> AppResult<bool
     Ok(true)
 }
 
-/// The bookmark menu: the hint line, the mode notice and one entry per
-/// bookmark.
+/// Build the bookmark menu, with a mode notice while adding or removing.
 fn generate_menu(app: &App, status: char) -> MenuList {
     let mut menu = MenuList::new()
         .header(key_hints(
@@ -146,7 +145,7 @@ fn remove_target_dir(app: &mut App, key: char) -> AppResult<()> {
     Ok(())
 }
 
-/// Read config for goto operation.
+/// Load the `goto_dir` bookmarks into `App::target_dir`.
 pub fn read_config(app: &mut App, document: &DocumentMut) -> AppResult<()> {
     let mut errors = AppError::new();
 
@@ -190,8 +189,8 @@ mod goto_test {
 
     #[test]
     fn test_read_config() {
-        // The config is built in memory, so the test never reads (nor depends
-        // on) the real user config, which may open a GUI program.
+        // Built in memory, so the test never reads the real user config, which
+        // may open a GUI program.
         let document: DocumentMut = r#"
             goto_dir = { h = "/home", G = "/home/user/Github" }
         "#
@@ -236,7 +235,6 @@ mod goto_test {
         assert_eq!("", a.trim());
     }
 
-    /// The bookmark menu lists every bookmark with the key which activates it.
     #[test]
     fn test_menu_lists_the_bookmarks() {
         let mut app = App::default();

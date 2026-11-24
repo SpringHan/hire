@@ -1,4 +1,4 @@
-// Simple operations.
+//! Show the full path, output the selection and jump to the temp file.
 
 use std::io::{Read, Write};
 use std::fs::OpenOptions;
@@ -54,7 +54,6 @@ pub fn output_path(
         app.current_path()
     };
 
-    // Open the path with the GUI command when it has been configured.
     if let ConfigValue::String(gui_cmd) = Config::get_value(
         &app.config,
         "gui_file_open_cmd"
@@ -109,9 +108,8 @@ pub fn jump_to_temp_file(app: &mut App) -> AppResult<()> {
     }
 
     // Paths copied from a shell often keep a trailing separator (`/home/`).
-    // `app.path` is shown as `<path>/<file>` in the title and by
-    // `print_full_path`, so store it without one; a lone "/" (or "///") is
-    // still the root.
+    // The title and `print_full_path` render `<path>/<file>`, so store the
+    // path without one; a lone "/" (or "///") is still the root.
     let target_path = normalize_target(&target_path);
 
     app.record_path_history();
@@ -119,8 +117,6 @@ pub fn jump_to_temp_file(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-/// Remove the trailing separators from a directory path read from the temp
-/// file, keeping `/` for the root.
 fn normalize_target(target: &str) -> &str {
     let target = target.trim().trim_end_matches('/');
 
@@ -182,7 +178,7 @@ mod test {
         jump_to_temp_file(&mut app).unwrap();
 
         assert_eq!(app.path.to_string_lossy(), dir.to_string_lossy());
-        // The target is consumed, as before.
+        // The target is consumed, so a second jump finds nothing.
         assert_eq!(fs::read_to_string(&temp).unwrap(), "");
     }
 }

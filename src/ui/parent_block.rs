@@ -1,4 +1,4 @@
-// Parent Block.
+//! The parent directory column.
 
 use std::path::PathBuf;
 

@@ -1,4 +1,4 @@
-// Image Preview
+//! Image preview: the terminal picker and its decode/resize threads.
 
 use std::{
     thread,
@@ -26,10 +26,9 @@ pub type PreviewUpdate = (PathBuf, Preview);
 /// What the preview thread produced for one file.
 #[derive(Debug)]
 pub enum Preview {
-    /// The file decoded as an image.
     Image(DynamicImage),
 
-    /// The file is not an image: what to show instead, its MIME type.
+    /// Not an image: its MIME label, shown instead.
     FileType(String),
 }
 
@@ -38,13 +37,12 @@ pub struct ImagePreview {
     pub useless: bool,
     picker: Option<Picker>,
     protocol: Option<ThreadProtocol>,
-    /// Paths to preview are handed to the preview thread through this channel.
     path_sender: Option<Sender<PathBuf>>,
     resize_sender: Option<Sender<ResizeRequest>>,
 }
 
 impl ImagePreview {
-    /// Check whether the current terminal supports image preview feature.
+    /// Whether the terminal supports image preview.
     pub fn with_image_feat(&self) -> bool {
         self.picker.is_some()
     }
@@ -117,7 +115,6 @@ impl<'a> App<'a> {
         let (image_tx, image_rx)   = mpsc::channel::<PreviewUpdate>();
         let (path_tx, path_rx)     = mpsc::channel::<PathBuf>();
 
-        // Image resize thread
         thread::spawn(move || {
             while let Ok(request) = resize_rx.recv() {
                 if prot_tx.send(request.resize_encode()).is_err() {
@@ -126,9 +123,8 @@ impl<'a> App<'a> {
             }
         });
 
-        // Preview thread: decode the requested path, or describe its type when
-        // it is not an image. `recv` blocks while nothing is asked for, so the
-        // thread costs nothing between previews.
+        // Decode thread: `recv` blocks while nothing is asked for, so it
+        // costs nothing between previews.
         thread::spawn(move || {
             while let Ok(mut path) = path_rx.recv() {
                 // Only the newest request matters: browsing a directory must

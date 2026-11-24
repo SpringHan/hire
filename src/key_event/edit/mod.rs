@@ -1,4 +1,4 @@
-// Edit mode
+//! Edit mode, which edits entry names in place in the file list.
 
 mod types;
 
@@ -24,8 +24,8 @@ use super::{cursor_movement::move_cursor_core, Goto, SwitchCaseData};
 
 pub use types::*;
 
-// NOTE: The Edit mode can only be used for current_block.
-// And it's not allow to enable it in root directory of Linux.
+// NOTE: edit mode only works on the current block, and it cannot be enabled
+// in the root directory of Linux.
 impl EditMode {
     pub fn cursor_move(
         &mut self,
@@ -47,8 +47,8 @@ impl EditMode {
                 continue
             }
 
-            // The cursor is a byte offset on a character boundary, so the
-            // movement has to jump over the whole character (e.g. a CJK one).
+            // The cursor is a byte offset which must stay on a character
+            // boundary, so the step jumps over the whole character (e.g. CJK).
             let Some(pos) = cursor_insertion_point(
                 &item.editing_name,
                 item.cursor
@@ -75,11 +75,10 @@ impl EditMode {
         Ok(())
     }
 
-    /// Move the cursor of the editing items to the end of the nearest word
+    /// Move the editing items' cursors to the end of the nearest word
     /// (`Alt-f`).
     ///
-    /// Like [`Self::cursor_move`], every item whose cursor is active is moved,
-    /// which handles the marked items as well.
+    /// Every item with an active cursor moves, so marked items move together.
     pub fn cursor_word_forward(&mut self) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -93,8 +92,7 @@ impl EditMode {
         }
     }
 
-    /// Move the cursor of the editing items to the start of the nearest word
-    /// (`Alt-b`).
+    /// Move the cursors to the start of the nearest word (`Alt-b`).
     pub fn cursor_word_backward(&mut self) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -108,8 +106,7 @@ impl EditMode {
         }
     }
 
-    /// Delete the whole word before the cursor of the editing items
-    /// (`Ctrl-Backspace`).
+    /// Delete the whole word before the cursor (`Ctrl-Backspace`).
     pub fn delete_word_before_cursor(&mut self) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -123,7 +120,7 @@ impl EditMode {
         }
     }
 
-    /// Delete the whole word after the cursor of the editing items (`Alt-d`).
+    /// Delete the whole word after the cursor (`Alt-d`).
     pub fn delete_word_after_cursor(&mut self) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -137,7 +134,7 @@ impl EditMode {
         }
     }
 
-    /// Delete the character after the cursor of the editing items (`Ctrl-d`).
+    /// Delete the character after the cursor (`Ctrl-d`).
     pub fn delete_char_after_cursor(&mut self) {
         for item in self.items.iter_mut() {
             if item.cursor == CursorPos::None {
@@ -156,13 +153,10 @@ impl EditMode {
         self.enter_insert_with(state, |_| pos);
     }
 
-    /// Enter insert modal with the cursor right before the extension of every
-    /// active item's name.
+    /// Enter insert modal with the cursor before each active item's extension.
     ///
-    /// This is the edit-mode counterpart of `AppendFsName`: the cursor lands
-    /// right before the last `.`, so a new name can be typed without touching
-    /// the extension, and the command line is never opened. `EditInsert` still
-    /// handles the beginning and the end of the name.
+    /// The edit-mode counterpart of `AppendFsName`: a name can be typed
+    /// without touching the extension, and the command line is never opened.
     pub fn enter_insert_before_extension(&mut self, state: &mut ListState) {
         self.enter_insert_with(state, |name| match extension_start(name) {
             Some(idx) => CursorPos::Index(idx),
@@ -537,7 +531,6 @@ mod test {
         assert_eq!(edit_mode.items[0].editing_name, "oldname.");
         assert!(edit_mode.items[0].cursor == CursorPos::End);
 
-        // The separators between the word and the cursor are removed as well.
         edit_mode.delete_word_before_cursor();
         assert_eq!(edit_mode.items[0].editing_name, "");
         assert!(edit_mode.items[0].cursor == CursorPos::End);
@@ -575,7 +568,6 @@ mod test {
         assert_eq!(edit_mode.items[0].editing_name, "one ");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
 
-        // The item without a cursor is untouched.
         assert_eq!(edit_mode.items[1].editing_name, "abc");
         assert!(edit_mode.items[1].cursor == CursorPos::None);
     }
@@ -588,12 +580,10 @@ mod test {
         assert_eq!(edit_mode.items[0].editing_name, "bc.txt");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
 
-        // Repeated deletions remove the following characters one by one.
         edit_mode.delete_char_after_cursor();
         assert_eq!(edit_mode.items[0].editing_name, "c.txt");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
 
-        // Nothing to delete at the end of the name.
         let mut edit_mode = edit_mode_with("abc.txt", CursorPos::End);
         edit_mode.delete_char_after_cursor();
         assert_eq!(edit_mode.items[0].editing_name, "abc.txt");
@@ -602,14 +592,12 @@ mod test {
 
     #[test]
     fn test_delete_word_after_cursor() {
-        // Delete the word right after the cursor.
         let mut edit_mode = edit_mode_with("hello.txt", CursorPos::Index(0));
 
         edit_mode.delete_word_after_cursor();
         assert_eq!(edit_mode.items[0].editing_name, ".txt");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
 
-        // Nothing to delete at the end of the name.
         let mut edit_mode = edit_mode_with("hello.txt", CursorPos::End);
 
         edit_mode.delete_word_after_cursor();
@@ -632,7 +620,6 @@ mod test {
         assert_eq!(edit_mode.items[0].editing_name, "中Xb");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(4));
 
-        // The cursor moves over the whole inserted character.
         edit_mode.insert_char('文');
         assert_eq!(edit_mode.items[0].editing_name, "中X文b");
         assert!(edit_mode.items[0].cursor == CursorPos::Index(7));
@@ -666,7 +653,6 @@ mod test {
         edit_mode.cursor_move(true, false).unwrap();
         assert!(edit_mode.items[0].cursor == CursorPos::End);
 
-        // The edge movement still jumps to the beginning and the end.
         edit_mode.cursor_move(false, true).unwrap();
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
 
@@ -711,8 +697,7 @@ mod test {
         assert!(edit_mode.items[0].cursor == CursorPos::Index(0));
     }
 
-    /// The edit-mode `append_filename`: insert mode with the cursor right
-    /// before the extension, without touching the command line.
+    /// The edit-mode `append_filename`, without opening the command line.
     #[test]
     fn test_enter_insert_before_extension() {
         let mut state = ListState::default();
@@ -740,8 +725,7 @@ mod test {
         assert!(edit_mode.items[0].cursor == CursorPos::Index(6));
     }
 
-    /// Marked items are inserted at once, each cursor before its own
-    /// extension, which is what `append_filename` does for the command line.
+    /// Marked items are inserted at once, each before its own extension.
     #[test]
     fn test_enter_insert_before_extension_of_marked_items() {
         let mut edit_mode = EditMode {
@@ -779,7 +763,6 @@ mod test {
         assert!(edit_mode.items[0].cursor == CursorPos::Index(3));
         assert!(edit_mode.items[2].cursor == CursorPos::End);
 
-        // The item which is neither marked nor selected is untouched.
         assert!(edit_mode.items[1].cursor == CursorPos::None);
     }
 }

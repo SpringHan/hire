@@ -1,4 +1,4 @@
-// UI
+//! Frame assembly: the browser columns, the title bar and the overlays.
 
 mod list;
 mod utils;
@@ -30,10 +30,9 @@ pub use child_block::update_file_linenr;
 pub use utils::key_hints;
 
 pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
-    // A menu is an overlay over the page it was opened from: it keeps that
-    // page visible (dimmed) instead of replacing it. `Alt-Ctrl-Tab` only
-    // expands a typed command line, so an expanded block without a switch case
-    // is the full-page editor, not a menu.
+    // A menu is an overlay: the page it was opened from stays visible, dimmed.
+    // `Alt-Ctrl-Tab` only expands a typed command line, so an expanded block
+    // without a switch case is the full-page editor, not a menu.
     let menu_open = app.command_expand && app.switch_case.is_some();
     let full_page = app.command_expand && !menu_open;
 
@@ -55,7 +54,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         })
         .split(frame.area());
 
-    // Title
     let (title_right, right_length) = get_title_right_info(app);
     let title_layout = Layout::default()
         .direction(Direction::Horizontal)
@@ -91,10 +89,8 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
             ]))
         .block(computer_info_block);
 
-    // App Error
     check_app_error(app);
 
-    // Item list statistic information
     let item_info_block = Block::default();
     let item_num_info = title_right
         .alignment(Alignment::Right)
@@ -151,18 +147,16 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         }
 
         // The expanded state belongs to a command-line block; if it outlived
-        // one, drop it and let the next frame draw the restored browser
-        // instead of reading a band which is not there.
+        // one, drop it so the next frame draws the browser, not a missing band.
         app.quit_command_mode();
 
         return Ok(())
     }
 
 
-    // File browser layout. The page behind a menu (or behind a typed command
-    // line) is the browser the user was in, and its layout follows the
-    // directory rather than the block which owns the input, so the root
-    // directory is recognized by the path.
+    // The page behind a menu or a typed command line is still the browser the
+    // user was in, and its layout follows the directory rather than the block
+    // which owns the input, so root is recognized by the path.
     let root = app.root();
     let constraints = if root {
         vec![
@@ -188,17 +182,14 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         .constraints(constraints)
         .split(chunks[1]);
 
-    // Title layer
     frame.render_widget(computer_info, title_layout[0]);
     frame.render_widget(item_num_info, title_layout[1]);
 
-    // Parent block
     render_parent(app, frame, browser_layout[0]);
     
-    // Child Block
+    // Root has two columns: the preview fills the second when there is one,
+    // otherwise the current directory does.
     if root {
-        // The root directory has two columns: the preview, when there is one,
-        // is the second one and there is no current column below it.
         if app.file_content.is_some() {
             render_file(frame, app, browser_layout[1])?;
 
@@ -212,7 +203,6 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
         render_child(app, frame, browser_layout[2]);
     }
 
-    // Current Block
     render_current(app, frame, browser_layout[1]);
 
     finish_browser(app, frame, chunks[1], chunks[2], menu_open);
@@ -220,8 +210,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Finish the frame after the browser has been drawn: the menu overlay, or the
-/// bottom command line with its completion popup.
+/// Draw the frame's overlay: the menu, or the command line and its popup.
 ///
 /// A menu leaves the bottom line empty, like the expanded page did before it.
 fn finish_browser(
@@ -254,9 +243,8 @@ fn check_app_error(app: &mut App) {
             return ()
         }
 
-        // A picker shows the error below its entries. Its text body is only a
-        // fallback for the states which look at the block, so the message is
-        // not appended there as well.
+        // A picker draws the error below its entries; its text body is only a
+        // fallback, so the message is not appended there as well.
         let picker_notice = matches!(
             app.selected_block,
             SBlock::CommandLine(_, CursorPos::None)
@@ -331,7 +319,6 @@ fn get_title_right_info(app: &App) -> (Paragraph<'static>, usize) {
         }
     };
 
-    // A tab with mounted shells shows their count next to its number.
     let shell_badge = if current_tab.shells.is_empty() {
         String::new()
     } else {
@@ -370,7 +357,7 @@ fn short_display_path(app: &App) -> String {
     }
 
     let mut splited_path: Vec<&str> = path.split("/").collect();
-    splited_path.remove(0);     // Remove the empty string.
+    splited_path.remove(0);     // The leading `/` produces an empty part.
 
     for i in 0..(splited_path.len() - 1) {
         splited_path[i] = splited_path[i].get(0..1).unwrap();
@@ -383,9 +370,9 @@ fn short_display_path(app: &App) -> String {
 
 /// The path shown in the title bar, with exactly one trailing separator.
 ///
-/// `app.path` may still carry a trailing separator (a path read from the temp
-/// file, an old tab state, a shortened path, ...). The file name is appended
-/// right after this string, so a blind extra `/` would render `/home//name`.
+/// `app.path` may still carry a trailing separator (read from the temp file,
+/// an old tab state, ...), and the file name is appended right after this
+/// string, so a blind extra `/` would render `/home//name`.
 fn title_bar_path(app: &App) -> String {
     let path = short_display_path(app);
 

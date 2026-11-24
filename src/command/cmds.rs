@@ -1,4 +1,4 @@
-// Command functions
+//! File operations run by the command line (rename, create, symlink).
 
 use std::fs;
 use std::path::{PathBuf, Path};
@@ -40,11 +40,9 @@ pub fn rename_file(
         return Ok(())
     }
 
-    // Refresh modified time
     let metadata = fs::metadata(new_file)?;
     file.set_modified(metadata.modified().unwrap());
 
-    // Refresh the display of whole directory
     let (directory, index) = app.get_directory_mut();
     let mut new_files = directory.to_owned();
     sort(&mut new_files);
@@ -111,7 +109,6 @@ where I: Iterator<Item = &'a str>
         }
     }
 
-    // Update render
     if !to_show_hidden_files {
         let mut prev_file_name = String::from("");
         let current_file = app.get_file_saver();

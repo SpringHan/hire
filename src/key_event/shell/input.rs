@@ -1,16 +1,13 @@
-// Input handling for the attached shell view.
-//
-// The shell owns every key except the prefix chord. Keys are translated back
-// into the byte sequences a terminal emulator would send to the child.
+//! Key specs and key/paste encoding for the attached shell view.
+//!
+//! The shell owns every key except the prefix chord; keys are translated back
+//! into the byte sequences a terminal emulator sends to the child.
 
 use anyhow::{anyhow, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-/// A key together with its modifiers.
-///
-/// Parsed from the same specs the `shell_prefix` option uses: `C-s`, `M-u`,
-/// `C-M-s`, `F12`, `PageUp`, `b`, … The keymap's shell sections use this so
-/// that chords such as `Alt+u` can be bound from `keymap.toml`.
+/// A key plus its modifiers, parsed from the spec form `keymap.toml` and
+/// `shell_prefix` accept (`C-s`, `M-u`, `C-M-s`, `F12`, `PageUp`, `b`, …).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct KeySpec {
     pub code: KeyCode,
@@ -18,7 +15,6 @@ pub struct KeySpec {
 }
 
 impl KeySpec {
-    /// Parse a spec such as `C-s`, `M-x`, `C-M-s`, `F12` or `b`.
     pub fn parse(spec: &str) -> anyhow::Result<Self> {
         let spec = spec.trim();
 
@@ -154,7 +150,6 @@ impl Default for ShellPrefix {
 }
 
 impl ShellPrefix {
-    /// Parse a spec such as `C-s`, `M-x`, `C-M-s`, `F12` or `b`.
     pub fn parse(spec: &str) -> anyhow::Result<Self> {
         KeySpec::parse(spec)
             .map(Self)
@@ -169,9 +164,8 @@ impl ShellPrefix {
 /// Translate a crossterm key event into the bytes a terminal sends.
 ///
 /// `application_cursor` is the child's DECCKM state: curses programs switch it
-/// on and then expect `ESC O A` instead of `ESC [ A` for the arrow keys.
-/// `None` means the key cannot be represented; it is ignored instead of
-/// silently sending something wrong.
+/// on and then expect `ESC O A` for arrows. `None` means the key cannot be
+/// represented; it is ignored rather than sent wrong.
 pub fn encode_key(key: &KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
@@ -252,9 +246,9 @@ pub fn encode_key(key: &KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
 
 /// Encode pasted text for the child.
 ///
-/// With bracketed paste the text is wrapped in `ESC[200~` / `ESC[201~` and sent
-/// verbatim. Without it the paste is indistinguishable from typing, so line
-/// breaks become `cr`; an embedded `\n` is not a terminal Enter.
+/// Bracketed paste is wrapped in `ESC[200~` / `ESC[201~` and sent verbatim.
+/// Without it a `\n` in the text is not an Enter to the terminal, so line
+/// breaks become `\r`.
 pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     let mut bytes = Vec::new();
 
@@ -280,7 +274,6 @@ pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     bytes
 }
 
-/// The byte a `Ctrl-<char>` combination produces.
 fn ctrl_byte(c: char) -> Option<u8> {
     match c {
         ' ' | '@' => Some(0x00),

@@ -1,4 +1,4 @@
-// Syntax highlighting of the file content preview.
+//! Syntax highlighting of the file content preview.
 
 use std::env;
 use std::path::Path;
@@ -15,10 +15,8 @@ use syntect::util::LinesWithEndings;
 
 /// Syntax definitions syntect's bundled set does not ship.
 ///
-/// The bundled set is Sublime's default package, which has no TOML and no
-/// INI-style syntax, so `Cargo.toml`, `Cargo.lock` and `.conf` files would be
-/// shown as plain text. These two definitions cover them; they are compiled
-/// into the binary.
+/// The bundled set has no TOML and no INI-style syntax, so these are compiled
+/// into the binary to cover `Cargo.toml`, `Cargo.lock` and `.conf` files.
 const EXTRA_SYNTAXES: [&str; 2] = [
     include_str!("syntaxes/toml.sublime-syntax"),
     include_str!("syntaxes/ini.sublime-syntax"),
@@ -30,10 +28,8 @@ lazy_static! {
 
     /// The definitions of `EXTRA_SYNTAXES`, in a set of their own.
     ///
-    /// They are not merged into `SYNTAX_SET`: that needs `into_builder()` and
-    /// `build()`, which re-link all 75 bundled syntaxes and cost hundreds of
-    /// milliseconds. A path is looked up in `SYNTAX_SET` first and only a file
-    /// that set does not know is looked up here, so two sets cost nothing.
+    /// `SYNTAX_SET` is tried first; keeping these separate avoids re-linking
+    /// all 75 bundled syntaxes, which costs hundreds of milliseconds.
     static ref EXTRA_SET: SyntaxSet = {
         let mut set = SyntaxSetBuilder::new();
 
@@ -59,13 +55,11 @@ lazy_static! {
 
 /// Highlight `content`, the preview of the file at `path`.
 ///
-/// `None` when there is nothing to highlight: no set knows a language for the
-/// file (a `.txt` file included), or the parser fails. The caller keeps the
-/// unhighlighted text it is showing.
+/// `None` when no set knows a language for the file (a `.txt` file included) or
+/// the parser fails; the caller keeps the unhighlighted text.
 ///
-/// This runs on the highlighting thread (`app/highlight.rs`), never on the UI
-/// thread: syntect parses the window of lines it is given (plus the context the
-/// worker adds), so the cost follows the pane, not the file.
+/// Runs on the highlighting thread (`app/highlight.rs`): syntect parses only
+/// the window it gets, so the cost follows the pane, not the file.
 pub fn highlight_text(content: &str, path: &Path) -> Option<Text<'static>> {
     let (set, syntax) = syntax_for(path)?;
 
@@ -74,10 +68,9 @@ pub fn highlight_text(content: &str, path: &Path) -> Option<Text<'static>> {
 
 /// The set and the syntax to highlight `path` with.
 ///
-/// `None` when neither set knows a language for the file, and for syntect's
-/// plain text syntax (a `.txt` file is shown exactly as before). The detection
-/// is syntect's own: extension, then file name, then the first line of the file
-/// (so it can open the file — another reason to run on the worker thread).
+/// `None` for syntect's plain text syntax (a `.txt` file is shown exactly as
+/// before). The detection is syntect's own — extension, then file name, then
+/// the first line — and it opens the file: another reason to run on the worker.
 fn syntax_for(
     path: &Path
 ) -> Option<(&'static SyntaxSet, &'static SyntaxReference)> {
@@ -99,10 +92,9 @@ fn syntax_for(
     Some((set, syntax))
 }
 
-/// Highlight `content` with `syntax`, which belongs to `set`.
-///
-/// `None` when syntect fails on a line (a syntax definition with a broken
-/// regular expression); the caller then shows the unhighlighted text instead.
+/// Highlight `content` with `syntax`, which belongs to `set`, or `None` when
+/// syntect fails on a line (a broken regular expression in a definition); the
+/// caller then keeps the unhighlighted text.
 fn highlighted_text(
     content: &str,
     set: &SyntaxSet,
@@ -112,8 +104,8 @@ fn highlighted_text(
     let mut highlighter = HighlightLines::new(syntax, &THEME);
     let mut text = Text::default();
 
-    // `LinesWithEndings` keeps the newline: the parser needs it to know where
-    // a line ends (a block comment does not end with the line).
+    // `LinesWithEndings` keeps the newline: the parser needs it to know where a
+    // line ends (a block comment does not end with the line).
     for line in LinesWithEndings::from(content) {
         let ranges = highlighter.highlight_line(line, set).ok()?;
 
@@ -162,9 +154,7 @@ fn convert(style: SynStyle) -> Style {
 /// The name of the theme to highlight with.
 ///
 /// hire does not know the terminal's background, so `$COLORFGBG` (`"fg;bg"`,
-/// set by many terminals) picks between the light and the dark palette; a
-/// terminal which does not export it gets the dark one. Both themes are
-/// bundled with syntect.
+/// set by many terminals) picks the palette; without it the dark one is used.
 fn theme_name() -> &'static str {
     if light_background() {
         "base16-ocean.light"
@@ -180,9 +170,8 @@ fn light_background() -> bool {
 
 /// Whether a `$COLORFGBG` value (`"fg;bg"`) names a light background.
 ///
-/// The background is the last field (`"15;0"` is white text on a black
-/// background); palette entries 0-6 are the dark colours and 7 and above the
-/// light ones.
+/// The background is the last field; palette entries 0-6 are the dark colours
+/// and 7 and above the light ones (`"15;0"` is white on black).
 fn is_light_background(value: &str) -> bool {
     let background = value.rsplit(';').next().unwrap_or("");
 
@@ -256,8 +245,6 @@ mod test {
             .join("\n")
     }
 
-    /// A source file is highlighted: the keywords and the code get different
-    /// foreground colours from the theme.
     #[test]
     fn test_source_file_is_highlighted() {
         let dir = temp_dir("source");
@@ -293,8 +280,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A tab is expanded like in the plain preview, and highlighting does not
-    /// leave a tab in a span.
     #[test]
     fn test_tabs_are_expanded() {
         let dir = temp_dir("tab");
@@ -308,8 +293,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A `.txt` file is syntect's plain text syntax: the preview shows it as
-    /// before, i.e. every span keeps the terminal's default style.
     #[test]
     fn test_plain_text_is_not_highlighted() {
         let dir = temp_dir("plain");
@@ -346,8 +329,7 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A file which is not valid UTF-8 is an error, which is how the preview
-    /// decides that the file is not text at all (image or MIME type instead).
+    /// Invalid UTF-8 makes the preview show an image or the MIME type.
     #[test]
     fn test_binary_file_is_an_error() {
         let dir = temp_dir("binary");
@@ -360,8 +342,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The background of the terminal is guessed from `$COLORFGBG`; only the
-    /// last field (the background palette index) matters.
     #[test]
     fn test_light_background_guess() {
         assert!(!is_light_background("15;0"));
@@ -383,9 +363,7 @@ mod test {
         assert!(themes.contains_key("base16-ocean.light"));
     }
 
-    /// `EXTRA_SYNTAXES` is what makes configuration files highlighted: they are
-    /// the formats syntect's bundled set does not know, so these extensions had
-    /// no syntax and the files were shown as plain text.
+    /// The extra definitions claim formats syntect's bundled set does not know.
     #[test]
     fn test_config_files_are_highlighted() {
         let dir = temp_dir("config");
@@ -430,8 +408,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The extensions and file names the extra syntaxes claim. A file which
-    /// neither syntect nor the extra definitions know stays plain.
     #[test]
     fn test_config_extensions_have_a_syntax() {
         for name in [

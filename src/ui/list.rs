@@ -1,4 +1,4 @@
-// List Widget
+//! The list widget shared by the browser columns.
 
 use ratatui::{
     widgets::{Block, ListState, StatefulWidget, Widget},
@@ -21,7 +21,6 @@ pub struct List<'a> {
     block: Block<'a>,
     items: Vec<Item<'a>>,
 
-    // Navigation index
     navi_show: bool,
     navi_index: Option<usize>,
 
@@ -72,7 +71,6 @@ impl Widget for Item<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         buf.set_style(area, self.style);
 
-        // Add sidebar if there is.
         let right = if let Some(mut line) = self.right {
             if let Some(style) = self.sidebar_style {
                 line.push_span(Span::raw(" ").style(style));
@@ -174,7 +172,7 @@ impl StatefulWidget for List<'_> {
             return ()
         }
 
-        // Adjust offset firstly
+        // Settle the offset before taking the slice of visible items.
         Self::adjust_offset(state);
 
         let mut current_number = 0;
@@ -196,7 +194,6 @@ impl StatefulWidget for List<'_> {
 
             let mut right = Line::default();
 
-            // Set Index for each item
             if self.navi_show {
                 if let Some(index) = self.navi_index {
                     let splitted = prefix_split(index, current_number);
@@ -228,13 +225,12 @@ impl StatefulWidget for List<'_> {
                 }
             }
 
-            // Set whitespace to make 
+            // Keep the name column aligned when the row has no sidebar mark.
             if self.navi_show && item.sidebar_style.is_none() && self.sidebar_used {
                 right.push_span(Span::raw(" "));
             }
 
 
-            // Render item
             if !right.spans.is_empty() {
                 item.right = Some(right);
             }
@@ -271,7 +267,6 @@ fn prefix_split(
         return (Some(num_str), None)
     }
 
-    // Calculate the pow of prefix
     let mut pow = 1;
     let mut temp = prefix;
     while temp >= 10 {

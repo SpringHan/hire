@@ -1,4 +1,4 @@
-// Cursor Movement.
+//! Cursor movement between the panes of the browser and between its items.
 
 mod types;
 
@@ -39,7 +39,8 @@ pub fn directory_movement(
                 return Ok(())
             }
 
-            // TODO(low priority): Maybe there could be a better way.
+            // TODO(low priority): rotating the three lists by swapping them
+            // is hard to follow; a rotation helper would say it plainly.
             swap(&mut app.child_files, &mut app.current_files);
             swap(&mut app.current_files, &mut app.parent_files);
 
@@ -88,7 +89,6 @@ pub fn directory_movement(
 
                 let selected_file = selected_file.unwrap();
 
-                // Open selected file
                 if !selected_file.is_dir {
                     super::shell::open_file_in_shell(
                         app,
@@ -153,7 +153,6 @@ pub fn move_cursor(
         return Ok(())
     }
 
-    // Check range
     if let Goto::Index(ref mut idx) = goto {
         let file_length = if in_root {
             app.parent_files.len()
@@ -166,7 +165,6 @@ pub fn move_cursor(
         }
     }
 
-    // Move cursor
     let expand_range = move_cursor_core(
         goto,
         selected_item,
@@ -193,7 +191,6 @@ pub fn move_cursor(
         }
     }
 
-    // Update child block
     if in_root {
         let current_file = app.get_file_saver().unwrap();
 
@@ -215,8 +212,8 @@ pub fn move_cursor(
     Ok(())
 }
 
-/// Core logic for moving cursor.
-/// This function will return a range to mark files if it's needed.
+/// Move the cursor and return the range of items to mark when `mark_expand`
+/// is on.
 pub fn move_cursor_core(
     direction: Goto,
     selected_item: &mut ListState,
@@ -318,7 +315,7 @@ pub fn move_cursor_core(
     expand_range
 }
 
-/// Jump to specific item with navigation index entered by user.
+/// Jump to the item at the index the user typed.
 pub fn jump_to_index(app: &mut App) -> AppResult<bool> {
     let current_state = if app.root() {
         &app.selected_item.parent

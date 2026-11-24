@@ -1,4 +1,4 @@
-// Keymap
+//! Reading `keymap.toml` into the keymaps.
 
 use std::collections::HashMap;
 
@@ -15,7 +15,6 @@ use crate::{
 
 use super::get_document;
 
-/// One shell scroll binding: a key spec and what it does.
 pub type ScrollBinding = (KeySpec, ScrollCommand);
 
 pub struct Keymap {
@@ -66,18 +65,16 @@ impl Keymap {
         )
     }
 
-    /// The scroll command `key` runs while the shell view is live.
     pub fn shell_scroll_get(&self, key: &KeyEvent) -> Option<ScrollCommand> {
         get_binding(&self.shell_scroll, key)
     }
 
-    /// The scroll command `key` runs inside the scroll mode.
     pub fn shell_scroll_mode_get(&self, key: &KeyEvent) -> Option<ScrollCommand> {
         get_binding(&self.shell_scroll_mode, key)
     }
 
     /// The first key bound to `command` in the scroll mode, for the status
-    /// line hint. `None` when the user removed every binding of it.
+    /// line hint; `None` when the user removed every binding of it.
     pub fn shell_scroll_label(&self, command: ScrollCommand) -> Option<String> {
         self.shell_scroll_mode
             .iter()
@@ -392,7 +389,6 @@ shell_scroll_mode = [
             app.keymap.shell_scroll_get(&key(KeyCode::Char('u'), KeyModifiers::ALT)),
             Some(ScrollCommand::Top)
         );
-        // Mode defaults stay, the file adds one.
         assert_eq!(
             app.keymap.shell_scroll_mode_get(&key(KeyCode::Char('k'), KeyModifiers::empty())),
             Some(ScrollCommand::Up)

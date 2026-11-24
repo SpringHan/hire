@@ -1,4 +1,4 @@
-// File operations.
+//! Rename, delete and mark the selected or marked files.
 
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -14,15 +14,13 @@ use crate::ui::key_hints;
 use crate::utils::{extension_start, CmdContent, CursorPos};
 use crate::error::{AppResult, AppError, ErrorType};
 
-// File name modify
 pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
     let file_saver = app.get_file_saver();
     if let Some(file_saver) = file_saver {
         let current_file = &file_saver.name;
 
-        // The cursor is placed before the extension, so a new name can be typed
-        // without touching it. The `:rename ` prefix is eight bytes long, which
-        // has to be added to the index of the extension inside the name.
+        // A new name can be typed without touching the extension: the cursor
+        // goes before it, shifted by the eight-byte `:rename ` prefix.
         let cursor_pos = if file_saver.is_dir || to_end {
             CursorPos::End
         } else {
@@ -43,7 +41,6 @@ pub fn append_file_name(app: &mut App, to_end: bool) -> AppResult<()> {
     Ok(())
 }
 
-// Delete operation
 pub fn delete_operation(app: &mut App) {
     SwitchCase::new(
         app,
@@ -195,8 +192,7 @@ fn generate_msg(app: &App, confirm: bool) -> CmdContent {
 }
 
 
-/// Execute mark operation.
-/// single is a boolean which indicates whether to mark all files in current dir.
+/// Toggle the mark; with `single` false the whole directory is toggled.
 pub fn mark_operation(app: &mut App,
                       single: bool,
                       in_root: bool
@@ -218,7 +214,7 @@ pub fn mark_operation(app: &mut App,
             return Ok(())
         }
     } else if !app.current_files.is_empty() {
-        // NOTE(for refactoring): Maybe append all files to marked files could be implied in app method.
+        // NOTE(refactor): appending every file could live in an `App` method.
         if app.marked_file_contains_path() {
             app.clear_path_marked_files();
         } else {
@@ -255,13 +251,6 @@ where I: Iterator<Item = (String, bool)>
         match remove_result {
             Err(err) => {
                 errors.add_error(err);
-
-                // When the file does not exist, maybe the path is deleted.
-                // If it's true, do not return error for stably running.
-                // if single_file {
-                //     app.option_key = OptionFor::None;
-                //     return Ok(())
-                // }
             },
             Ok(_) => (),
         }
@@ -282,13 +271,14 @@ where I: Iterator<Item = (String, bool)>
     if dir.is_empty() {
         app.selected_item.current_select(None);
         app.selected_item.child_select(None);
-        // It's impossible that root directory could be empty.
+        // The root directory can never be empty.
         app.child_files.clear();
 
         if app.file_content.is_some() {
             app.reset_preview();
         }
-    } else if dir.len() == idx.selected().unwrap() { // There have been an element deleted.
+    } else if dir.len() == idx.selected().unwrap() {
+        // The deleted entry was the last one, so the index is past the end.
         idx.select(Some(idx.selected().unwrap() - 1));
         if in_root {
             let current_select = app.get_file_saver().unwrap();
@@ -343,8 +333,7 @@ mod test {
         }
     }
 
-    /// The cursor is placed right before the extension, after the `:rename `
-    /// prefix, so a new name can be typed without touching the extension.
+    /// The cursor lands before the extension, after the `:rename ` prefix.
     #[test]
     fn test_append_file_name_before_extension() {
         let mut app = app_with_file("foo.txt", false);

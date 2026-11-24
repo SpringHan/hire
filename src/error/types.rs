@@ -1,4 +1,4 @@
-// App Result
+//! The app-wide error types and their conversion into `AppError`.
 
 use std::{env, io};
 use std::convert::From;
@@ -12,7 +12,6 @@ pub struct AppError {
     errors: Vec<ErrorType>
 }
 
-/// The three cases matching not found error.
 #[derive(Debug, Error)]
 pub enum NotFoundType {
     #[error("[Error]: Not found: {0}")]
@@ -22,7 +21,7 @@ pub enum NotFoundType {
     None
 }
 
-/// This enum is used for the errors that will not destroy program.
+/// Errors which are shown in the command line instead of stopping hire.
 #[derive(Debug, Error)]
 pub enum ErrorType {
     #[error("[AppError]: Permission Denied: {0:?}")]
@@ -47,7 +46,6 @@ pub enum ErrorType {
     Others(#[from] anyhow::Error)
 }
 
-// AppError Implements
 impl AppError {
     pub fn new() -> Self {
         AppError { errors: Vec::new() }
@@ -118,7 +116,6 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
-// ErrorType Implements
 impl ErrorType {
     pub fn pack(self) -> AppError {
         AppError { errors: vec![self] }

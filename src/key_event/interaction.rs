@@ -1,4 +1,4 @@
-// Interaction with other Terminal tools.
+//! Hand the terminal over to external tools: fzf, ripgrep and vim.
 
 use std::path::PathBuf;
 
@@ -102,7 +102,6 @@ pub fn vim_diff(
         return Err(ErrorType::NoSelected.pack())
     }
 
-    // Get marked file name.
     let mut marked_file = String::new();
 
     'outer: for (path, files) in app.marked_files.iter() {
@@ -116,7 +115,6 @@ pub fn vim_diff(
         }
     }
 
-    // Get selected file name.
     let file_saver = app.get_file_saver();
     if let None = file_saver {
         return Err(ErrorType::NoSelected.pack())
@@ -137,8 +135,7 @@ pub fn vim_diff(
             vec![
                 CommandStr::Str("vim"),
                 CommandStr::Str("-d"),
-                // Both paths are single arguments even when they contain a
-                // space.
+                // Both paths must stay one argument, even with a space.
                 CommandStr::Quoted(&selected_file),
                 CommandStr::Quoted(&marked_file)
             ]

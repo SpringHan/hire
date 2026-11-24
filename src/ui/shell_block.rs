@@ -1,6 +1,4 @@
-// Shell view.
-//
-// Renders the `vt100` screen of the attached shell and its status line.
+//! The attached shell view: its `vt100` screen and its status line.
 
 use std::path::PathBuf;
 
@@ -25,8 +23,7 @@ const CWD_MAX_LEN: usize = 40;
 ///
 /// The PTY and the parser are resized to the area first, so the shell sees the
 /// same dimensions it is drawn with. `show_cursor` is `false` when the screen
-/// is only the background of a menu: the child's cursor must not be drawn over
-/// the menu box.
+/// only backs a menu: the child's cursor must not land on the menu box.
 pub fn render_shell(
     app: &mut App,
     frame: &mut Frame,
@@ -93,11 +90,10 @@ pub fn render_shell(
 
 /// The left and right line of the shell status bar.
 ///
-/// The left line names the shell; the right one only appears when it has
-/// something to say — a pending prompt, typed digits or the prefix hint. The
-/// idle key list is deliberately absent: the keys are shown once the user has
-/// pressed `shell_prefix`, so an attached shell looks like a plain terminal
-/// until then.
+/// The right one only appears when it has something to say — a pending prompt,
+/// typed digits or the prefix hint. The idle key list is deliberately absent:
+/// the keys appear once the user presses `shell_prefix`, so an attached shell
+/// looks like a plain terminal until then.
 pub fn shell_status_lines(app: &App) -> Vec<Line<'static>> {
     let Some(id) = app.selected_block.shell_id() else {
         return Vec::new()
@@ -349,7 +345,6 @@ mod test {
         let mut app = App::default();
         attach_test_shell(&mut app);
 
-        // Idle: just the left line (title, cwd, position).
         assert_eq!(shell_status_lines(&app).len(), 1);
 
         app.shell_prefix_active = true;

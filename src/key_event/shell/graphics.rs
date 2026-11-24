@@ -1,32 +1,20 @@
-// Graphics support for shell sessions.
-//
-// The child of a shell session talks to a real PTY, so a TUI inside it probes
-// the terminal for image support and then paints pictures with the kitty
-// graphics protocol. `vt100` models a text grid only, so those escape sequences
-// would be dropped and the pictures never reach the real terminal.
-//
-// This module splits the kitty sequences out of the byte stream before the
-// parser sees them, answers the child's capability queries, and hands the image
-// data to the main loop, which forwards it to the real terminal. The child (and
-// hire's own renderer) already paints the unicode placeholder cells that make
-// the terminal draw the image, so only the image data has to be forwarded.
-//
-// Unlike hire's own preview, this path does not decode or re-encode anything:
-// the child sized the image for the terminal's real cell size, and the terminal
-// draws it where the placeholders are. Nothing else about the shell (text,
-// colours, alt screen) is affected.
+//! Splits the kitty graphics sequences out of a shell session's output.
+//!
+//! `vt100` models a text grid only, so image sequences would be dropped and a
+//! TUI inside the shell would paint nothing. The filter answers the child's
+//! queries and splits the image data out; that data is forwarded undecoded to
+//! the real terminal, where the child's placeholder cells draw it.
 
 use std::collections::HashSet;
 
 use super::emulation::Hvp;
 
-/// The kitty graphics delete command which frees an image id and its
-/// placements. Used to translate the child's "delete everything" without
-/// touching the images of hire's own preview.
+/// The kitty delete command which frees an image id. Used to translate the
+/// child's "delete everything" without touching hire's own preview images.
 const DELETE_IMAGE: &str = "\x1b_Ga=d,d=I,q=2,i=";
 
-/// Never grow the forwarding buffer beyond this; a broken `m=1` chunk stream
-/// would otherwise be remembered forever.
+/// Cap on the forwarding buffer; a broken `m=1` chunk stream would otherwise
+/// grow it forever.
 const MAX_FORWARD_BYTES: usize = 32 * 1024 * 1024;
 
 /// Bytes of a text run kept back so a query split between two reads is found.
@@ -71,9 +59,7 @@ pub enum GraphicsEvent {
 
 /// The child's text screen, as much of it as the filter needs.
 ///
-/// Some queries are answered from the terminal state rather than from the
-/// query alone: `CSI 6 n` reports the cursor position, so the filter has to
-/// parse the bytes up to the query before it can answer.
+/// `CSI 6 n` must be answered from the state at the query, not from the query.
 pub trait TextScreen {
     /// Feed one run of ordinary terminal output to the screen model.
     fn process(&mut self, bytes: &[u8]);
@@ -92,7 +78,6 @@ impl TextScreen for vt100::Parser {
     }
 }
 
-/// A terminal query the filter answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Query {
     /// `CSI 6 n`: report the cursor position.
@@ -118,8 +103,7 @@ struct Forwarding {
     bytes: Vec<u8>,
 }
 
-/// Splits kitty graphics sequences out of a shell's output and answers the
-/// terminal capability queries the child sends.
+/// Splits kitty sequences out of a shell's output and answers its queries.
 pub struct GraphicsFilter {
     support: GraphicsSupport,
     /// A partial APC sequence, from `ESC _` onwards.
@@ -146,9 +130,8 @@ impl GraphicsFilter {
         }
     }
 
-    /// Split `bytes` into text for the vt100 parser and graphics events.
-    ///
-    /// `rows`/`cols` are the child's terminal size, used by the size replies.
+    /// Split `bytes` into text for the vt100 parser and graphics events;
+    /// `rows`/`cols` are the child's size, used by the size replies.
     pub fn feed(
         &mut self,
         bytes: &[u8],
@@ -261,7 +244,6 @@ impl GraphicsFilter {
             .translate(bytes, &mut |translated| screen.process(translated));
     }
 
-    /// Match one terminal query.
     fn query(&self, buf: &[u8]) -> Option<(usize, Query)> {
         if buf.starts_with(b"\x1b[6n") {
             // Cursor position report. Programs which cannot ask the terminal
@@ -285,13 +267,11 @@ impl GraphicsFilter {
         }
     }
 
-    /// Build the answer to a query.
+    /// Build the answer to a query; `cursor` is the position at the query.
     ///
-    /// `cursor` is the position after the bytes up to and including the query
-    /// were parsed. Only the cursor report is answered without kitty graphics:
-    /// it is plain terminal behaviour, and a program which asked for it would
-    /// wait forever otherwise. The other answers describe hire's image support,
-    /// so a terminal without kitty must not give them.
+    /// Only the cursor report is answered without kitty graphics: it is plain
+    /// terminal behaviour and the program would wait forever otherwise. The
+    /// other answers describe hire's image support.
     fn reply(
         &self,
         query: Query,
@@ -310,7 +290,6 @@ impl GraphicsFilter {
             Query::CellSize => {
                 format!("\x1b[6;{};{}t", self.support.cell.1, self.support.cell.0)
             },
-            // Text area size in pixels.
             Query::TextArea => format!(
                 "\x1b[4;{};{}t",
                 rows.saturating_mul(self.support.cell.1),
@@ -318,7 +297,6 @@ impl GraphicsFilter {
             ),
             // Primary device attributes. No sixel, so the child picks kitty.
             Query::PrimaryDa => String::from("\x1b[?62;22c"),
-            // Device status report: "terminal ready".
             Query::Status => String::from("\x1b[0n"),
         };
 
@@ -354,7 +332,6 @@ impl GraphicsFilter {
         // dropped: hire cannot map the child's cursor to the real terminal.
     }
 
-    /// Answer a kitty graphics query for the child.
     fn answer(&self, params: &[u8], emit: &mut dyn FnMut(GraphicsEvent)) {
         if !self.support.enabled() {
             return
@@ -491,10 +468,9 @@ fn parse_u32(value: &[u8]) -> Option<u32> {
     std::str::from_utf8(value).ok()?.parse().ok()
 }
 
-/// Rebuild a kitty command with `q=2`, so the real terminal never answers it.
-///
-/// The terminal's answer would arrive on hire's own stdin, where crossterm would
-/// read it as key presses for the attached shell.
+/// Rebuild a kitty command with `q=2`, so the real terminal never answers it:
+/// the answer would land on hire's own stdin, where crossterm reads it as key
+/// presses for the attached shell.
 fn command(params: &[u8], payload: Option<&[u8]>) -> Vec<u8> {
     let mut out = Vec::with_capacity(params.len() + 16);
     out.extend_from_slice(b"\x1b_G");
@@ -634,8 +610,6 @@ mod test {
             .collect()
     }
 
-    /// Kitty image data is taken out of the text stream; everything else is
-    /// still parsed as text.
     #[test]
     fn test_image_data_is_not_text() {
         let mut filter = GraphicsFilter::new(support());
@@ -653,8 +627,7 @@ mod test {
         );
     }
 
-    /// The image data is split over several APCs (`m=1` ... `m=0`) and is
-    /// forwarded as one sequence when the last chunk arrives.
+    /// The chunks (`m=1` … `m=0`) are forwarded as one sequence.
     #[test]
     fn test_chunked_transmission() {
         let mut filter = GraphicsFilter::new(support());
@@ -714,13 +687,12 @@ mod test {
         assert!(replies.contains("\x1b[4;480;800t"));
     }
 
-    /// A program which cannot read the terminal size otherwise saves the
-    /// cursor, moves it to the bottom right and asks where it is. The answer is
-    /// the child screen's cursor, one-based like every terminal reports it.
+    /// The answer is the child screen's cursor, one-based like every terminal
+    /// reports it.
     #[test]
     fn test_cursor_position_report() {
-        // No kitty support: the cursor report is plain terminal behaviour and
-        // must be answered by every terminal.
+        // Still answered without kitty: the cursor report is plain terminal
+        // behaviour.
         let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
         let mut screen = Recorder::new(24, 80);
 
@@ -750,7 +722,6 @@ mod test {
         assert_eq!(screen.cursor_position(), (9, 19));
     }
 
-    /// A cursor query split between two reads is answered exactly once.
     #[test]
     fn test_split_cursor_query_is_answered_once() {
         let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());
@@ -784,8 +755,6 @@ mod test {
         assert_eq!(replies(&events), b"\x1b[1;1R");
     }
 
-    /// Only direct transmission is accepted, so the child sends the data
-    /// inline instead of shared memory or file paths.
     #[test]
     fn test_only_direct_transmission_is_accepted() {
         let mut filter = GraphicsFilter::new(support());
@@ -855,8 +824,6 @@ mod test {
         assert_eq!(forwarded(&events), b"");
     }
 
-    /// Without a kitty capable terminal nothing is answered or forwarded, and
-    /// the text still reaches the parser.
     #[test]
     fn test_disabled_support_keeps_the_text() {
         let mut filter = GraphicsFilter::new(GraphicsSupport::disabled());

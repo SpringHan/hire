@@ -1,4 +1,4 @@
-// FileSaver
+//! The metadata behind a directory entry and its `ls -l`-style state line.
 
 use std::io;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ lazy_static! {
     static ref USER_NAMES: HashMap<u32, String> = read_user_names();
 }
 
-/// The structure used to save file information.
+/// The cached metadata of one directory entry.
 #[derive(Clone)]
 pub struct FileSaver {
     pub name: String,
@@ -56,7 +56,7 @@ impl Default for FileSaver {
 }
 
 impl FileSaver {
-    /// FILE_PATH is the full path of file.
+    /// Build an entry; `meta` skips a second `stat` when the caller has it.
     pub fn new<S, P>(file_name: S,
                      file_path: P,
                      meta: Option<io::Result<fs::Metadata>>
@@ -131,16 +131,12 @@ impl FileSaver {
         temp
     }
 
-    /// The `ls -l` style file mode text, e.g. `-rw-r--r--`.
+    /// The `ls -l` style mode text, e.g. `-rw-r--r--`.
     ///
-    /// The type character covers every kind the browser can list (`d`, `c`,
-    /// `b`, `p`, `s`, and `-` for a regular file), and the setuid, setgid and
-    /// sticky bits are shown like `ls -l` does (`s`/`S`, `t`/`T`). The mode is
-    /// the one the entry's metadata describes: a symlink shows the mode of the
-    /// file it points at, like the rest of the state line. The string is empty
-    /// only when the metadata is not available (`DENIED` / `DANGLING_SYMLINK`
-    /// entries, which are rendered differently). This is the text behind
-    /// [`FileSaver::mode_spans`], which colours it.
+    /// A symlink shows the mode of its target, like the rest of the state
+    /// line. The string is empty only without metadata (`DENIED` /
+    /// `DANGLING_SYMLINK` entries, rendered differently); it is the text
+    /// behind [`FileSaver::mode_spans`].
     fn mode_string(&self) -> String {
         let Some(permissions) = self.permissions.as_ref() else {
             return String::new()
@@ -187,12 +183,10 @@ impl FileSaver {
         string
     }
 
-    /// The `ls -l` style file mode as spans, one per character.
+    /// The mode text as spans, one per character, each in its own colour.
     ///
-    /// Every character is coloured by what it describes (see
-    /// [`mode_char_style`]), so the state line can be read at a glance: the
-    /// type character, the three permission triads and the special bits are
-    /// told apart by colour instead of by reading the letters.
+    /// Colour (see [`mode_char_style`]) is what tells the type character, the
+    /// triads and the special bits apart, so the state line reads at a glance.
     pub fn mode_spans(&self) -> Vec<Span<'static>> {
         self.mode_string()
             .chars()
@@ -202,7 +196,6 @@ impl FileSaver {
             .collect()
     }
 
-    /// Get owner span of file.
     pub fn owner_span<'a>(&self) -> Span<'a> {
         Span::raw(self.owner.to_owned())
     }
@@ -252,12 +245,9 @@ impl FileSaver {
 
 /// The colour of one character of the mode string.
 ///
-/// The palette is the one `app/color.rs` maps the `LS_COLORS` codes to
-/// (`90`/`92`/`93`/`91`/`94`/`36`): a `-` stays quiet (dark gray), the type
-/// character tells the entry kind at a glance (light green), and the
-/// permission letters stand out — `r` light yellow, `w` light red, `x` light
-/// blue. The special bits (`s`/`S`, `t`/`T`) are cyan, the socket type
-/// character included, so no character which means "special" is green.
+/// The palette mirrors `app/color.rs` (`90`/`92`/`93`/`91`/`94`/`36`): the
+/// special bits are cyan, the socket type character included, so no character
+/// which means "special" is green.
 fn mode_char_style(character: char) -> Style {
     let color = match character {
         '-' => Color::DarkGray,
@@ -270,9 +260,9 @@ fn mode_char_style(character: char) -> Style {
     Style::new().fg(color)
 }
 
-/// Get the name of the user that owns a file.
+/// The name of the user who owns a file.
 ///
-/// The numeric uid is returned when the user cannot be found in `/etc/passwd`.
+/// The numeric uid is used when `/etc/passwd` has no entry for it.
 fn owner_name(uid: u32) -> String {
     match USER_NAMES.get(&uid) {
         Some(name) => name.to_owned(),
@@ -280,7 +270,6 @@ fn owner_name(uid: u32) -> String {
     }
 }
 
-/// Read the uid -> user name mapping from `/etc/passwd`.
 fn read_user_names() -> HashMap<u32, String> {
     match fs::read_to_string("/etc/passwd") {
         Ok(content) => parse_passwd(&content),
@@ -288,7 +277,6 @@ fn read_user_names() -> HashMap<u32, String> {
     }
 }
 
-/// Parse the content of `/etc/passwd` into a uid -> user name mapping.
 fn parse_passwd(content: &str) -> HashMap<u32, String> {
     let mut names = HashMap::new();
 
@@ -343,8 +331,6 @@ mod test {
 
     use super::*;
 
-    /// The state line shows the `ls -l` mode of the entry, including the
-    /// special bits and the directory type.
     #[test]
     fn test_mode_string() {
         let nanos = SystemTime::now()
@@ -399,8 +385,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Every character of the mode gets the colour of what it describes, so
-    /// the state line can be read at a glance.
     #[test]
     fn test_mode_spans_colour_each_character() {
         let nanos = SystemTime::now()
@@ -462,8 +446,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The palette in one place: every type character is green except the
-    /// socket `s`, and `s`/`S`/`t`/`T` are cyan.
     #[test]
     fn test_mode_char_colours() {
         let colour = |character: char| mode_char_style(character).fg;
@@ -482,8 +464,6 @@ mod test {
         }
     }
 
-    /// An entry whose metadata could not be read has no mode: the state line
-    /// shows `DENIED` or `DANGLING_SYMLINK` instead.
     #[test]
     fn test_mode_string_without_metadata() {
         let denied = FileSaver {

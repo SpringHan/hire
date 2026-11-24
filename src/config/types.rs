@@ -1,4 +1,4 @@
-// Types for config
+//! The config values and their defaults.
 
 use std::borrow::Cow;
 
@@ -11,10 +11,8 @@ pub type AppConfig<'a> = Vec<Config<'a>>;
 
 #[derive(Clone)]
 pub enum ConfigValue<'a> {
-    // Bool(bool),
     String(Cow<'a, str>),
     Vec(Vec<Cow<'a, str>>),
-    // HashMap(HashMap<char, String>),
 }
 
 pub struct Config<'a> {
@@ -22,7 +20,6 @@ pub struct Config<'a> {
     value: ConfigValue<'a>
 }
 
-// Config Implements
 impl<'a> Config<'a> {
     fn default_value(prop: &str) -> ConfigValue<'_> {
         match prop {
@@ -72,9 +69,9 @@ impl<'a> Config<'a> {
                     bail!("{err_msg}")
                 };
 
-                // The list is built first and stored last: a broken entry skips
-                // the whole property (it keeps its default) instead of leaving
-                // the commands read before it in place.
+                // The list is built first and stored last: a broken entry
+                // skips the whole property (it keeps its default) instead of
+                // leaving the commands read before it in place.
                 let mut commands = Vec::with_capacity(items.len());
 
                 for item in items.iter() {

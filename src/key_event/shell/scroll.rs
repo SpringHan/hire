@@ -1,20 +1,16 @@
-// Scrollback of the attached shell view.
-//
-// The shell's history lives in its `vt100` screen: `set_scrollback(n)` moves
-// the viewport `n` lines up, `0` being the live screen. Nothing is copied
-// here; the parser owns the position, and this module only moves it and keeps
-// the view mode (keys and wheel are owned by hire) in sync.
-//
-// Scrolling up enters the mode; scrolling back to the bottom leaves it, so the
-// keys become the shell's again as soon as the live view is visible.
+//! Scrollback mode for the attached shell view.
+//!
+//! The history lives in the child's `vt100` screen; `set_scrollback(n)` moves
+//! the viewport and nothing is copied here. Scrolling up enters the mode (hire
+//! owns the keys and the wheel) and returning to the bottom leaves it.
 
 use crate::{app::App, utils::ShellId};
 
 /// How many lines one wheel notch scrolls.
 pub const WHEEL_LINES: usize = 3;
 
-/// What a scroll binding does. Parsed from `keymap.toml` (`shell_scroll` /
-/// `shell_scroll_mode`) and executed by [`apply`].
+/// A scroll binding from `keymap.toml` (`shell_scroll` / `shell_scroll_mode`),
+/// run by [`apply`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollCommand {
     Up,
@@ -54,7 +50,6 @@ pub fn leave(app: &mut App, id: ShellId) {
     app.shell_scroll_mode = false;
 }
 
-/// Run one scroll binding.
 pub fn apply(app: &mut App, id: ShellId, command: ScrollCommand) {
     match command {
         ScrollCommand::Up => move_by(app, id, 1),
@@ -75,7 +70,8 @@ pub fn apply(app: &mut App, id: ShellId, command: ScrollCommand) {
     }
 }
 
-/// One wheel notch; up enters the scroll mode, down leaves it at the bottom.
+/// One wheel notch. Up enters the scroll mode; down leaves it when the live
+/// screen is reached.
 pub fn handle_wheel(app: &mut App, id: ShellId, up: bool) {
     let delta = WHEEL_LINES as isize;
 
@@ -87,9 +83,9 @@ fn page_lines(app: &App) -> usize {
     (app.shell_area.height as usize).saturating_sub(1).max(1)
 }
 
-/// Move the viewport by `delta` lines (negative scrolls towards the live
-/// screen) and update the mode: any history above the view keeps the mode on,
-/// the bottom leaves it.
+/// Move the viewport by `delta` lines (negative goes towards the live screen),
+/// then update the mode: history above the view keeps it on, the bottom leaves
+/// it.
 fn move_by(app: &mut App, id: ShellId, delta: isize) {
     let Some(current) = offset(app, id) else {
         return

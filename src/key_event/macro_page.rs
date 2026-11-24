@@ -1,4 +1,4 @@
-// Macro page.
+//! The macro page: record keys and replay them on one or more files.
 
 use ratatui::text::{Line, Text};
 use ratatui::DefaultTerminal;
@@ -11,9 +11,6 @@ use crate::ui::key_hints;
 use crate::utils::{Block, CmdContent};
 use crate::rt_error;
 
-/// Open the macro page.
-///
-/// In the page, `q` is used to record a macro and `e` is used to execute it.
 pub fn macro_operation(app: &mut App) -> AppResult<()> {
     if app.macro_attri.status == MacroStatus::Recording {
         app.macro_attri.status = MacroStatus::None;
@@ -39,13 +36,11 @@ fn macro_switch(
 ) -> AppResult<bool>
 {
     match key {
-        // `q` starts recording a macro,
         'q' => {
             app.macro_attri.clear_keys();
             app.macro_attri.status = MacroStatus::Recording;
         },
 
-        // Execute the recorded macro.
         'e' => {
             if app.macro_attri.status == MacroStatus::Executing {
                 return Ok(true)
@@ -55,9 +50,8 @@ fn macro_switch(
                 rt_error!("No macro has been recorded!")
             }
 
-            // When there're marked files, the macro will be executed on every
-            // marked file. So the targets are recorded here and the macro is
-            // really executed by `execute_macro` later.
+            // With marked files the macro runs once per file: only the targets
+            // are recorded here, and `execute_macro` replays the keys later.
             let targets = if app.marked_files.is_empty() {
                 Vec::new()
             } else {
@@ -76,9 +70,8 @@ fn macro_switch(
 
 /// Execute the recorded macro.
 ///
-/// When the macro has targets (which are the marked files), it will be
-/// executed on every target after selecting it. Otherwise, it will be
-/// executed on the currently selected item.
+/// With targets (the marked files) the macro runs on each target after
+/// selecting it; without targets it runs on the selected item.
 pub fn execute_macro(
     app: &mut App,
     terminal: &mut DefaultTerminal
@@ -123,7 +116,6 @@ pub fn execute_macro(
     Err(errors)
 }
 
-/// Collect the marked files as the targets of a macro.
 fn collect_marked_targets(app: &App) -> Vec<MacroTarget> {
     let mut targets = app.marked_files
         .iter()

@@ -1,15 +1,14 @@
-// Colorscheme
+//! The file styles, built from `LS_COLORS` or a bundled palette.
 
 use std::env::var;
 use std::collections::HashMap;
 
 use ratatui::style::{Color, Style, Modifier};
 
-/// The palette used when `LS_COLORS` is not set (or is empty).
+/// The palette used when `LS_COLORS` is unset or empty.
 ///
-/// It is the value of `$LS_COLORS` from the author's interactive zsh (a
-/// standard `dircolors` palette), so tests and fresh environments get the same
-/// colours as the development machine instead of a panic or uncoloured output.
+/// It is the author's `dircolors` value, so tests and a bare environment get
+/// the same colours instead of a panic or uncoloured output.
 const DEFAULT_LS_COLORS: &str = include_str!("default_ls_colors.txt");
 
 pub struct TermColors {
@@ -43,10 +42,8 @@ impl TermColors {
 
     /// Build the styles from an `LS_COLORS` value.
     ///
-    /// `None` and a blank value mean the variable is not usable, so the
-    /// bundled palette is used. This keeps `TermColors::init` infallible: a
-    /// terminal without `LS_COLORS` (CI, a bare shell, a minimal container)
-    /// still gets readable colours.
+    /// `None` and a blank value are unusable, so the bundled palette keeps
+    /// `TermColors::init` infallible in a terminal without it.
     fn from_ls_colors(configured: Option<&str>) -> TermColors {
         let color_map = hashmap!(
             ("0", Style::new().fg(Color::White)),

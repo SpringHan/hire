@@ -1,4 +1,4 @@
-// Popup window for command line.
+//! The completion popup drawn above the command line.
 
 use std::borrow::Cow;
 
@@ -78,9 +78,8 @@ pub fn render_completion(
         return ()
     }
 
-    // Adjust area for completion popup window. The origin is a terminal column
-    // computed from the display width, so it must not be mixed with the byte
-    // length of the command line (see `display_width`).
+    // The origin is a terminal column computed from the display width, not a
+    // byte offset into the command line (see `display_width`).
     let x_offset = origin_len.saturating_sub(1);
     if app.command_expand {
         area.y += 1;

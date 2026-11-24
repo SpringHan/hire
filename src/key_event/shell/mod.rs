@@ -1,4 +1,4 @@
-// Shell operations
+//! Shell commands and the shells mounted on the tabs.
 
 mod utils;
 mod types;
@@ -30,7 +30,7 @@ use crate::{
     rt_error
 };
 
-/// Call up the command line for editing shell command.
+/// Put `:!<shell> ` on the command line, so only the command is missing.
 pub fn cmdline_shell(app: &mut App) -> AppResult<()> {
     let shell_type = Config::get_value(&app.config, "default_shell");
 

@@ -1,17 +1,16 @@
-// Types
+//! How a shell command is built from words and quoted for the shell.
 
 use crate::{app::App, error::{AppResult, ErrorType}};
 
 #[derive(Clone, Copy)]
 pub enum CommandStr<'a> {
-    /// The SelectedItem can only be used for commands read from keymap.toml.
+    /// `$.`, the selected item of the browser.
     SelectedItem,
-    /// A word written by the user. It is inserted into the command as it is,
-    /// because it may be shell syntax (`|`, `>`, `$HOME`, quotes, …).
+    /// A word written by the user, inserted as it is because it may be shell
+    /// syntax (`|`, `>`, `$HOME`, quotes, …).
     Str(&'a str),
-    /// One argument that must reach the program intact, such as a file path.
-    /// It is quoted when needed while the words are joined, so that a space,
-    /// `$` or `'` in it can neither split nor change the argument.
+    /// One argument that must reach the program intact, such as a file path;
+    /// it is quoted when the words are joined.
     Quoted(&'a str)
 }
 
@@ -19,8 +18,8 @@ pub enum CommandStr<'a> {
 ///
 /// Interactive shells are `ShellSession`s instead.
 pub enum ShellCommand<'a> {
-    /// The first element is the shell that command runs on;
-    /// The second one is the program & its arguments.
+    /// The shell the command runs on (`None` is the default), then the program
+    /// and its arguments.
     Command(
         Option<&'a str>,
         Vec<CommandStr<'a>>
@@ -37,8 +36,7 @@ impl<'a> From<&'a str> for CommandStr<'a> {
     }
 }
 
-// NOTE: This method can only be called when getting program name,
-// which cannot be the selected item.
+// Only called to get the program name, which is never the selected item.
 impl<'a> Into<&'a str> for CommandStr<'a> {
     fn into(self) -> &'a str {
         match self {
@@ -48,9 +46,7 @@ impl<'a> Into<&'a str> for CommandStr<'a> {
     }
 }
 
-/// Whether a shell would read `value` as anything other than one literal word,
-/// which is the case when it is empty or contains a character the shell treats
-/// specially.
+/// Whether a shell would split `value` into anything but one literal word.
 fn needs_quoting(value: &str) -> bool {
     value.is_empty() ||
         value.chars().any(|chr| matches!(
@@ -61,13 +57,11 @@ fn needs_quoting(value: &str) -> bool {
         ))
 }
 
-/// Quote `value` so that a POSIX shell reads it as a single literal word, and
-/// return it unchanged when it already is one.
+/// Quote `value` as one literal word for a POSIX shell, unchanged if it already
+/// is one.
 ///
-/// Everything inside single quotes is literal, so a space, `$`, `*` or a
-/// newline in a file name stays part of the word. A `'` cannot appear inside
-/// them, so it closes the quotes, is escaped outside of them and the quotes
-/// are reopened: `'` becomes `'\''`, which the shell reads as one `'`.
+/// A `'` closes the quotes, is escaped outside and the quotes are reopened:
+/// `'` becomes `'\''`, which the shell reads as one `'`.
 pub fn shell_quote(value: &str) -> String {
     if !needs_quoting(value) {
         return value.to_owned()
@@ -95,8 +89,8 @@ impl<'a> CommandStr<'a> {
             .collect::<Vec<_>>()
     }
 
-    /// Read the words of a command line, where `$.` stands for the selected
-    /// item. Both `:!` and `shell_command` in `keymap.toml` accept it.
+    /// Read the words of a command line, where the whole word `$.` stands for
+    /// the selected item.
     pub fn from_slices(str_vec: Vec<&'a str>) -> Vec<Self> {
         str_vec.into_iter()
             .map(|_str| if _str == "$." {
@@ -107,12 +101,10 @@ impl<'a> CommandStr<'a> {
             .collect::<Vec<_>>()
     }
 
-    /// Join the words into the command string `shell -c` runs.
+    /// Join the words into the shell source `shell -c` runs.
     ///
-    /// The result is shell source: `Str` words are kept as written, while the
-    /// selected item and `Quoted` arguments are quoted when they need it, so a
-    /// file name with a space is still a single argument when the shell runs
-    /// the command.
+    /// `Str` words stay as written (they may be shell syntax); the selected
+    /// item and `Quoted` arguments are quoted so they stay one argument.
     pub fn join_command(str_vec: Vec<Self>, app: &App) -> AppResult<String> {
         let selected_item = app.get_file_saver();
 
@@ -144,7 +136,6 @@ impl<'a> CommandStr<'a> {
         Ok(joined_str)
     }
 
-    /// Convert a CommandStr Vec into a &str Vec.
     pub fn str_vec(str_vec: Vec<Self>) -> Vec<&'a str> {
         str_vec.into_iter()
             .map(|e| e.into())
@@ -182,8 +173,7 @@ mod test {
 
     #[test]
     fn test_shell_quote() {
-        // A plain word needs no quoting and is kept readable, which matters
-        // when the result is shown on the command line.
+        // A plain word stays readable, which matters when the command is shown.
         assert_eq!(shell_quote("a.txt"), "a.txt");
         assert_eq!(shell_quote("a b.txt"), "'a b.txt'");
         assert_eq!(shell_quote(""), "''");
@@ -191,7 +181,6 @@ mod test {
         // Nothing is expanded or globbed inside the quotes.
         assert_eq!(shell_quote("$HOME *.txt"), "'$HOME *.txt'");
 
-        // A quote is closed, escaped outside and reopened.
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
     }
 
@@ -211,8 +200,7 @@ mod test {
         );
     }
 
-    /// `$.` is the selected item, and it is quoted, so the shell sees one
-    /// argument even when the name contains a space.
+    /// `$.` is quoted too, so a name with a space stays one argument.
     #[test]
     fn test_join_quotes_selected_item() {
         let dir = temp_dir("join");
@@ -231,8 +219,7 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A `Quoted` argument is quoted as well, while a `Str` word stays as the
-    /// user wrote it.
+    /// A `Quoted` argument is quoted; a `Str` word stays as the user wrote it.
     #[test]
     fn test_join_quotes_quoted_arguments_only() {
         let app = App::default();

@@ -1,4 +1,4 @@
-// Config
+//! Reading and reloading hire's TOML configuration.
 
 mod types;
 mod keymap;
@@ -30,8 +30,7 @@ pub fn set_config_dir_override(dir: &str) {
     let _ = CONFIG_DIR_OVERRIDE.set(dir.to_owned());
 }
 
-/// Get T from Option<T>.
-/// When it succeeded, return the value, otherwise throw anyhow error.
+/// The value of `$e`, or an early `Err(anyhow!(...))` built from `$msg`.
 #[macro_export]
 macro_rules! option_get {
     ($e: expr, $msg: expr) => {
@@ -44,27 +43,20 @@ macro_rules! option_get {
 
 /// Read the three config files and apply them to the running app.
 ///
-/// This is called at startup and by the `reload_config` command, so the
-/// configuration is always rebuilt from the files: everything taken from them
-/// (the keymap, the bookmarks, the stored tab groups, the user settings and the
-/// parsed shell prefix) is dropped first. That is what makes a reload remove an
-/// entry the user deleted from a file.
-///
-/// Reading is never fatal. A file or an entry which cannot be read is skipped
-/// while the rest of the file — and the other files — are still applied; the
-/// errors are returned only after the whole configuration has been read, so the
-/// caller shows them once the new configuration is in place.
+/// Called at startup and by `reload_config`, so it always rebuilds from the
+/// files: dropping the old state first is what removes an entry the user
+/// deleted from a file. An unreadable file or entry is skipped rather than
+/// fatal, and its errors are returned once the whole configuration is read.
 pub fn load_config(app: &mut App) -> AppResult<()> {
     let (auto_path, user_path, keymap_path) = get_conf_file()?;
 
     load_config_from(app, auto_path, user_path, keymap_path)
 }
 
-/// Read the three config files at `auto_path`, `user_path` and `keymap_path`.
+/// Read the files at `auto_path`, `user_path` and `keymap_path`.
 ///
-/// It is separate from [`load_config`] so the reading/reloading rules can be
-/// tested with files in a temporary directory, without the process-wide
-/// `HIRE_CONFIG_DIR` override.
+/// Split from [`load_config`] so the reload rules can be tested with a
+/// temporary directory, without the process-wide `HIRE_CONFIG_DIR` override.
 fn load_config_from(
     app: &mut App,
     auto_path: String,
@@ -106,11 +98,10 @@ fn load_config_from(
     Ok(())
 }
 
-/// Drop the configuration which [`load_config`] rebuilds from the files.
+/// Drop the configuration [`load_config`] rebuilds from the files.
 ///
-/// Only state coming from the files is cleared; everything else on `App`
-/// (working directory, open tabs and shells, marked files, …) is untouched, so
-/// reloading never changes what the user is doing.
+/// Only file state is cleared: tabs, shells, marks and the working directory
+/// stay, so a reload never changes what the user is doing.
 fn reset_config(app: &mut App) {
     app.config.clear();
     app.target_dir.clear();
@@ -186,7 +177,6 @@ fn init_user_config(app: &mut App, path: String) -> AppResult<()> {
     Ok(())
 }
 
-/// Write modified document into auto_config file.
 pub fn write_document(document: DocumentMut) -> io::Result<()> {
     let (path, _, _) = get_conf_file()?;
 
@@ -221,10 +211,9 @@ pub fn get_document(path: String) -> Result<DocumentMut> {
 
 /// Get the three config file paths, creating the config directory if needed.
 ///
-/// The directory is `~/.config/springhan/hire/` by default. It can be
-/// overridden with the `HIRE_CONFIG_DIR` environment variable, which is useful
-/// for tests and for running the app with an isolated configuration (the
-/// configured GUI command, for example, is then never the one of the user).
+/// The default directory is `~/.config/springhan/hire/`; `HIRE_CONFIG_DIR`
+/// overrides it so tests and isolated runs (a sudo session, say) never read
+/// the user's own settings.
 pub fn get_conf_file() -> io::Result<(String, String, String)> {
     let config_dir = if let Some(dir) = CONFIG_DIR_OVERRIDE.get() {
         format!("{}/", dir.trim().trim_end_matches('/'))
@@ -255,23 +244,15 @@ pub fn get_conf_file() -> io::Result<(String, String, String)> {
         }
     }
 
-    // NOTE(dev): this block is a deliberate developer toggle, not a bug.
-    //
-    // - Production names: auto_config.toml / user_config.toml / keymap.toml
-    // - Dev names:        auto_config_dev.toml / user_config_dev.toml /
-    //                     keymap_dev.toml
-    //
-    // The dev names are enabled temporarily, in the local working tree, to try
-    // a new feature without polluting the real configuration. The committed
-    // state uses the production names; a working tree with the dev block
-    // active is expected during development. Scripts, tests and e2e harnesses
-    // must check which block is active and create the matching files (see
-    // docs/ARCHITECTURE.md §6, "Dev config filenames").
+    // NOTE(dev): a deliberate developer toggle, not a bug. The commented
+    // `*_dev.toml` lines are swapped in temporarily to try a feature without
+    // touching the real config; committed state keeps the production names.
+    // Scripts and e2e harnesses must check which block is active and create
+    // the matching files (docs/ARCHITECTURE.md §6, "Dev config filenames").
     Ok((
         format!("{}auto_config.toml", config_dir),
         format!("{}user_config.toml", config_dir),
         format!("{}keymap.toml", config_dir)
-        // Dev
         // format!("{}auto_config_dev.toml", config_dir),
         // format!("{}user_config_dev.toml", config_dir),
         // format!("{}keymap_dev.toml", config_dir)
@@ -369,11 +350,9 @@ keymap = [
         let prefix = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
         assert!(app.shell_prefix.matches(&prefix));
 
-        // Only the readable bookmark is stored.
         assert_eq!(app.target_dir.get(&'h').map(String::as_str), Some("/home"));
         assert_eq!(app.target_dir.len(), 1);
 
-        // Only the readable binding is stored.
         assert!(matches!(app.keymap.get('x'), Ok(AppCommand::Refresh)));
         assert!(app.keymap.get('y').is_err());
 
@@ -402,7 +381,6 @@ keymap = [
         assert!(app.target_dir.contains_key(&'h'));
         assert!(app.keymap.get('x').is_ok());
 
-        // The user removes the bookmark and the binding, and changes a value.
         let auto = write(&dir, "auto_config.toml", "");
         let user = write(&dir, "user_config.toml", r#"default_shell = "bash""#);
         let keymap = write(
@@ -435,7 +413,8 @@ keymap = [
         let mut app = App::default();
         assert!(load_config_from(&mut app, auto, user, keymap).is_err());
 
-        // `Config::get_value` must never miss a name: a shell spawn would panic.
+        // `Config::get_value` must never miss a name: a shell spawn would
+        // panic.
         assert_eq!(config_string(&app, "default_shell"), "bash");
         assert_eq!(config_string(&app, "file_read_program"), "vim");
         assert!(matches!(app.keymap.get('x'), Ok(AppCommand::Refresh)));

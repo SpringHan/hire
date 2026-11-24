@@ -1,4 +1,4 @@
-// Special types used in App structure.
+//! Types shared by the app: blocks, cursors and preview content.
 
 use std::collections::HashMap;
 
@@ -6,38 +6,32 @@ use ratatui::{text::Text, widgets::ListState};
 
 /// The identity of a shell session mounted on a tab.
 ///
-/// The value is opaque: it is only used to look the session up in
-/// `ShellSessions`, and it stays valid while the session is alive.
+/// The value is opaque: it is only ever looked up in `ShellSessions`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ShellId(pub u64);
 
 /// The cursor position inside a piece of editable text.
 ///
 /// `Index` is a **byte offset** into the UTF-8 text and always lies on a
-/// character boundary, so a multi-byte character (e.g. a CJK one) is moved and
-/// deleted as a whole. `End` means the cursor is placed after the last
-/// character, and `None` means the text isn't editable.
+/// character boundary, so a multi-byte character is moved and deleted whole.
+/// `End` is the point after the last character; `None` means not editable.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum CursorPos {
-    /// The insertion point, as a byte offset on a character boundary.
     Index(usize),
-    /// The insertion point after the last character.
     End,
-    /// No editable cursor.
     None
 }
 
-/// The struct to store content in command line.
-/// The `String` is used to store editable command.
-/// The `Text` is used to store non-editable style text.
+/// The command-line content: `String` while it is editable, `Text` when it is
+/// styled and read-only.
 #[derive(Clone)]
 pub enum CmdContent {
     String(String),
     Text(Text<'static>)
 }
 
-/// The type of block that can be selected.
-/// The boolean from Browser indicates whether current dir is the root directory.
+/// A block which can be selected; `Browser`'s flag says whether the current
+/// directory is the root directory.
 pub enum Block {
     Browser(bool),
     CommandLine(CmdContent, CursorPos),
@@ -47,7 +41,6 @@ pub enum Block {
 }
 
 impl Block {
-    /// The attached shell id, if the shell view owns the input.
     pub fn shell_id(&self) -> Option<ShellId> {
         if let Self::Shell(id) = self {
             Some(*id)
@@ -121,8 +114,7 @@ impl CmdContent {
         }
     }
 
-    /// Get mutable reference of `CmdContent`.
-    /// This function can only be used for String enum.
+    /// The mutable `String`; panics for the `Text` variant.
     pub fn get_mut(&mut self) -> &mut String {
         if let Self::String(_ref) = self {
             _ref

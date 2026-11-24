@@ -1,4 +1,4 @@
-// Command Line
+//! Editing and running the command line block.
 
 use ratatui::DefaultTerminal;
 
@@ -49,7 +49,6 @@ impl<'a> App<'a> {
         }
     }
     
-    /// Quit command line selection.
     pub fn quit_command_mode(&mut self) {
         self.selected_block = self::Block::Browser(self.root());
 
@@ -78,8 +77,7 @@ impl<'a> App<'a> {
         self.leave_shell_menu();
     }
 
-    /// The function will change content in command line.
-    /// In the meanwhile, adjusting current command index.
+    /// Step through the command history, keeping `command_idx` in sync.
     pub fn command_select(&mut self, next: bool) {
         if let Block::CommandLine(
             ref mut current,
@@ -96,7 +94,7 @@ impl<'a> App<'a> {
                 *cursor = CursorPos::End;
             }
 
-            // Select with current index when the user has already made this operation
+            // The user already stepped through the history: move one entry.
             if let Some(index) = self.command_idx {
                 if next {
                     if index == self.command_history.len() - 1 {
@@ -117,12 +115,11 @@ impl<'a> App<'a> {
                 return ()
             }
 
-            // There is no next item
+            // With no history position yet, there is no next entry.
             if next {
                 return ()
             }
 
-            // Initial selection.
             let current_idx = self.command_history
                 .iter()
                 .rev()
@@ -130,7 +127,8 @@ impl<'a> App<'a> {
 
             if let Some(idx) = current_idx {
                 if !next {
-                    // The real idx is: len - 1 - IDX
+                    // `position` counted from the end, so the matching forward
+                    // index is `len - 1 - idx`; stepping back lands one before.
                     if idx == self.command_history.len() - 1 {
                         self.command_idx = Some(0);
                         return ()
@@ -255,11 +253,9 @@ impl<'a> App<'a> {
                 },
 
                 // Re-read the three config files and apply them to the running
-                // process; the errors are shown in the command line like those
-                // of any other command.
+                // process; their errors are shown like any other command's.
                 ":reload_config" => crate::config::load_config(self)?,
 
-                // Shell command
                 shell if shell.starts_with(":!") => {
                     if command_slices.len() < 2 {
                         rt_error!("{argu_err}")

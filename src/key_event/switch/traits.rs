@@ -1,10 +1,11 @@
-// Switch traits
+//! Object-safe cloning of the boxed state a switch case carries.
 
 use std::any::Any;
 
 use super::SwitchCaseData;
 
-// Trait
+/// Object-safe `Clone` for the boxed state; the blanket impl reaches `Clone`
+/// through the concrete type, since a `Box<dyn SwitchStruct>` is not `Clone`.
 pub trait SwitchClone {
     fn switch_clone(&self) -> Box<dyn SwitchStruct>;
 }
@@ -13,7 +14,6 @@ pub trait SwitchStruct: SwitchClone + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
-// Implements
 impl<T: SwitchStruct + Clone> SwitchClone for T {
     fn switch_clone(&self) -> Box<dyn SwitchStruct> {
         Box::new(self.to_owned())

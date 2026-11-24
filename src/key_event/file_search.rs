@@ -1,4 +1,4 @@
-// File Search
+//! The incremental file-name search and the cursor moves over its matches.
 
 use std::{sync::mpsc::{self, Receiver, Sender}, thread};
 
@@ -74,7 +74,7 @@ impl<'a> App<'a> {
     }
 
     pub fn file_search(&mut self, name: String, exactly: bool) -> anyhow::Result<()> {
-        // NOTE: The user cannot reach to `exactly` by inputing command.
+        // Only an internal jump passes `exactly`; the command line cannot.
         if !exactly {
             self.command_history.push(format!("/{}", name.clone()));
         }
@@ -103,8 +103,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Move current cursor to next/previous searched file name.
-    /// When NEXT is true, searching the next. Otherwise the previous.
+    /// Move the cursor to the next or previous match; the search does not wrap.
     fn move_candidate(&mut self,
                       next: bool
     ) -> AppResult<()>

@@ -1,14 +1,13 @@
-// Types
+//! The state of edit mode: the items being edited and their cursors.
 
 use crate::{app::FileSaver, utils::CursorPos, error::{AppResult, ErrorType}};
 
 #[derive(Clone)]
 pub struct EditItem {
     pub(super) editing_name: String,
-    /// This attribute is only for items that has no filesaver.
+    /// Only meaningful for a new item, which has no `FileSaver` behind it.
     pub is_dir: bool,
 
-    // pub(super) mark: bool,
     pub(super) delete: bool,
     pub(super) cursor: CursorPos,
 }
@@ -49,7 +48,6 @@ impl EditMode {
                 editing_name: file.name.to_owned(),
                 is_dir: false,
 
-                // mark: false,
                 delete: false,
                 cursor: CursorPos::None
             });

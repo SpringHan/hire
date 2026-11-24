@@ -1,4 +1,4 @@
-// Syntax highlighting of the file preview, off the UI thread.
+//! Off-thread syntax highlighting of the file preview.
 
 use std::{
     fs::File,
@@ -11,11 +11,10 @@ use ratatui::text::Text;
 
 use crate::utils::{highlight_text, read_prev_window};
 
-/// How many lines before the window are highlighted as context.
+/// How many lines before the window seed syntect's parser state.
 ///
-/// Syntect keeps its parser state from line to line (a block comment or a
-/// string can span many lines). The lines before the window seed that state;
-/// they are thrown away afterwards, so only the window is painted.
+/// A block comment or a string can span many lines, so the state must be built
+/// from the lines above the window; they are then dropped from the answer.
 const CONTEXT_LINES: usize = 32;
 
 /// A request for the highlighting thread.
@@ -39,24 +38,18 @@ pub type HighlightDone = (PathBuf, u64, Option<Text<'static>>);
 
 /// The thread which highlights the preview's window.
 ///
-/// Only the lines the terminal can show (plus a margin and a context prefix) are
+/// Only the visible lines, plus a margin and a context prefix, are
 /// read and highlighted, so the cost is bounded by the pane, not by the file.
-/// One worker does it in the background, so the UI thread draws the
-/// unhighlighted text at once and replaces it when the answer arrives.
-///
-/// Between windows the worker blocks on its channel, so an idle hire spends
-/// nothing on it. Requests and answers are not piled up either: the worker
-/// keeps only the newest request (browsing a directory must not queue one
-/// highlight per file) and the UI thread keeps only the newest answer.
+/// The worker keeps only the newest request (browsing a directory must not
+/// queue one highlight per file) and the UI thread only the newest answer.
 #[derive(Default)]
 pub struct HighlightPreview {
     requests: Option<Sender<Job>>,
     answers: Option<Receiver<HighlightDone>>,
 
     /// The window of the last request, until its answer is taken. While it is
-    /// set, the UI polls sooner so the colours are painted as soon as they are
-    /// ready. The generation tells an answer for an older window from the one
-    /// the UI is waiting for.
+    /// set the UI polls sooner; the generation tells an answer for an older
+    /// window from the one the UI waits for.
     requested: Option<(PathBuf, u64)>,
 }
 
@@ -90,8 +83,8 @@ impl HighlightPreview {
 
     /// Ask for the preview window `content` of `path` to be highlighted.
     ///
-    /// `start_line` and `start_byte` locate the window in the file, so the
-    /// worker can read the lines before it as syntect context.
+    /// `start_line` and `start_byte` locate the window, so the worker can read
+    /// the lines above it as syntect context.
     pub fn request(
         &mut self,
         path: PathBuf,
@@ -159,10 +152,9 @@ impl HighlightPreview {
 /// Highlight `content`, a window of `path` which starts at `start_line` and
 /// `start_byte`.
 ///
-/// The lines just before the window are read and parsed first, so a block
-/// comment or a string which started above it keeps its colour; they are
-/// dropped from the answer, which holds only the window. `None` when syntect
-/// knows no language for `path`, or when its parser fails.
+/// The lines just above the window are parsed first, so a block comment or a
+/// string which started there keeps its colour; they are dropped from the
+/// answer. `None` when syntect knows no language for `path`, or fails.
 pub fn highlight_window(
     path: &Path,
     start_line: usize,
@@ -198,7 +190,6 @@ pub fn highlight_window(
     Some(text)
 }
 
-/// Highlight the window of `job`, with the lines before it as context.
 fn highlight_job(job: &Job) -> Option<Text<'static>> {
     highlight_window(&job.path, job.start_line, job.start_byte, &job.content)
 }

@@ -1,4 +1,4 @@
-// Operations on command line.
+//! Completion of the command line plus its cursor and word operations.
 
 use std::borrow::Cow;
 
@@ -68,8 +68,6 @@ impl<'a> AppCompletion<'a> {
 }
 
 pub fn completion(app: &mut App) -> AppResult<()> {
-    // When the cursor is placed right after a space, complete the name of
-    // the item selected in the file browser before the cursor.
     if complete_selected_item(app) {
         return Ok(())
     }
@@ -180,7 +178,6 @@ pub fn update_cmdline(
     }
 
 
-    // Can make completion
     let err_msg = "Cannot get any candidate for completion";
 
     let (content, _) = content_info.unwrap();
@@ -198,9 +195,8 @@ pub fn update_cmdline(
     if command_slice.len() == 1 {
         command_slice[0] = format!(":{}", new_value);
     } else {
-        // The candidate is a file name in a `:!` command, where it becomes an
-        // argument of a shell command: quote it, so a space in the name cannot
-        // split it into several arguments.
+        // In a `:!` line the candidate becomes an argument of a shell command:
+        // quote it, so a space in the name cannot split it in two.
         let candidate = if is_shell {
             shell_quote(new_value.as_ref())
         } else {
@@ -380,7 +376,6 @@ impl<'a> App<'a> {
             let length = content.len();
             crate::utils::delete_word_after_cursor(content, cursor);
 
-            // The candidates are meaningless after the content has changed.
             if content.len() != length && self.command_completion.show_frame {
                 self.command_completion.reset();
             }
@@ -397,7 +392,6 @@ impl<'a> App<'a> {
             let length = content.len();
             crate::utils::delete_char_after_cursor(content, cursor);
 
-            // The candidates are meaningless after the content has changed.
             if content.len() != length && self.command_completion.show_frame {
                 self.command_completion.reset();
             }
@@ -416,7 +410,6 @@ impl<'a> App<'a> {
             let length = content.len();
             crate::utils::delete_to_end(content, cursor);
 
-            // The candidates are meaningless after the content has changed.
             if content.len() != length && self.command_completion.show_frame {
                 self.command_completion.reset();
             }
@@ -438,8 +431,8 @@ fn complete_selected_item(app: &mut App) -> bool {
         None => return false,
     };
 
-    // In a `:!` command the name becomes an argument of a shell command, so it
-    // is quoted: otherwise a space in it would split it into several arguments.
+    // Same reason as in `update_cmdline`: a `:!` name becomes a shell
+    // argument, so a space in it must not split it.
     let inserted = if is_shell_command_line(&app.selected_block) {
         shell_quote(&selected_name)
     } else {
@@ -517,7 +510,7 @@ fn insert_before_cursor(app_block: &mut Block, text: &str) -> bool {
     false
 }
 
-/// Return true if the completion candidates is updated.
+/// Return true if the completion candidates are updated.
 fn update_completion(
     app: &mut App,
     _type: CompletionType,
@@ -628,7 +621,6 @@ mod test {
         app.cursor_word_forward();
         assert_command_line(&app, ":rename foo.txt", CursorPos::End);
 
-        // The cursor stays at the end of the command line.
         app.cursor_word_forward();
         assert_command_line(&app, ":rename foo.txt", CursorPos::End);
     }
@@ -649,49 +641,40 @@ mod test {
         app.cursor_word_backward();
         assert_command_line(&app, ":rename foo.txt", CursorPos::Index(0));
 
-        // The cursor stays at the beginning of the command line.
         app.cursor_word_backward();
         assert_command_line(&app, ":rename foo.txt", CursorPos::Index(0));
     }
 
     #[test]
     fn test_delete_word_before_cursor() {
-        // Delete the word from the end of the command line.
         let mut app = app_with(":rename foo.txt", CursorPos::End);
         app.delete_word_before_cursor();
         assert_command_line(&app, ":rename foo.", CursorPos::End);
 
-        // Delete the word in the middle of the command line.
         let mut app = app_with("hello world", CursorPos::Index(8));
         app.delete_word_before_cursor();
         assert_command_line(&app, "hello rld", CursorPos::Index(6));
 
-        // Delete the separators before a word.
         let mut app = app_with("  hello", CursorPos::Index(2));
         app.delete_word_before_cursor();
         assert_command_line(&app, "hello", CursorPos::Index(0));
 
-        // Nothing to delete at the beginning of the command line.
         let mut app = app_with(":rename", CursorPos::Index(0));
         app.delete_word_before_cursor();
         assert_command_line(&app, ":rename", CursorPos::Index(0));
 
-        // Delete the punctuation right before the cursor.
         let mut app = app_with(":rename", CursorPos::Index(1));
         app.delete_word_before_cursor();
         assert_command_line(&app, "rename", CursorPos::Index(0));
 
-        // The word after the command name is deleted with the separators.
         let mut app = app_with(":rename", CursorPos::End);
         app.delete_word_before_cursor();
         assert_command_line(&app, ":", CursorPos::End);
 
-        // The whole content is deleted when the cursor is at its end.
         let mut app = app_with("hello", CursorPos::Index(5));
         app.delete_word_before_cursor();
         assert_command_line(&app, "", CursorPos::End);
 
-        // The completion popup is reset after the deletion.
         let mut app = app_with("hello", CursorPos::End);
         app.command_completion.show_frame = true;
         app.delete_word_before_cursor();
@@ -700,17 +683,14 @@ mod test {
 
     #[test]
     fn test_delete_word_after_cursor() {
-        // Delete the word right after the cursor.
         let mut app = app_with(":rename foo.txt", CursorPos::Index(1));
         app.delete_word_after_cursor();
         assert_command_line(&app, ": foo.txt", CursorPos::Index(1));
 
-        // The separators between the cursor and the word are deleted as well.
         let mut app = app_with(":rename foo.txt", CursorPos::Index(7));
         app.delete_word_after_cursor();
         assert_command_line(&app, ":rename.txt", CursorPos::Index(7));
 
-        // Nothing to delete at the end of the command line.
         let mut app = app_with(":rename", CursorPos::End);
         app.delete_word_after_cursor();
         assert_command_line(&app, ":rename", CursorPos::End);
@@ -720,7 +700,6 @@ mod test {
         app.delete_word_after_cursor();
         assert_command_line(&app, " abc", CursorPos::Index(0));
 
-        // The completion popup is reset after the deletion.
         let mut app = app_with(":rename foo", CursorPos::Index(1));
         app.command_completion.show_frame = true;
         app.delete_word_after_cursor();
@@ -729,12 +708,10 @@ mod test {
 
     #[test]
     fn test_delete_char_after_cursor() {
-        // Delete the character under the cursor; the cursor stays in place.
         let mut app = app_with(":rename", CursorPos::Index(1));
         app.delete_char_after_cursor();
         assert_command_line(&app, ":ename", CursorPos::Index(1));
 
-        // Nothing to delete at the end of the command line.
         let mut app = app_with(":rename", CursorPos::End);
         app.delete_char_after_cursor();
         assert_command_line(&app, ":rename", CursorPos::End);
@@ -744,7 +721,6 @@ mod test {
         app.delete_char_after_cursor();
         assert_command_line(&app, "件 x", CursorPos::Index(0));
 
-        // The completion popup is reset after the deletion.
         let mut app = app_with(":rename", CursorPos::Index(1));
         app.command_completion.show_frame = true;
         app.delete_char_after_cursor();
@@ -753,17 +729,14 @@ mod test {
 
     #[test]
     fn test_delete_to_end() {
-        // Everything after the cursor is deleted; the cursor stays in place.
         let mut app = app_with(":rename foo.txt", CursorPos::Index(8));
         app.delete_to_end();
         assert_command_line(&app, ":rename ", CursorPos::End);
 
-        // The whole content goes when the cursor is at its beginning.
         let mut app = app_with(":rename", CursorPos::Index(0));
         app.delete_to_end();
         assert_command_line(&app, "", CursorPos::End);
 
-        // Nothing to delete at the end of the command line.
         let mut app = app_with(":rename", CursorPos::End);
         app.delete_to_end();
         assert_command_line(&app, ":rename", CursorPos::End);
@@ -773,13 +746,11 @@ mod test {
         app.delete_to_end();
         assert_command_line(&app, "文件", CursorPos::End);
 
-        // The completion popup is reset after the deletion.
         let mut app = app_with(":rename foo", CursorPos::Index(1));
         app.command_completion.show_frame = true;
         app.delete_to_end();
         assert!(!app.command_completion.show_frame());
 
-        // The read-only command line (an error message) is left alone.
         let mut app = App {
             selected_block: Block::CommandLine(
                 CmdContent::Text(ratatui::text::Text::raw("readonly")),
@@ -1016,8 +987,6 @@ mod test {
         ).unwrap();
         assert_command_line(&app, ":!bash vim ./'a b.txt'", CursorPos::End);
 
-        // A candidate of a command which is not a shell command is written
-        // as it is.
         let mut app = app_with(":create_symlink a", CursorPos::End);
         app.command_completion.candidates = vec![
             std::borrow::Cow::Borrowed("a b.txt")

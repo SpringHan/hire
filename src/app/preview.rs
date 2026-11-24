@@ -1,4 +1,4 @@
-// Text preview: windowed file reading, scrolling and searching.
+//! The text preview: its window of the file, its scroll offset and search.
 
 use std::{
     fs,
@@ -31,31 +31,25 @@ use crate::{
 
 use super::{highlight::highlight_window, App};
 
-/// How many matches a preview search keeps.
-///
-/// A file whose every line matches would otherwise grow the result without a
-/// bound; the first matches are the ones the user walks through anyway.
+/// How many matches a preview search keeps; a file whose every line matches
+/// would otherwise grow the result without bound.
 const MAX_SEARCH_MATCHES: usize = 100_000;
 
-/// How many lines the search reads from the file at a time.
 const SEARCH_BATCH_LINES: usize = 256;
 
 /// How many pages the preview keeps loaded.
 ///
-/// One page above the view and two below it after a scroll: a page down (or a
-/// page of line scrolling) stays inside the window, so it does not reload and
-/// flash.
+/// One above the view and two below it after a scroll, so a page down stays
+/// inside the window: it does not reload, and does not flash.
 const PREVIEW_WINDOW_PAGES: usize = 4;
 
-/// Which page of the window the view starts on after a scroll.
 const PREVIEW_WINDOW_ABOVE_PAGES: usize = 1;
 
 /// The largest window which is highlighted before it is drawn.
 ///
-/// Highlighting happens on the UI thread for a reload, so the plain text is
-/// never painted; a window of very long lines (a minified file) would block
-/// that thread in syntect, so those rare windows keep the asynchronous path
-/// (and its plain first frame) instead.
+/// A reload highlights on the UI thread, so no plain frame is painted, but a
+/// minified file would block that thread in syntect: it keeps the asynchronous
+/// path instead.
 const MAX_SYNC_HIGHLIGHT_BYTES: usize = 128 * 1024;
 
 /// One line of the preview which contains a search match.
@@ -81,7 +75,7 @@ pub struct PreviewMatches {
 struct PreviewSearchRequest {
     generation: u64,
 
-    /// The value of [`PreviewState::ticket`] this search belongs to.
+    /// The [`PreviewState::ticket`] value this search was sent with.
     ticket: u64,
 
     query: String,
@@ -91,10 +85,9 @@ struct PreviewSearchRequest {
 
 /// Scrolling and search state of the text preview.
 ///
-/// The preview holds only a window of the file (the visible page plus a
-/// margin), so opening or scrolling a huge file costs what the terminal shows,
-/// not the size of the file. This state decides which part of the window is on
-/// screen and where the next window starts.
+/// Only a window of the file is held, so a huge file costs what the terminal
+/// shows; this state decides which part is on screen and where the next window
+/// starts.
 #[derive(Default)]
 pub struct PreviewState {
     /// The absolute index of the first line shown in the preview.
@@ -122,8 +115,7 @@ pub struct PreviewState {
     /// window is never painted over the current one.
     window_generation: u64,
 
-    /// The file the preview belongs to; `None` when there is no text preview
-    /// (an image, a directory listing, a message).
+    /// The file the preview belongs to; `None` when there is no text preview.
     path: Option<PathBuf>,
 
     /// The query of the active search.
@@ -150,12 +142,10 @@ pub struct PreviewState {
 }
 
 impl PreviewState {
-    /// The index of the first line shown in the preview.
     pub fn offset(&self) -> usize {
         self.offset
     }
 
-    /// The first terminal column shown of every preview line.
     pub fn column(&self) -> usize {
         self.column
     }
@@ -165,12 +155,10 @@ impl PreviewState {
         self.query.is_some()
     }
 
-    /// The absolute line index of the first line of the loaded window.
     pub fn window_start(&self) -> usize {
         self.window_start
     }
 
-    /// The generation of the loaded window; a highlight answer carries it.
     #[cfg(test)]
     pub fn window_generation(&self) -> u64 {
         self.window_generation
@@ -183,8 +171,8 @@ impl PreviewState {
 
     /// The line of the match `n`/`N` last moved to.
     ///
-    /// The renderer underlines this match, so the occurrence the user selected
-    /// stands out from the other matches of the same query.
+    /// The renderer underlines it, so it stands out from the other matches of
+    /// the same query.
     pub fn current_line(&self) -> Option<usize> {
         self.current
             .and_then(|idx| self.matches.get(idx))
@@ -193,9 +181,8 @@ impl PreviewState {
 
     /// The character ranges of every occurrence of the query in `line`.
     ///
-    /// The ranges are what the renderer reverses. They are in characters, not
-    /// bytes, because the renderer walks the spans of the line character by
-    /// character.
+    /// They are in characters, not bytes, because the renderer walks the spans
+    /// of the line character by character.
     pub fn match_ranges(&self, line: &Line<'_>) -> Vec<(usize, usize)> {
         let Some(query) = self.query.as_deref() else {
             return Vec::new()
@@ -272,12 +259,11 @@ impl PreviewState {
 }
 
 impl<'a> App<'a> {
-    /// Start the thread which searches the preview, and return the channel its
-    /// answers arrive on.
+    /// Start the thread which searches the preview; its answers arrive on the
+    /// returned channel.
     ///
     /// The worker scans the file itself, a batch of lines at a time, so a huge
-    /// file never has to be loaded to be searched. It blocks on its channel
-    /// between searches, so an idle hire spends nothing on it.
+    /// file never has to be loaded to be searched.
     pub fn init_preview_search_channel(&mut self) -> Receiver<PreviewMatches> {
         let (update_tx, update_rx) = mpsc::channel::<PreviewMatches>();
         let (calc_tx, calc_rx) = mpsc::channel::<PreviewSearchRequest>();
@@ -312,9 +298,8 @@ impl<'a> App<'a> {
 
     /// Search `query` in the text preview.
     ///
-    /// The worker scans the file in the background, so the UI never waits for
-    /// a long file; `apply_preview_search` moves the view when the answer
-    /// arrives. An empty query clears the previous search (and its highlight).
+    /// The worker scans in the background, so the UI never waits for a long
+    /// file; an empty query clears the previous search (and its highlight).
     pub fn preview_search(&mut self, query: String) -> AppResult<()> {
         if query.is_empty() {
             self.preview.clear_search();
@@ -397,9 +382,6 @@ impl<'a> App<'a> {
     }
 
     /// Scroll the text preview by five columns.
-    ///
-    /// The right end of the widest visible line stays at the right edge of the
-    /// pane, so the preview never scrolls off the text into an empty screen.
     pub fn preview_scroll_column(&mut self, right: bool) {
         let Some(longest) = preview_visible_width(self) else {
             return
@@ -440,10 +422,9 @@ impl<'a> App<'a> {
 
     /// Whether `n`/`N` navigate the preview instead of the file list.
     ///
-    /// A preview search which found nothing still owns the keys: the user
-    /// searched the preview, so `n`/`N` must not quietly move through the file
-    /// list's matches. Selecting another file (or another preview) resets the
-    /// preview, which gives the keys back.
+    /// A preview search which found nothing still owns the keys: `n`/`N` must
+    /// not quietly move through the file list's matches. Selecting another file
+    /// resets the preview, which gives the keys back.
     pub fn preview_search_active(&self) -> bool {
         self.preview.is_searching() &&
             matches!(self.file_content, FileContent::Text(_))
@@ -452,9 +433,8 @@ impl<'a> App<'a> {
     /// Make sure the loaded window covers what the terminal shows.
     ///
     /// The terminal can be resized while the preview is open: a taller pane
-    /// needs more lines than the window was read with, and a narrower one needs
-    /// the horizontal scroll clamped again. The window is reloaded around the
-    /// current offset when it no longer covers the page.
+    /// needs more lines than the window was read with, a narrower one needs the
+    /// column clamped again.
     pub fn ensure_preview_window(&mut self, height: u16) {
         if self.preview.path.is_none() ||
             !matches!(self.file_content, FileContent::Text(_))
@@ -584,9 +564,8 @@ impl<'a> App<'a> {
     /// The start (line, byte and lines to skip) of the window which contains
     /// `line`.
     ///
-    /// Lines inside the loaded window are free; earlier ones need a backward
-    /// read; a line past the window is reached by skipping the lines between
-    /// it and the window's end.
+    /// A line above the window needs a backward read; one past it is reached by
+    /// skipping the lines in between.
     fn window_start_for(&mut self, line: usize) -> anyhow::Result<(usize, u64, usize)> {
         let start = self.preview.window_start;
         let end = start + self.preview_window_len();
@@ -632,8 +611,8 @@ impl<'a> App<'a> {
 
     /// Jump to `target`, which must be visible after the jump.
     ///
-    /// The match is centred when the file allows it: the window starts half a
-    /// page before it, which needs a backward read from the match's byte.
+    /// The match is centred when the file allows it, which needs a backward
+    /// read from the match's byte.
     fn preview_jump_to(&mut self, target: PreviewMatch) -> anyhow::Result<()> {
         let page = preview_page();
         let offset = target.line.saturating_sub(page / 2);
@@ -700,10 +679,9 @@ impl<'a> App<'a> {
 
     /// Load a window which starts `skip` lines after `start_byte`.
     ///
-    /// `sync` asks for the window to be highlighted before it is installed: a
-    /// scroll or a jump then never paints plain text, only the coloured window.
-    /// The first window of a file stays asynchronous, so browsing a directory
-    /// does not block on syntect.
+    /// `sync` highlights the window before it is installed, so a scroll or a
+    /// jump never paints plain text. The first window of a file stays
+    /// asynchronous, so browsing a directory does not block on syntect.
     fn load_preview_window_skipping(
         &mut self,
         start_line: usize,
@@ -759,7 +737,6 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// The number of lines in the loaded window.
     fn preview_window_len(&self) -> usize {
         match &self.file_content {
             FileContent::Text(text) => text.lines.len(),
@@ -773,7 +750,6 @@ fn preview_page() -> usize {
     (get_window_height() as usize).max(1)
 }
 
-/// How many lines a loaded window holds.
 fn preview_window_capacity() -> usize {
     preview_page() * PREVIEW_WINDOW_PAGES
 }
@@ -803,9 +779,8 @@ fn preview_visible_width(app: &App) -> Option<usize> {
 
 /// The largest column the text preview can be scrolled to.
 ///
-/// The end of the widest visible line stays at the right edge of the pane. A
-/// line which fits the pane cannot be scrolled at all; the shift is also kept
-/// in `u16`, which is what the renderer's scroll offset uses.
+/// The end of the widest visible line stops at the right edge of the pane; the
+/// shift is kept in `u16`, which is what the renderer's scroll offset uses.
 fn preview_max_column(longest: usize) -> usize {
     let width = (get_window_width() as usize).max(1);
 
@@ -814,11 +789,9 @@ fn preview_max_column(longest: usize) -> usize {
 
 /// The character ranges of every occurrence of `query` in `text`.
 ///
-/// The comparison is case-insensitive, like the file search. Lowercasing a
-/// character can expand it (`İ` becomes two characters), so the positions of
-/// the lowercased text are mapped back to the characters of `text` instead of
-/// being used as they are. The matches do not overlap: `aa` occurs once in
-/// `aaa`.
+/// The comparison is case-insensitive. Lowercasing can expand a character (`İ`
+/// becomes two), so the positions of the lowered text are mapped back to the
+/// characters of `text`. The matches do not overlap: `aa` occurs once in `aaa`.
 fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
 
@@ -826,8 +799,7 @@ fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
         return ranges
     }
 
-    // `map` holds the index of the original character for every character of
-    // `lowered`.
+    // `map[i]` is the character of `text` that `lowered[i]` came from.
     let mut lowered: Vec<char> = Vec::new();
     let mut map: Vec<usize> = Vec::new();
 
@@ -856,9 +828,8 @@ fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
 
 /// Scan `path` for `query`, a batch of lines at a time.
 ///
-/// The worker reads the file itself, so the UI thread never holds more than a
-/// window. A new search bumps the ticket, which stops this scan at the next
-/// batch instead of finishing a file the user already left.
+/// A new search bumps the ticket, which stops this scan at the next batch
+/// instead of finishing a file the user already left.
 fn search_preview_file(
     request: &PreviewSearchRequest,
     ticket: &AtomicU64,
@@ -966,8 +937,8 @@ mod test {
         dir
     }
 
-    /// Take the window-size lock and set the pane size the scroll clamps use;
-    /// the test sets both back before the guard is dropped.
+    /// Take the window-size lock and set the pane size the scroll clamps read;
+    /// a test must set both back before it drops the guard.
     fn window_size(
         height: u16,
         width: u16,
@@ -1005,7 +976,6 @@ mod test {
         app.preview.matches.iter().map(|found| found.line).collect()
     }
 
-    /// The line `row` of the visible page.
     fn visible_line(app: &App, row: usize) -> String {
         let FileContent::Text(ref text) = app.file_content else {
             return String::new()
@@ -1020,7 +990,6 @@ mod test {
             .collect()
     }
 
-    /// The preview holds only a window of the file, not the whole file.
     #[test]
     fn test_preview_loads_a_window() {
         let _guard = window_size(10, 80);
@@ -1059,7 +1028,6 @@ mod test {
         // it stays plain.
         assert!(!preview_has_colours(&app));
 
-        // Scrolling out of the first window reloads it synchronously.
         for _ in 0..5 {
             app.preview_scroll_page(true);
         }
@@ -1072,7 +1040,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Whether the preview already has syntax colours.
     fn preview_has_colours(app: &App) -> bool {
         let FileContent::Text(ref text) = app.file_content else {
             return false
@@ -1110,8 +1077,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A page can be scrolled far past the loaded window; the window is
-    /// reloaded around the new position.
     #[test]
     fn test_preview_scrolls_past_the_window() {
         let _guard = window_size(10, 80);
@@ -1133,7 +1098,6 @@ mod test {
         assert_eq!(app.preview.offset(), 310);
         assert_eq!(visible_line(&app, 0), "line 310");
 
-        // And back up.
         for _ in 0..31 {
             app.preview_scroll_page(false);
         }
@@ -1145,8 +1109,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A taller terminal needs a taller window; the window is reloaded without
-    /// moving the view.
     #[test]
     fn test_preview_window_follows_the_terminal_size() {
         let _guard = window_size(10, 80);
@@ -1163,7 +1125,6 @@ mod test {
 
         let before = app.preview_window_len();
 
-        // The terminal grew while the preview was open.
         update_window_height(40);
         app.ensure_preview_window(40);
 
@@ -1182,9 +1143,8 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A terminal which grows while the last page is on screen pulls the view
-    /// up: the last lines are shown from the top of the taller pane, not with
-    /// blank rows below the end of the file.
+    /// A terminal which grows on the last page pulls the view up instead of
+    /// leaving blank rows below the end of the file.
     #[test]
     fn test_preview_growth_at_the_end_pulls_the_view_up() {
         let _guard = window_size(10, 80);
@@ -1212,8 +1172,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The preview scrolls a line and a page, stays inside its clamps and has
-    /// nothing to scroll when it is not text.
     #[test]
     fn test_preview_scrolls_line_and_page() {
         let _guard = window_size(10, 80);
@@ -1230,7 +1188,6 @@ mod test {
         app.preview_scroll_line(false);
         assert_eq!(app.preview.offset(), 0);
 
-        // The first line cannot be scrolled away at the top.
         app.preview_scroll_line(false);
         assert_eq!(app.preview.offset(), 0);
 
@@ -1240,13 +1197,11 @@ mod test {
         app.preview_scroll_page(false);
         assert_eq!(app.preview.offset(), 0);
 
-        // The last page keeps the last line at the bottom of the pane.
         for _ in 0..10 {
             app.preview_scroll_page(true);
         }
         assert_eq!(app.preview.offset(), 40);
 
-        // A directory has no text preview: scrolling does nothing.
         app.preview.reset();
         app.file_content = FileContent::None;
         app.preview_scroll_line(true);
@@ -1257,9 +1212,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The column offset moves over the widest visible line five columns at a
-    /// time and stops at the right edge of the pane; a line which fits cannot
-    /// be scrolled.
     #[test]
     fn test_preview_scrolls_columns() {
         let _guard = window_size(10, 10);
@@ -1279,23 +1231,20 @@ mod test {
         app.preview_scroll_column(false);
         assert_eq!(app.preview.column(), 0);
 
-        // The first column stays at the left edge.
         app.preview_scroll_column(false);
         assert_eq!(app.preview.column(), 0);
 
-        // The 20-column line in a 10-column pane: the last visible column is 10.
+        // A 20-column line in a 10-column pane: column 10 is the last visible.
         for _ in 0..50 {
             app.preview_scroll_column(true);
         }
         assert_eq!(app.preview.column(), 10);
 
-        // A file whose lines fit the pane has nothing to scroll.
         write_lines(&dir, &[String::from("short")]);
         app.set_file_content().unwrap();
         app.preview_scroll_column(true);
         assert_eq!(app.preview.column(), 0);
 
-        // A new preview starts at the first column as well.
         write_lines(&dir, &[String::from("0123456789ABCDEFGHIJ")]);
         app.set_file_content().unwrap();
         app.preview_scroll_column(true);
@@ -1313,8 +1262,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The search jumps to a match, `n`/`N` walk the matches (wrapping around)
-    /// and a new search replaces the old matches.
     #[test]
     fn test_preview_search_and_move_candidate() {
         let _guard = window_size(10, 80);
@@ -1329,13 +1276,11 @@ mod test {
         let rx = app.init_preview_search_channel();
         app.goto_dir(&dir, Some(false)).unwrap();
 
-        // The search is case-insensitive and keeps every matching line.
         search(&mut app, &rx, "needle");
         assert_eq!(matched_lines(&app), vec![3, 30]);
         assert_eq!(app.preview.current, Some(0));
         assert_eq!(app.preview.current_line(), Some(3));
 
-        // While the preview is text, `n`/`N` belong to its search.
         assert!(app.preview_search_active());
 
         // The match is centred: line 3 is shown at the top of a ten-line pane.
@@ -1346,33 +1291,27 @@ mod test {
         assert_eq!(app.preview.current_line(), Some(30));
         assert_eq!(app.preview.offset(), 25);
 
-        // `n` at the last match wraps around to the first one.
         app.preview_move_candidate(true);
         assert_eq!(app.preview.current, Some(0));
         assert_eq!(app.preview.current_line(), Some(3));
         assert_eq!(app.preview.offset(), 0);
 
-        // `N` at the first match wraps around to the last one.
         app.preview_move_candidate(false);
         assert_eq!(app.preview.current, Some(1));
         assert_eq!(app.preview.current_line(), Some(30));
         assert_eq!(app.preview.offset(), 25);
 
-        // A search without a match keeps the view where it is.
         search(&mut app, &rx, "nothing-matches");
         assert!(app.preview.matches.is_empty());
         assert_eq!(app.preview.current, None);
         assert_eq!(app.preview.current_line(), None);
         assert_eq!(app.preview.offset(), 25);
 
-        // An empty query clears the search, so `n`/`N` leave the preview.
         app.preview_search(String::new()).unwrap();
         assert!(!app.preview.is_searching());
         assert!(!app.preview_search_active());
         assert!(app.preview.matches.is_empty());
 
-        // A preview which is not text (an image, a directory listing) keeps
-        // `n`/`N` for the file list even when a query is still set.
         app.preview.clear_search();
         app.preview.query = Some(String::from("needle"));
         app.file_content = FileContent::None;
@@ -1410,7 +1349,6 @@ mod test {
         assert_eq!(app.preview.offset(), 415);
         assert_eq!(app.preview.window_generation(), generation);
 
-        // And back, still inside the same window.
         app.preview_move_candidate(false);
         assert_eq!(app.preview.offset(), 395);
         assert_eq!(app.preview.window_generation(), generation);
@@ -1446,8 +1384,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A directory has no text to search: the command line shows an error
-    /// instead of starting a search.
     #[test]
     fn test_preview_search_without_text_is_an_error() {
         let dir = temp_dir("no-text");
@@ -1492,9 +1428,6 @@ mod test {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The ranges are in characters across the spans of the line, so a match
-    /// can cross a syntax-highlighting span boundary, and the query is matched
-    /// case-insensitively.
     #[test]
     fn test_preview_match_ranges() {
         let state = PreviewState {
@@ -1508,11 +1441,9 @@ mod test {
         ]);
         assert_eq!(state.match_ranges(&line), vec![(2, 8), (11, 17)]);
 
-        // No query: nothing is highlighted.
         let state = PreviewState::default();
         assert!(state.match_ranges(&line).is_empty());
 
-        // Multi-byte text: the ranges count characters.
         assert_eq!(
             match_ranges("中文needle中文", "needle"),
             vec![(2, 8)]
@@ -1527,8 +1458,7 @@ mod test {
     }
 
     /// A jump close to the end of the file keeps its view: the last page is
-    /// short, and a resize (which calls `ensure_preview_window`) must not pull
-    /// the view back to the start of the window.
+    /// short, so a resize must not pull the view back to the window's start.
     #[test]
     fn test_preview_jump_near_the_end_survives_a_resize() {
         let _guard = window_size(34, 120);

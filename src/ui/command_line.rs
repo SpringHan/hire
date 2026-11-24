@@ -1,4 +1,4 @@
-// Command line
+//! The bottom band: the file state line and the command line.
 
 use std::path::PathBuf;
 
@@ -15,17 +15,16 @@ use crate::utils::{CmdContent, CursorPos};
 
 use super::utils::shorten_path;
 
-/// The max length of the path shown by the working directory label.
 const WORKING_DIR_MAX_LEN: usize = 28;
 
-/// The widget to show states, such as file permission, size, etc.
+/// The left state line, and the labels on its right.
 pub struct StateLine<'a> {
     left_side: Line<'a>,
     right_side: Option<Line<'a>>
 }
 
 impl<'a> StateLine<'a> {
-    // NOTE: There's no possibility that the length of lines doesn't equal to 2.
+    // Callers pass two lines; an empty list would panic on `lines[0]`.
     pub fn new(lines: Vec<Line<'a>>) -> Self {
         let right_side = if lines.len() < 2 {
             None
@@ -64,7 +63,6 @@ impl<'a> Widget for StateLine<'a> {
     }
 }
 
-/// Function used to generate Paragraph at command-line layout.
 pub fn render_command_line<'a>(
     app: &App,
     frame: &mut Frame,
@@ -113,7 +111,6 @@ pub fn render_command_line<'a>(
                 lines.push(Line::raw("").alignment(Alignment::Left));
             }
 
-            // Status labels shown on the right side of the state line.
             let labels = state_labels(app);
             if !labels.is_empty() {
                 lines.push(Line::from(labels).alignment(Alignment::Right));
@@ -155,11 +152,9 @@ pub fn render_command_line<'a>(
     }
 }
 
-/// Build the status labels which are shown at the right side of the state line.
+/// The labels at the right side of the state line, in the order drawn.
 ///
-/// The working directory path is shown first when it has been set, followed by
-/// the labels `WD EXPAND -- RECORDING -- QUIT`; every label is only included when
-/// its condition is satisfied.
+/// Every label is only included when its condition holds.
 fn state_labels(app: &App) -> Vec<Span<'static>> {
     let mut labels: Vec<Span> = Vec::new();
 
@@ -220,7 +215,6 @@ fn state_labels(app: &App) -> Vec<Span<'static>> {
         return labels
     }
 
-    // Separate the labels with a space.
     let mut separated: Vec<Span> = Vec::new();
     for (idx, label) in labels.into_iter().enumerate() {
         if idx != 0 {
@@ -233,9 +227,7 @@ fn state_labels(app: &App) -> Vec<Span<'static>> {
     separated
 }
 
-/// Create Paragraph structure with different color.
-///
-/// Make the text red when it's an error message.
+/// The command line paragraph, red when it holds an error message.
 pub fn get_command_line_style<'a>(
     app: &'a App,
     content: &'a CmdContent,
@@ -267,9 +259,8 @@ pub fn get_command_line_style<'a>(
 /// highlighted.
 ///
 /// The cursor is a byte offset on a character boundary, so the text is walked
-/// with `char_indices()` and compared by the byte position. Comparing the
-/// character count would be wrong as soon as the content holds multi-byte
-/// characters (e.g. CJK ones).
+/// with `char_indices()` and compared by byte position: a character count
+/// would be wrong once the content holds multi-byte characters (e.g. CJK).
 fn get_command_line_span_list<'a>(
     command_cont: &'a CmdContent,
     cursor: CursorPos,

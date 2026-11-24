@@ -1,4 +1,5 @@
-// Paste operation.
+//! The paste menu: copy, move or symlink the marked files into the current
+//! directory.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -45,7 +46,10 @@ pub fn paste_operation(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-/// Paste files and return failed files & errors.
+/// Paste `file_iter` into `target_path` and collect the failures.
+///
+/// Failures are keyed by source directory so a move keeps the files it could
+/// not copy instead of deleting them.
 pub fn paste_files<'a, I, P>(file_iter: I,
                              target_path: P,
                              overwrite: bool
@@ -82,11 +86,10 @@ where
         for file in files.files.iter() {
             let mut final_path = target_path.as_ref().join(file.0);
             let target_file = fs::metadata(&final_path);
-            // Check whether the target file exists.
             match target_file {
                 Err(err) => {
                     match err.kind() {
-                        ErrorKind::NotFound => (), // Nice find.
+                        ErrorKind::NotFound => (),
                         _ => {
                             errors.add_error(err);
                         }
@@ -97,10 +100,6 @@ where
                         final_path = target_path.as_ref().join(
                             format!("{}.new", file.0)
                         );
-                        // exists_files
-                        //     .entry(path.to_owned())
-                        //     .or_insert(Vec::new())
-                        //     .push(file.0.to_owned());
                     } else {
                         target_exists = true;
                         target_is_dir = metadata.is_dir();
@@ -108,8 +107,8 @@ where
                 }
             }
 
-            // NOTE: If the exists_file is a directory and the original one is not, cancel this action
-            // and vice versa.
+            // NOTE: the target is removed by its own type before the copy,
+            // as a dir needs `remove_dir_all` and a file `remove_file`.
             if target_exists {
                 if target_is_dir {
                     file_action!(
@@ -188,9 +187,8 @@ fn paste_switch(
     let current_dir = app.current_path();
     let files = app.marked_files.to_owned();
 
-    // A copy or a symlink keeps the marked files (see `restore_status`), so
-    // the same selection is ready for the next paste; a move consumes its
-    // source files, and `x` (clear the selection) drops the marks.
+    // Copy and symlink leave their sources, so their marks survive for the
+    // next paste; a move consumes them.
     let mut keep_marked_files = false;
 
     match key {
@@ -296,7 +294,7 @@ fn remove_origin_files<I>(
 where I: Iterator<Item = (PathBuf, MarkedFiles)>
 {
     for (path, files) in files {
-        // Avoid removing files that failed to be moved to target path.
+        // A file that failed to reach the target must stay in place.
         let marked_ref = app.marked_files.get_mut(&path).unwrap();
         let mut temp_files: HashMap<String, bool>;
 
@@ -319,7 +317,7 @@ where I: Iterator<Item = (PathBuf, MarkedFiles)>
             path,
             temp_files.into_iter(),
             false,
-            false       // Not necesary
+            false
         )?;
     }
 
@@ -365,13 +363,11 @@ fn generate_msg(app: &App) -> CmdContent {
     CmdContent::Text(text)
 }
 
-/// Refresh the view after the paste menu and clear the marks unless they are
-/// kept.
+/// Refresh the view after the paste menu and clear the marks unless the entry
+/// kept them.
 ///
-/// `keep_marked_files` is set by the copy and symlink entries: their sources
-/// stay where they are, so the marks can be reused for the next paste. A move
-/// consumes its sources and the clear entry exists to drop them, so both still
-/// clear the marks.
+/// A copy or a symlink leaves its sources, so its marks survive for the next
+/// paste; a move consumes them, and `x` is there to drop them, so both clear.
 fn restore_status(app: &mut App, keep_marked_files: bool) -> AppResult<()> {
     app.mark_expand = false;
 
@@ -433,8 +429,7 @@ mod test {
             .is_some_and(|marked| marked.files.contains_key(name))
     }
 
-    /// `c` copies and keeps the selection, so the same files can be pasted
-    /// again; the originals stay where they are.
+    /// `c` copies and keeps the selection, so the files can be pasted again.
     #[test]
     fn test_copy_keeps_the_marked_files() {
         let source = temp_dir("copy-source");
@@ -453,7 +448,7 @@ mod test {
         fs::remove_dir_all(&target).unwrap();
     }
 
-    /// `o` overwrites the target and keeps the selection as well.
+    /// `o` overwrites the target and still keeps the selection.
     #[test]
     fn test_copy_with_overwrite_keeps_the_marked_files() {
         let source = temp_dir("overwrite-source");
@@ -472,8 +467,7 @@ mod test {
         fs::remove_dir_all(&target).unwrap();
     }
 
-    /// `s` creates the symbolic links and keeps the selection as well, so the
-    /// same files can be linked somewhere else next.
+    /// `s` links the files and keeps the selection for the next target.
     #[test]
     fn test_symlink_keeps_the_marked_files() {
         let source = temp_dir("symlink-source");
@@ -493,8 +487,7 @@ mod test {
         fs::remove_dir_all(&target).unwrap();
     }
 
-    /// A move keeps the old behaviour: the source is gone, and so are its
-    /// marks.
+    /// A move removes the source, so its marks go too.
     #[test]
     fn test_move_clears_the_marked_files() {
         let source = temp_dir("move-source");
@@ -531,8 +524,7 @@ mod test {
         fs::remove_dir_all(&target).unwrap();
     }
 
-    /// `x` is the "clear selected files" entry, so it still drops the marks
-    /// and copies nothing.
+    /// `x` drops the marks and copies nothing.
     #[test]
     fn test_clear_selection_clears_the_marked_files() {
         let source = temp_dir("clear-source");

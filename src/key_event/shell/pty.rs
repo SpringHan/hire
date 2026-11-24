@@ -1,8 +1,5 @@
-// A PTY-backed shell process.
-//
-// The child gets a private terminal, so hire keeps the real one and can
-// detach/attach the shell at will. Output is parsed by a reader thread into
-// the shared `vt100` screen.
+//! The PTY behind one shell session: the child gets a private terminal, so
+//! hire keeps the real one and can detach and attach the shell at will.
 
 use std::{
     io::{Read, Write},
@@ -38,10 +35,9 @@ pub struct PtyProcess {
 impl PtyProcess {
     /// Spawn `program` in a new PTY.
     ///
-    /// The reader thread keeps parsing `program`'s output into `screen` until
-    /// the slave side is closed, then sends the shell id through `exited`.
-    /// Kitty image sequences are split off for `graphics` instead of being
-    /// parsed as text.
+    /// The reader thread parses the output into `screen`, splits kitty image
+    /// sequences off for `graphics`, and sends the shell id through `exited`
+    /// when the slave side is closed.
     pub fn spawn(
         program: &str,
         cwd: &Path,
@@ -131,7 +127,6 @@ impl PtyProcess {
         })
     }
 
-    /// Forward terminal bytes to the shell.
     pub fn write(&mut self, bytes: &[u8]) -> AppResult<()> {
         self.writer.write_all(bytes)?;
         self.writer.flush()?;
@@ -161,12 +156,9 @@ impl PtyProcess {
         Ok(())
     }
 
-    /// The pid of the process group which currently owns the terminal.
+    /// The pid of the shell's foreground process group (`vim`, `htop`).
     ///
-    /// The shell and everything it runs live on the slave side of the PTY, so
-    /// the foreground job (`vim`, `htop`, …) is the process group the kernel
-    /// reports for that terminal. `tcgetpgrp` on the master end queries the
-    /// slave's terminal, not hire's own.
+    /// `tcgetpgrp` on the master queries the slave's terminal, not hire's own.
     pub fn foreground_pid(&self) -> Option<u32> {
         let fd = self.master.as_raw_fd()?;
 
@@ -180,7 +172,6 @@ impl PtyProcess {
         }
     }
 
-    /// Terminate the child and reap it.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
         // Reap it so a closed session does not leave a zombie behind. SIGKILL

@@ -1,4 +1,4 @@
-// Path history operation.
+//! The path history and its numbered picker.
 
 use std::any::Any;
 
@@ -12,11 +12,9 @@ use crate::app::App;
 use crate::ui::key_hints;
 use crate::rt_error;
 
-/// The maximum number of paths that `App::path_history` can store.
 pub const PATH_HISTORY_LIMIT: usize = 30;
 
-/// The state of the path history page, which stores the keys pressed by user
-/// to form the number of the target path.
+/// The digits typed so far on the path history page.
 #[derive(Clone, Default)]
 pub struct PathHistoryState {
     selecting: Vec<u8>,
@@ -37,7 +35,7 @@ impl PathHistoryState {
         self.selecting.len()
     }
 
-    /// The number formed by all the keys pressed so far.
+    /// The number the pressed keys form so far.
     fn number(&self) -> usize {
         self.selecting.iter()
             .fold(0usize, |number, digit| number * 10 + *digit as usize)
@@ -45,11 +43,10 @@ impl PathHistoryState {
 }
 
 impl App<'_> {
-    /// Record the path before jumping to a new path.
+    /// Record the current path before jumping away.
     ///
-    /// The path will be removed first when it's already in the history, so the
-    /// last item is always the newest path. The oldest path will be dropped
-    /// when the history is full.
+    /// A path already in the history is moved to the end, so the newest path is
+    /// always last; the oldest is dropped once the history is full.
     pub fn record_path_history(&mut self) {
         let path = self.path.to_owned();
 
@@ -65,8 +62,7 @@ impl App<'_> {
     }
 }
 
-/// Jump to the last path in the path history, which is also the path before
-/// the last jump.
+/// Jump to the last path in the history, which is the one before the last jump.
 pub fn goto_prev_path(app: &mut App) -> AppResult<()> {
     let prev_path = match app.path_history.pop() {
         Some(path) => path,
@@ -79,7 +75,6 @@ pub fn goto_prev_path(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-/// Open the path history page.
 pub fn path_history_operation(app: &mut App) {
     let state = PathHistoryState::default();
 
@@ -93,7 +88,7 @@ pub fn path_history_operation(app: &mut App) {
     );
 }
 
-/// Handle the keys pressed on the path history page.
+/// Handle one key on the path history page.
 fn path_history_switch(
     app: &mut App,
     key: char,
@@ -124,9 +119,8 @@ fn path_history_switch(
     let total = app.path_history.len();
     let number = state.number();
 
-    // The number of the target path may be made up of more than one key,
-    // so the pressed keys should only be regarded as a complete number when
-    // it cannot be extended to another valid one.
+    // A path number may take several keys, so the keys pressed are only a
+    // complete number when no further digit can still make a valid one.
     if !can_extend(number, state.len(), total) {
         if number < 1 || number > total {
             return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -149,8 +143,7 @@ fn path_history_switch(
     Ok(false)
 }
 
-/// Check whether the keys pressed so far can be extended to form another
-/// valid number that is not larger than `total`.
+/// Whether the keys pressed so far can still become a number within `total`.
 fn can_extend(number: usize, digits: usize, total: usize) -> bool {
     if digits >= total.to_string().len() {
         return false
@@ -162,8 +155,8 @@ fn can_extend(number: usize, digits: usize, total: usize) -> bool {
     })
 }
 
-/// Jump to the path at `idx` (started from 0) in the path history, and move
-/// the path before jumping to the last place of the history.
+/// Jump to path `idx` (0-based), moving the path left behind to the end of the
+/// history.
 fn jump_to_history_path(app: &mut App, idx: usize) -> AppResult<()> {
     if idx >= app.path_history.len() {
         return Err(ErrorType::NotFound(NotFoundType::None).pack())
@@ -176,7 +169,7 @@ fn jump_to_history_path(app: &mut App, idx: usize) -> AppResult<()> {
     Ok(())
 }
 
-/// The path history menu: a hint line and one entry per recorded path.
+/// Build the picker: a hint line and one keyed entry per recorded path.
 fn generate_menu(app: &App, state: &PathHistoryState) -> MenuList {
     let mut menu = MenuList::new()
         .header(key_hints(
@@ -234,8 +227,7 @@ mod test {
             .collect()
     }
 
-    /// The menu lists the recorded paths with 1-based keys and highlights the
-    /// number being typed while it names an entry.
+    /// The menu labels the paths from 1 and highlights the number being typed.
     #[test]
     fn test_menu_lists_paths_and_highlights_the_typed_number() {
         let app = app_with(&["/a", "/b", "/c"]);

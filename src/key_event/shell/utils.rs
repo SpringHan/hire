@@ -1,4 +1,4 @@
-// Shell Command.
+//! One-shot external programs and the working-directory cache.
 
 use std::io::{self, stdout};
 use std::path::{Path, PathBuf};
@@ -40,11 +40,10 @@ const INTERRUPT_SIGNALS: [libc::c_int; 2] = [SIGINT, SIGQUIT];
 
 /// Ignore the interrupt signals until the guard is dropped.
 ///
-/// A one-shot program runs in hire's own process group, so pressing `Ctrl-C`
-/// sends the signal to hire as well, and hire would exit although the user
-/// only wanted to stop the program it runs. Hire ignores the signal while the
-/// program runs; the dispositions which were in place before are put back on
-/// drop, so nothing stays ignored after the program exits.
+/// A one-shot program runs in hire's own process group, so `Ctrl-C` sends the
+/// signal to hire as well, and hire would exit although the user only wanted to
+/// stop the program it runs. The dispositions which were in place before are
+/// put back on drop, so nothing stays ignored after the program exits.
 ///
 /// The guard has to be created *after* the program was spawned: a signal which
 /// is already ignored when a child is forked is inherited by it, and then the
@@ -78,7 +77,7 @@ impl Drop for InterruptGuard {
     }
 }
 
-/// Start a shell process.
+/// Run `command` in a shell on the real screen, then restore the UI.
 pub fn shell_process(
     app: &mut App,
     terminal: &mut DefaultTerminal,
@@ -88,7 +87,6 @@ pub fn shell_process(
 {
     let shell_program = default_shell(app)?;
 
-    // For restore the original state
     let current_file = if let Some(file) = app.get_file_saver() {
         Some(file.name.to_owned())
     } else {
@@ -102,18 +100,15 @@ pub fn shell_process(
     let program: &str = args[0].into();
 
     if let Some(_type) = shell_type {
-        // Change shell program
         if _type != &shell_program {
             process = Command::new(_type)
         }
     }
 
-    // Add process arguments
     process.arg("-c").arg(
         CommandStr::join_command(args, app)?
     );
 
-    // Check whether current command needs to wait for user's key press
     if let ConfigValue::Vec(
         cmds
     ) = Config::get_value(&app.config, "gui_commands")
@@ -127,7 +122,6 @@ pub fn shell_process(
     }
 
 
-    // Preparation for running process
     process.current_dir(&app.path);
 
     disable_raw_mode()?;
@@ -143,7 +137,6 @@ pub fn shell_process(
     enable_raw_mode()?;
     drop(interrupts);
 
-    // Wait for user press
     if wait_for_press {
         println!("Press any key to continue");
         loop {
@@ -158,9 +151,8 @@ pub fn shell_process(
     }
 
     // The command ran on the real screen and its output is still there. Clear
-    // it and put the cursor back at the top-left, so the next one-shot command
-    // starts on a clean screen instead of below this one's output. Done only
-    // now, after the optional pause, so the output stays readable while it runs.
+    // it only now, after the optional pause, so the output stayed readable. The
+    // next one-shot command then starts on a clean screen.
     execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
 
     execute!(stdout(), EnterAlternateScreen, Hide)?;
@@ -177,7 +169,7 @@ pub fn shell_process(
     Ok(())
 }
 
-/// Run `command` & get its output.
+/// Run `command` and return its stdout.
 pub fn fetch_output<P: AsRef<Path>>(
     terminal: &mut DefaultTerminal,
     current_path: P,
@@ -210,15 +202,11 @@ pub fn fetch_output<P: AsRef<Path>>(
     Ok(String::from_utf8(output.stdout)?)
 }
 
-/// Run a shell command without taking the output of it.
+/// Run a shell command without taking its output.
 ///
-/// The command is split into the program and its arguments by whitespace,
-/// and `target` is appended as the last argument of it.
-///
-/// The command inherits hire's terminal, so it may paint over the UI (a GUI
-/// launcher usually prints nothing, but it is not guaranteed). The screen is
-/// cleared once the command exits: the residue is removed and the reset buffer
-/// makes the next draw repaint the whole UI.
+/// The command is split on whitespace and `target` is appended as its last
+/// argument. It inherits hire's terminal, so it may paint over the UI; the
+/// screen is cleared afterwards so the next draw repaints the whole UI.
 pub fn execute_command<P: AsRef<Path>>(
     terminal: &mut DefaultTerminal,
     command: &str,
@@ -340,8 +328,7 @@ where P: AsRef<Path>
 impl App<'_> {
     /// Load the working directory that has been set into `App`.
     ///
-    /// Errors, such as a missing cache file, are ignored so that the app
-    /// merely treats the working directory as unset.
+    /// Errors, such as a missing cache file, just leave it unset.
     pub fn load_working_directory(&mut self) {
         self.working_directory = match fetch_working_directory() {
             Ok(path) if !path.as_os_str().is_empty() => Some(path),

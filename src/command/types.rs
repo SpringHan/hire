@@ -1,4 +1,4 @@
-// Command type.
+//! The `AppCommand` enum and its `keymap.toml` spellings.
 
 use anyhow::bail;
 
@@ -40,89 +40,79 @@ pub enum AppCommand {
     PrintFullPath,
     QuitAfterOutput,
 
-    /// Enter the command line block with a leading `:` so the user can type a
-    /// hire command (the keymap's `enter_command_line`).
+    /// Open the command line with a leading `:`, ready for a hire command.
     EnterCommandLine,
 
-    /// Re-read `auto_config.toml`, `user_config.toml` and `keymap.toml` and
-    /// apply them to the running process.
+    /// Re-read the three config files and apply them to the running process.
     ReloadConfig,
 
     /// Run a root instance of hire with the tabs of the current session.
     SudoSession,
 
-    /// When the boolean is true, only mark single file.
+    /// `true` restricts the mark to the single selected file.
     Mark(bool),
 
-    /// Switch tab with index.
     SwitchTab(char),
 
-    /// When the boolean is true, scroll down.
+    /// `true` scrolls the list down.
     ListScroll(bool),
 
-    /// Search the text preview; like [`Self::Search`] it opens the command line,
-    /// with a leading `?` instead of `/`.
+    /// Search the text preview: opens the command line with a leading `?`.
     PreviewSearch,
 
-    /// Page the text preview, down when the boolean is true.
+    /// Page the text preview down when `true`.
     PreviewScrollPage(bool),
 
-    /// Scroll the text preview by one line, down when the boolean is true.
+    /// Scroll the text preview one line, down when `true`.
     PreviewScrollLine(bool),
 
-    /// Scroll the text preview by one column, right when the boolean is true.
+    /// Scroll the text preview one column, right when `true`.
     PreviewScrollColumn(bool),
 
-    /// The command to insert navigation index.
-    /// Element of it is used to imply what the index number is.
+    /// Insert the navigation index whose digit is the payload.
     NaviIndexInput(u8),
 
-    /// When boolean value is true, the cursor will be moved to the edge.
+    /// `true` moves the cursor to the end, `false` to the extension.
     AppendFsName(bool),
     
-    /// Move cursor to the candidate, jumping to the next when the boolean is true.
+    /// Jump to the next match when `true`, to the previous one otherwise.
     MoveCandidate(bool),
 
-    /// When the boolean value is true, set the working directory;
-    /// otherwise jump to the working directory.
+    /// `true` sets the working directory; `false` jumps to it.
     WorkDirectory(bool),
 
 
-    /// The value of it is the direction for movement,
+    /// Move the selection, changing directory on `Left`/`Right`.
     ItemMove(Direction),
 
-    /// The first element is the shell command with its arguments,
-    /// the second element refers to whether refreshing showing file items.
+    /// The command with its arguments, and whether to refresh the file items.
     ShellCommand(Vec<String>, bool),
 
     /// Attach the shell pinned with `C-s *`.
     AttachPinned,
 
-    // Edit Mode
     QuitEdit,
     EditDelete,
     EditGotoTop,
     EditGotoBottom,
 
-    /// When the value is true, create a directory,
-    /// otherwise create a file.
+    /// Create a directory when `true`, a file otherwise.
     EditNew(bool),
 
-    /// When the boolean is true, only mark single file.
+    /// `true` restricts the mark to the single selected file.
     EditMark(bool),
 
-    /// When the boolean value is true, insert at the end.
-    /// Otherwise insert at the beginning.
+    /// Insert at the end when `true`, at the beginning otherwise.
     EditInsert(bool),
 
     /// Enter insert mode with the cursor right before the file extension,
     /// which is the edit-mode counterpart of [`Self::AppendFsName`].
     EditAppendFsName,
 
-    /// When the value is true, select next item, otherwise the previous one.
+    /// Select the next item when `true`, the previous one otherwise.
     EditMoveItem(bool),
 
-    /// When the value is true, scroll down, otherwise scroll up.
+    /// Scroll down when `true`, up otherwise.
     EditListScroll(bool),
 }
 
@@ -229,7 +219,6 @@ impl AppCommand {
                 }
             },
 
-            // Edit Mode
             "quit_edit"   => Self::QuitEdit,
             "edit_delete" => Self::EditDelete,
             "edit_top"    => Self::EditGotoTop,
@@ -305,9 +294,8 @@ mod test {
         ));
     }
 
-    /// The edit-mode keymaps bind `a` to this command; unlike
-    /// `append_filename` it takes no argument, because `edit_insert` already
-    /// covers the beginning and the end of the name.
+    /// The edit-mode keymaps bind `a` to this command; it takes no argument
+    /// because `edit_insert` already covers both ends of the name.
     #[test]
     fn test_edit_append_filename_command() {
         assert!(matches!(

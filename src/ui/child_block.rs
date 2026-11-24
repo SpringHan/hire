@@ -1,4 +1,4 @@
-// Child Block
+//! The child column and the file preview, plus the right edge of the frame.
 
 use anyhow::bail;
 use ratatui_image::{StatefulImage, Resize};
@@ -35,7 +35,6 @@ pub fn render_child(app: &mut App, frame: &mut Frame, area: Rect) {
         .border_set(right_end_border_set())
         .borders(Borders::ALL);
 
-    // Update file linenr
     update_file_linenr(child_block.inner(area));
 
     let marked_files = if app.root() {
@@ -111,14 +110,13 @@ pub fn render_file(frame: &mut Frame, app: &mut App, layout: Rect) -> anyhow::Re
 
 /// Give the cells which carry an image escape sequence a width of one column.
 ///
-/// `ratatui`'s `Buffer::diff` derives a cell's width from its symbol. The
-/// image protocols (kitty, iTerm2, sixel) put the whole image row — cursor
-/// movements and unicode placeholders included — into the symbol of the first
-/// cell of the row. Without an explicit width that symbol looks hundreds of
-/// columns wide, so the diff skips the rest of the screen: the image is only
-/// partially drawn and the following frames/layout get out of sync.
-/// `CellDiffOption::ForcedWidth(1)` is the escape hatch designed for exactly
-/// this case.
+/// `Buffer::diff` derives a cell's width from its symbol, and the image
+/// protocols (kitty, iTerm2, sixel) put a whole image row — cursor movements
+/// and unicode placeholders included — into the symbol of the first cell of
+/// the row. Without an explicit width that symbol looks hundreds of columns
+/// wide, so the diff skips the rest of the screen: the image is partly drawn
+/// and the next frames get out of sync; `CellDiffOption::ForcedWidth(1)` is
+/// the escape hatch for exactly this.
 fn pin_image_cells(frame: &mut Frame, area: Rect) {
     let one = core::num::NonZeroU16::new(1).expect("1 is not zero");
     let buffer = frame.buffer_mut();
@@ -145,12 +143,10 @@ pub fn update_file_linenr(area: Rect) {
 ///
 /// The preview holds a window of the file, so the rendered lines start at
 /// `offset - window_start` inside it; paging and searching move that offset,
-/// which reloads the window only when the page leaves it. The column offset is
-/// applied by the `Paragraph` the lines are rendered with. Every occurrence of
-/// the preview search query is drawn with `Modifier::REVERSED`, which keeps the
-/// match visible whatever the syntax highlighting painted there; the match the
-/// search or `n`/`N` moved to is underlined as well, so the selected occurrence
-/// stands out from the other matches.
+/// and the window is reloaded only when the page leaves it. Every occurrence
+/// of the search query is drawn reversed, which keeps the match visible
+/// whatever the syntax highlighting painted there; the match the search or
+/// `n`/`N` moved to is underlined as well, so it stands out from the others.
 fn preview_lines<'a>(
     app: &'a App,
     height: u16
@@ -185,11 +181,10 @@ fn preview_lines<'a>(
 
 /// Reverse the matched character ranges of `line`.
 ///
-/// The spans are split at the boundaries of the ranges, so only the matched
-/// characters are reversed and the rest of the line keeps its syntax colours.
-/// `current` is the line the search or `n`/`N` moved to: its matches are
-/// underlined as well, which is what tells the selected occurrence apart from
-/// the other ones.
+/// The spans are split at the range boundaries, so only the matched characters
+/// are reversed and the rest keeps its syntax colours. `current` is the line
+/// the search or `n`/`N` moved to: its matches are underlined too, which is
+/// what tells the selected occurrence apart from the other ones.
 fn highlight_matches<'a>(
     line: &Line<'a>,
     ranges: &[(usize, usize)],
@@ -256,9 +251,8 @@ mod test {
 
     use super::*;
 
-    /// Only the matched characters are reversed; the characters before and
-    /// after them keep their span's style. On the current match line they are
-    /// underlined too.
+    /// Only the matched characters are reversed; on the current match line
+    /// they are underlined too.
     #[test]
     fn test_highlight_matches_splits_the_spans() {
         let style = ratatui::style::Style::new().fg(Color::Red);
@@ -292,8 +286,6 @@ mod test {
             })
         );
 
-        // The current match is underlined as well, so the selected occurrence
-        // stands out from the other matches.
         let highlighted = highlight_matches(&line, &[(6, 12)], true);
         let underlined: Vec<&str> = highlighted.spans
             .iter()

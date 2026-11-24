@@ -1,4 +1,4 @@
-// Tab.
+//! The tab list, its menu and the stored tab groups in the config.
 
 mod types;
 mod utils;
@@ -85,7 +85,6 @@ mod test {
         let mut app = App::default();
         let err = read_config(&mut app, &document).unwrap_err();
 
-        // The readable group is stored, the two broken ones are skipped.
         assert_eq!(app.tab_list.storage.len(), 1);
         assert_eq!(app.tab_list.storage[0].len(), 2);
         assert!(!err.to_string().is_empty());

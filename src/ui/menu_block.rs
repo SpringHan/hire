@@ -1,4 +1,4 @@
-// Menu overlay.
+//! The menu overlay: a centered dialog or picker box drawn over the page.
 
 use ratatui::{
     buffer::Buffer,
@@ -18,16 +18,12 @@ use crate::{
     utils::{display_width, Block as AppBlock, CmdContent},
 };
 
-/// The blank columns between the menu content and the box border.
 const PADDING: u16 = 1;
 
-/// The two border columns, the padding and one content column.
 const MIN_WIDTH: u16 = 2 + 2 * PADDING + 1;
 
-/// The two border rows and one content row.
 const MIN_HEIGHT: u16 = 3;
 
-/// The box a menu is drawn in.
 struct MenuLayout {
     rect: Rect,
     inner_width: u16,
@@ -65,7 +61,6 @@ fn menu_state(app: &App) -> Option<(String, MenuPresentation, Option<MenuList>)>
     ))
 }
 
-/// Draw a free-form text menu.
 fn render_dialog(app: &mut App, frame: &mut Frame, area: Rect, title: &str) {
     let border_style = app.term_colors.dir_style;
 
@@ -105,7 +100,6 @@ fn render_dialog(app: &mut App, frame: &mut Frame, area: Rect, title: &str) {
     );
 }
 
-/// Draw a list menu: hint lines, the entries and the notices.
 fn render_picker(
     app: &mut App,
     frame: &mut Frame,
@@ -224,7 +218,6 @@ fn render_picker(
     }
 }
 
-/// The box every menu is drawn in, its border and title in `style`.
 fn menu_block(style: Style, title: &str) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
@@ -236,9 +229,8 @@ fn menu_block(style: Style, title: &str) -> Block<'static> {
 
 /// The message of a dialog as an owned `Text`.
 ///
-/// A clone lets the message be measured and drawn after the `app` borrow which
-/// produced it has ended, which is needed because the scroll offset lives on
-/// `app` too.
+/// The clone ends the `app` borrow which produced the message, which is needed
+/// because the scroll offset the renderer updates lives on `app` too.
 fn owned_text(content: &CmdContent) -> Text<'static> {
     match content {
         CmdContent::Text(text) => text.clone(),
@@ -249,8 +241,7 @@ fn owned_text(content: &CmdContent) -> Text<'static> {
 /// Center the box in `area`, sized to `content_width` x `content_height`.
 ///
 /// A row and a column of the page stay visible on each side, so the box never
-/// covers the whole browser; `None` is returned when not even a minimal box
-/// fits.
+/// covers the whole browser; `None` when not even a minimal box fits.
 fn frame_layout(
     content_width: usize,
     content_height: usize,
@@ -297,9 +288,8 @@ fn frame_layout(
 
 /// Clamp the stored scroll offset to what the content allows.
 ///
-/// The box size is only known while rendering, so the offset is corrected
-/// here: a menu opened after a longer one, or a menu which became shorter,
-/// must not stay scrolled past its content.
+/// The box size is only known while rendering: a menu opened after a longer
+/// one, or one which became shorter, must not stay scrolled past its content.
 fn clamp_scroll(app: &mut App, max_row: u16, max_column: u16) -> (u16, u16) {
     let (row, column) = app.command_scroll.unwrap_or((0, 0));
     let (row, column) = (row.min(max_row), column.min(max_column));
@@ -439,8 +429,8 @@ mod test {
             .collect()
     }
 
-    /// The dialog is a centered box: rounded corners, its title on the top
-    /// border, and the page around it dimmed while the box itself is not.
+    /// The dialog is a centered, rounded box with its title on the top border,
+    /// and the page around it dimmed while the box itself is not.
     #[test]
     fn test_dialog_is_a_centered_box_with_its_title() {
         let mut app = App::default();
@@ -466,7 +456,7 @@ mod test {
         let top = row_text(&buffer, rect.y, rect.x, rect.width);
         assert!(top.contains("Delete"), "{top}");
 
-        // The page around the box is dimmed; the box is drawn over it.
+        // The box is drawn over the dimmed page, so it keeps its own style.
         assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
         assert!(
             !buffer[(rect.x, rect.y)].modifier.contains(Modifier::DIM)
@@ -546,8 +536,7 @@ mod test {
         assert_eq!(buffer[(title_x, rect.y)].fg, Color::Blue);
     }
 
-    /// The key column uses the executable colour, and the selected key keeps
-    /// that colour reversed.
+    /// The key column uses the executable colour, reversed when selected.
     #[test]
     fn test_picker_keys_use_the_executable_style() {
         let mut app = App::default();
@@ -609,7 +598,6 @@ mod test {
         let bottom = row_text(&buffer, area.height - 3, 0, area.width);
         assert!(bottom.contains("line 39"), "{bottom}");
 
-        // Selecting the first entry scrolls back to the top.
         let list = MenuList::new()
             .entry("1", Line::raw("line 0"))
             .entry("2", Line::raw("line 1"))
