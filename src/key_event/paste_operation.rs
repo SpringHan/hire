@@ -144,6 +144,9 @@ where
                     final_path
                 );
             }
+
+            target_exists = false;
+            target_is_dir = false;
         }
     }
 
